@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from btc_shared.db.database import engine, SessionLocal, get_db
+from shared.db.database import engine, SessionLocal, get_db
 
 
 class TestDatabaseEngine:
@@ -21,7 +21,7 @@ class TestDatabaseEngine:
         """
         Scenario: Create SQLAlchemy engine
         Given a valid DATABASE_URL is configured
-        When I import btc_shared.db.database.engine
+        When I import shared.db.database.engine
         Then the engine connects successfully to PostgreSQL
         And the engine uses the connection pool
         """
@@ -79,7 +79,7 @@ class TestGetDbDependency:
         """
         Scenario: Get database session
         Given the database engine is initialized
-        When I call btc_shared.db.database.get_db()
+        When I call shared.db.database.get_db()
         Then it yields a SQLAlchemy session
         """
         # When
@@ -168,7 +168,7 @@ class TestGetDbDependency:
 class TestDatabaseConnectionErrors:
     """Test error handling for database connection issues."""
 
-    @patch("btc_shared.db.database.settings")
+    @patch("shared.db.database.settings")
     def test_invalid_database_url_raises_clear_error(self, mock_settings):
         """
         Scenario: Invalid DATABASE_URL format (ZOMBIES: Exceptions)

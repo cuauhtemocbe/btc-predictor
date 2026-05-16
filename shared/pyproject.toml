@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "btc-shared"
+name = "shared"
 version = "0.1.0"
 description = "Shared package with database configuration and utilities for BTC Predictor"
 authors = ["Cuauhtémoc <cuauhtemocbe@gmail.com>"]
 readme = "README.md"
-packages = [{include = "btc_shared"}]
+packages = [{include = "shared"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"

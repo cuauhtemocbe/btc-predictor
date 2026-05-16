@@ -12,7 +12,7 @@ Run with: docker compose exec api pytest shared/tests/test_integration.py
 
 import pytest
 from sqlalchemy import text
-from btc_shared.db.database import engine, SessionLocal, get_db
+from shared.db.database import engine, SessionLocal, get_db
 
 
 class TestPostgreSQLIntegration:

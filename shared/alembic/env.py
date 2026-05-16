@@ -3,8 +3,8 @@ from logging.config import fileConfig
 from alembic import context
 
 # Import settings and models
-from btc_shared.config import settings
-from btc_shared.db.models import Base
+from shared.config import settings
+from shared.db.models import Base
 from sqlalchemy import engine_from_config, pool
 
 # this is the Alembic Config object, which provides

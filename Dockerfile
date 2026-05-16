@@ -24,7 +24,7 @@ COPY shared/ ./shared/
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
 # Copy API application code
-COPY btc-api/ ./api/
+COPY api-service/ ./api/
 
 # Install API dependencies
 WORKDIR /app/api
@@ -35,4 +35,4 @@ WORKDIR /app
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-CMD uvicorn btc_api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}

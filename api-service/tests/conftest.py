@@ -11,9 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # Importar cuando estén disponibles (después de Iteración 1)
-# from btc_shared.db.database import get_engine
-# from btc_shared.db.models import Base, BtcPrice, Model, Prediction
-# from btc_shared.config import settings
+# from shared.db.database import get_engine
+# from shared.db.models import Base, BtcPrice, Model, Prediction
+# from shared.config import settings
 
 
 @pytest.fixture(scope="session")

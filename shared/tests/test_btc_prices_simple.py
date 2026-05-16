@@ -12,8 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
 
-from btc_shared.config import settings
-from btc_shared.db.models import BtcPrice
+from shared.config import settings
+from shared.db.models import BtcPrice
 
 
 @pytest.fixture(scope="module")

@@ -9,7 +9,7 @@ Covers all Gherkin scenarios from US-001:
 
 import pytest
 from pydantic import ValidationError
-from btc_shared.config import Settings
+from shared.config import Settings
 
 
 class TestConfigurationLoading:
@@ -19,7 +19,7 @@ class TestConfigurationLoading:
         """
         Scenario: Load DATABASE_URL from environment
         Given the environment variable DATABASE_URL is set to "postgresql://user:pass@localhost/btcdb"
-        When I import btc_shared.config.Settings
+        When I import shared.config.Settings
         Then the settings.database_url attribute equals "postgresql://user:pass@localhost/btcdb"
         """
         # Given
@@ -54,7 +54,7 @@ class TestConfigurationValidation:
         """
         Scenario: Missing DATABASE_URL raises error
         Given the DATABASE_URL environment variable is not set
-        When I attempt to import btc_shared.config.Settings
+        When I attempt to import shared.config.Settings
         Then a ValidationError is raised with message "DATABASE_URL is required"
         """
         # Given: DATABASE_URL is not set (clean_env fixture)

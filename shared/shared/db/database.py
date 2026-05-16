@@ -8,7 +8,7 @@ from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-from btc_shared.config import settings
+from shared.config import settings
 
 
 # Create SQLAlchemy engine with connection pooling
@@ -36,7 +36,7 @@ def get_db() -> Generator[Session, None, None]:
     Example:
         ```python
         from fastapi import Depends
-        from btc_shared.db import get_db
+        from shared.db import get_db
 
         @app.get("/users")
         def get_users(db: Session = Depends(get_db)):

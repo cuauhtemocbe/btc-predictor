@@ -11,8 +11,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from alembic import command
 from alembic.config import Config
 
-from btc_shared.config import settings
-from btc_shared.db.models import Base, BtcPrice
+from shared.config import settings
+from shared.db.models import Base, BtcPrice
 
 
 @pytest.fixture

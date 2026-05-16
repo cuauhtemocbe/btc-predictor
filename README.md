@@ -56,26 +56,26 @@ El proyecto se despliega como **4 servicios en Railway**:
 
 ```
 btc-predictor/
-├── shared/              # Paquete compartido: btc-shared
-│   ├── btc_shared/
+├── shared/              # Paquete compartido: shared
+│   ├── shared/
 │   │   ├── config.py    # Configuración (DATABASE_URL, etc.)
 │   │   ├── db/          # SQLAlchemy models, engine, CRUD
 │   │   └── utils.py     # Helpers (PnL, cálculo de errores)
 │   └── alembic/         # Migraciones de base de datos
 │
-├── api/                 # Servicio web (FastAPI)
-│   └── btc_api/
+├── api-service/         # Servicio web (FastAPI)
+│   └── api/
 │       ├── main.py      # App FastAPI
 │       ├── routers/     # REST endpoints
 │       └── templates/   # Dashboard HTML (Jinja2)
 │
-└── jobs/
+└── workers/
     ├── fetch_price/     # Cron horario: fetch precios BTC
     └── daily/           # Cron diario: evaluate → train → predict
         └── models/      # BaseModel abstract + modelos ML
 ```
 
-**Nota:** La estructura actual (`src/app/`) se migrará gradualmente a esta arquitectura siguiendo las User Stories.
+**Nota:** Estructura actualizada y reorganizada. Próximos pasos: implementar workers de cron (US-003+).
 
 ---
 
@@ -231,9 +231,9 @@ Cada servicio tiene su carpeta `tests/`:
 
 ```
 shared/tests/           # Config, models, CRUD, utils
-api/tests/              # API endpoints + dashboard
-jobs/fetch_price/tests/ # Binance client + job
-jobs/daily/tests/       # Evaluator, trainer, predictor, models ML
+api-service/tests/              # API endpoints + dashboard
+workers/fetch_price/tests/ # Binance client + job
+workers/daily/tests/       # Evaluator, trainer, predictor, models ML
 ```
 
 ### Tipos de Tests
@@ -256,9 +256,9 @@ docker compose exec api pytest
 
 # Tests de un servicio específico
 docker compose exec api pytest shared/tests/
-docker compose exec api pytest api/tests/
-docker compose exec api pytest jobs/fetch_price/tests/
-docker compose exec api pytest jobs/daily/tests/
+docker compose exec api pytest api-service/tests/
+docker compose exec api pytest workers/fetch_price/tests/
+docker compose exec api pytest workers/daily/tests/
 
 # Tests con cobertura (target: >80%)
 docker compose exec api pytest --cov --cov-report=term-missing
@@ -357,7 +357,7 @@ ENVIRONMENT=development
 1. Crear proyecto en Railway
 2. Agregar plugin PostgreSQL
 3. Crear 4 servicios:
-   - **api:** Web service (start command: `uvicorn btc_api.main:app --host 0.0.0.0 --port $PORT`)
+   - **api:** Web service (start command: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`)
    - **fetch-price:** Cron `0 * * * *` (cada hora)
    - **daily:** Cron `0 7 * * *` (7am diario)
    - **postgres:** Plugin (automático)

@@ -71,9 +71,9 @@ btc-predictor/
 ├── README.md
 ├── ARCHITECTURE.md             # Este archivo
 │
-├── shared/                     # Paquete interno: btc-shared
+├── shared/                     # Paquete interno: shared
 │   ├── pyproject.toml
-│   ├── btc_shared/
+│   ├── shared/
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings con pydantic-settings (DATABASE_URL, etc.)
 │   │   ├── db/
@@ -93,10 +93,10 @@ btc-predictor/
 │       ├── env.py
 │       └── versions/
 │
-├── api/                        # Service 1 (Web API)
+├── api-service/                # Service 1 (Web API)
 │   ├── pyproject.toml
 │   ├── Dockerfile
-│   ├── btc_api/
+│   ├── api/
 │   │   ├── __init__.py
 │   │   ├── main.py             # App FastAPI, monta routers
 │   │   ├── routers/
@@ -111,7 +111,7 @@ btc-predictor/
 │       ├── test_prices.py      # Tests de /api/prices
 │       └── test_predictions.py # Tests de /api/predictions/*
 │
-└── jobs/
+└── workers/
     ├── fetch_price/            # Service 2 (Cron horario)
     │   ├── pyproject.toml
     │   ├── Dockerfile
@@ -227,7 +227,7 @@ async def test_insert_btc_price_duplicate_timestamp_fails(db_session):
 
 **Ejemplo:**
 ```python
-# api/tests/test_prices.py
+# api-service/tests/test_prices.py
 @pytest.mark.asyncio
 async def test_get_prices_returns_json_array(client: httpx.AsyncClient):
     # Arrange: insert test data
@@ -258,7 +258,7 @@ async def test_get_prices_returns_json_array(client: httpx.AsyncClient):
 
 **Ejemplo:**
 ```python
-# jobs/fetch_price/tests/test_main.py
+# workers/fetch_price/tests/test_main.py
 @pytest.mark.asyncio
 @respx.mock
 async def test_fetch_price_idempotent(db_session):
@@ -318,10 +318,10 @@ def db_session():
 poetry add --group dev pytest-cov
 
 # Correr tests con cobertura
-pytest --cov=btc_shared --cov=btc_api --cov=fetch_price --cov=daily
+pytest --cov=shared --cov=api --cov=fetch_price --cov=daily
 
 # Reporte HTML
-pytest --cov=btc_shared --cov-report=html
+pytest --cov=shared --cov-report=html
 open htmlcov/index.html
 ```
 
@@ -334,7 +334,7 @@ open htmlcov/index.html
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from btc_shared.db.models import Base
+from shared.db.models import Base
 
 @pytest.fixture
 def db_engine():
@@ -352,11 +352,11 @@ def db_session(db_engine):
     session.close()
 ```
 
-**`api/tests/conftest.py`**
+**`api-service/tests/conftest.py`**
 ```python
 import pytest
 from httpx import AsyncClient
-from btc_api.main import app
+from api.main import app
 
 @pytest.fixture
 async def client():
@@ -374,9 +374,9 @@ pytest
 
 # Correr tests de un paquete específico
 pytest shared/tests/
-pytest api/tests/
-pytest jobs/fetch_price/tests/
-pytest jobs/daily/tests/
+pytest api-service/tests/
+pytest workers/fetch_price/tests/
+pytest workers/daily/tests/
 
 # Correr un archivo específico
 pytest shared/tests/test_utils.py
@@ -817,25 +817,25 @@ pydantic-settings = "^2.0"
 ```toml
 [tool.poetry.dependencies]
 python = "^3.13"
-btc-shared = {path = "../shared", develop = true}
+shared = {path = "../shared", develop = true}
 fastapi = "^0.115"
 uvicorn = "^0.34"
 jinja2 = "^3.1"
 ```
 
-### `jobs/fetch_price/pyproject.toml`
+### `workers/fetch_price/pyproject.toml`
 ```toml
 [tool.poetry.dependencies]
 python = "^3.13"
-btc-shared = {path = "../../shared", develop = true}
+shared = {path = "../../shared", develop = true}
 httpx = "^0.28"
 ```
 
-### `jobs/daily/pyproject.toml`
+### `workers/daily/pyproject.toml`
 ```toml
 [tool.poetry.dependencies]
 python = "^3.13"
-btc-shared = {path = "../../shared", develop = true}
+shared = {path = "../../shared", develop = true}
 scikit-learn = "^1.4"
 pandas = "^2.0"
 numpy = "^1.26"
@@ -878,7 +878,7 @@ services:
   fetch-price:
     build:
       context: .
-      dockerfile: jobs/fetch_price/Dockerfile
+      dockerfile: workers/fetch_price/Dockerfile
     env_file: .env
     depends_on: [postgres]
     profiles: ["manual"]  # no se inicia con docker compose up
@@ -886,7 +886,7 @@ services:
   daily:
     build:
       context: .
-      dockerfile: jobs/daily/Dockerfile
+      dockerfile: workers/daily/Dockerfile
     env_file: .env
     depends_on: [postgres]
     profiles: ["manual"]  # no se inicia con docker compose up
@@ -898,7 +898,7 @@ volumes:
 ### Dockerfile Patrón (todos los servicios)
 
 ```dockerfile
-# Ejemplo: jobs/fetch_price/Dockerfile
+# Ejemplo: workers/fetch_price/Dockerfile
 FROM python:3.13-slim
 
 WORKDIR /app
@@ -911,7 +911,7 @@ RUN pip install poetry && \
 COPY shared/ ./shared/
 
 # Copiar el servicio específico
-COPY jobs/fetch_price/ ./job/
+COPY workers/fetch_price/ ./job/
 
 # Instalar dependencias
 WORKDIR /app/job
@@ -930,7 +930,7 @@ CMD ["python", "-m", "fetch_price.main"]
 | Servicio | Tipo | Config |
 |----------|------|--------|
 | `postgres` | Plugin | Nativo Railway (inyecta `DATABASE_URL` automáticamente) |
-| `api` | Web service | `uvicorn btc_api.main:app --host 0.0.0.0 --port $PORT` |
+| `api` | Web service | `uvicorn api.main:app --host 0.0.0.0 --port $PORT` |
 | `fetch-price` | Cron | `0 * * * *` (cada hora) |
 | `daily` | Cron | `0 7 * * *` (7am UTC, ajustar según timezone) |
 

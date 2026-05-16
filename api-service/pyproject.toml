@@ -1,14 +1,14 @@
 [tool.poetry]
-name = "btc-api"
+name = "api"
 version = "0.1.0"
 description = "BTC Predictor API Service"
 authors = ["Cuauhtémoc <cuauhtemocbe@gmail.com>"]
 readme = "README.md"
-packages = [{include = "btc_api"}]
+packages = [{include = "api"}]
 
 [tool.poetry.dependencies]
 python = "^3.13"
-btc-shared = {path = "../shared", develop = true}
+shared = {path = "../shared", develop = true}
 fastapi = "^0.115.0"
 uvicorn = {extras = ["standard"], version = "^0.34.0"}
 jinja2 = "^3.1.0"
