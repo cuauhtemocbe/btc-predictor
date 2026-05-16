@@ -12,10 +12,20 @@ RUN pip install --no-cache-dir poetry==$POETRY_VERSION && \
 
 WORKDIR /app
 
+# Copy root dependencies
 COPY pyproject.toml poetry.lock* ./
+
+# Copy shared package first (needed by main app)
+COPY shared/pyproject.toml shared/poetry.lock* ./shared/
+COPY shared/btc_shared/ ./shared/btc_shared/
+
+# Install dependencies (includes shared package)
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
+# Copy application code
 COPY src/ ./src/
+
+# Change ownership and switch to non-root user
 RUN chown -R appuser:appgroup /app
 USER appuser
 
