@@ -33,3 +33,6 @@ coverage.xml
 CLAUDE.md
 .claude/
 .mcp.json
+
+# CodeGraph
+.codegraph/
