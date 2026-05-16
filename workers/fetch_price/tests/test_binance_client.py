@@ -395,3 +395,49 @@ class TestErrorHandling:
 
         with pytest.raises(BinanceAPIError):
             await client.fetch_ohlcv()
+
+    async def test_malformed_candle_raises_binance_api_error(self, mocker):
+        """Test that malformed API response (missing fields) raises BinanceAPIError.
+
+        This test was added after mutation testing analysis identified that
+        malformed Binance responses could cause uncaught IndexErrors.
+        Now properly handled with validation.
+        """
+        client = BinanceClient()
+
+        # Mock response with incomplete candle (only 3 elements instead of 12)
+        # Binance normally returns: [open_time, open, high, low, close, volume, ...]
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            [1714521600000, "63000.50", "63500.75"]  # Missing close, volume, etc.
+        ]
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        # Should raise BinanceAPIError with clear error message
+        with pytest.raises(BinanceAPIError, match="Malformed candle data"):
+            await client.fetch_ohlcv()
+
+    async def test_invalid_price_format_raises_binance_api_error(self, mocker):
+        """Test that invalid price data (non-numeric) raises BinanceAPIError.
+
+        This test was added after mutation testing analysis to ensure
+        ValueError/TypeError are caught and wrapped properly.
+        """
+        client = BinanceClient()
+
+        # Mock response with non-numeric price data
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            [1714521600000, "invalid", "63500.75", "62800.25", "63200.00", "1234.56"]
+        ]
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        # Should raise BinanceAPIError (not ValueError)
+        with pytest.raises(BinanceAPIError, match="Failed to parse candle data"):
+            await client.fetch_ohlcv()

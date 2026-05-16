@@ -85,19 +85,34 @@ class BinanceClient:
 
         Returns:
             Tuple of (timestamp, open, high, low, close, volume)
+
+        Raises:
+            BinanceAPIError: If candle data is malformed (missing required fields)
         """
-        # Extract and convert timestamp (Unix ms → datetime UTC)
-        timestamp_ms = raw_candle[0]
-        timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+        # Validate candle has minimum required fields
+        if len(raw_candle) < 6:
+            raise BinanceAPIError(
+                f"Malformed candle data: expected at least 6 fields, got {len(raw_candle)}"
+            )
 
-        # Extract and parse OHLCV (strings → floats)
-        open_price = float(raw_candle[1])
-        high = float(raw_candle[2])
-        low = float(raw_candle[3])
-        close = float(raw_candle[4])
-        volume = float(raw_candle[5])
+        try:
+            # Extract and convert timestamp (Unix ms → datetime UTC)
+            timestamp_ms = raw_candle[0]
+            timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
 
-        return (timestamp, open_price, high, low, close, volume)
+            # Extract and parse OHLCV (strings → floats)
+            open_price = float(raw_candle[1])
+            high = float(raw_candle[2])
+            low = float(raw_candle[3])
+            close = float(raw_candle[4])
+            volume = float(raw_candle[5])
+
+            return (timestamp, open_price, high, low, close, volume)
+
+        except (ValueError, TypeError) as e:
+            raise BinanceAPIError(
+                f"Failed to parse candle data: {str(e)}"
+            ) from e
 
     async def fetch_ohlcv(
         self,
