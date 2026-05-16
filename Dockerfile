@@ -2,12 +2,14 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
-    POETRY_VERSION=1.8.4 \
+    PYTHONPATH=/app \
+    POETRY_VERSION=2.3.3 \
     POETRY_HOME=/opt/poetry \
     POETRY_VIRTUALENVS_CREATE=false
 
-RUN pip install --no-cache-dir poetry==$POETRY_VERSION && \
+# Upgrade pip and install Poetry with security fixes
+RUN pip install --no-cache-dir --upgrade pip==26.1 && \
+    pip install --no-cache-dir poetry==$POETRY_VERSION && \
     addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
@@ -15,18 +17,22 @@ WORKDIR /app
 # Copy root dependencies
 COPY pyproject.toml poetry.lock* ./
 
-# Copy shared package first (needed by main app)
-COPY shared/pyproject.toml shared/poetry.lock* ./shared/
-COPY shared/btc_shared/ ./shared/btc_shared/
+# Copy shared package first (needed by api)
+COPY shared/ ./shared/
 
-# Install dependencies (includes shared package)
+# Install root dependencies
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
-# Copy application code
-COPY src/ ./src/
+# Copy API application code
+COPY btc-api/ ./api/
+
+# Install API dependencies
+WORKDIR /app/api
+RUN poetry install --no-interaction --no-ansi --only main --no-root
 
 # Change ownership and switch to non-root user
+WORKDIR /app
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-CMD uvicorn src.app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn btc_api.main:app --host 0.0.0.0 --port ${PORT:-8000}

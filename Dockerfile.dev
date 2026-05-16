@@ -2,21 +2,36 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
-    POETRY_VERSION=1.8.4 \
+    PYTHONPATH=/app \
+    POETRY_VERSION=2.3.3 \
     POETRY_HOME=/opt/poetry \
     POETRY_VIRTUALENVS_CREATE=false
 
-RUN pip install --no-cache-dir poetry==$POETRY_VERSION && \
+# Upgrade pip and install Poetry with security fixes
+RUN pip install --no-cache-dir --upgrade pip==26.1 && \
+    pip install --no-cache-dir poetry==$POETRY_VERSION && \
     addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
 
+# Copy root dependencies
 COPY pyproject.toml poetry.lock* ./
+
+# Copy shared package first (dependency)
+COPY shared/ ./shared/
+
+# Install root dependencies
 RUN poetry install --no-interaction --no-ansi --no-root
 
-COPY src/ ./src/
+# Copy API code (mounted as volume in dev, but needed for poetry install)
+COPY btc-api/ ./api/
+
+# Install API dependencies
+WORKDIR /app/api
+RUN poetry install --no-interaction --no-ansi --no-root
+
+WORKDIR /app
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "btc_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

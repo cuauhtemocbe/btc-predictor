@@ -1,7 +1,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
+from btc_api.main import app
 
 
 @pytest.fixture

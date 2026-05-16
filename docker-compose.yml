@@ -22,11 +22,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./src:/app/src
+      - ./btc-api:/app/api
       - ./shared:/app/shared
-      - ./api:/app/api
       - ./jobs:/app/jobs
-      - ./tests:/app/tests
       - ./poetry.lock:/app/poetry.lock
       - ./pyproject.toml:/app/pyproject.toml
     environment:
@@ -34,10 +32,11 @@ services:
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
       - BINANCE_BASE_URL=https://api.binance.com
       - TZ=America/Mexico_City
+      - PYTHONPATH=/app:/app/api
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn btc_api.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:

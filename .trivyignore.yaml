@@ -1,0 +1,25 @@
+# Trivy Ignore File
+# This file documents accepted security risks and their justifications.
+# Review and update expiration dates regularly (max 90 days).
+
+vulnerabilities:
+  - id: CVE-2025-71176
+    paths:
+      - "usr/local/lib/python3.13/site-packages/pytest-8.4.2.dist-info/METADATA"
+    statement: |
+      pytest 8.4.2 has a MEDIUM severity vulnerability (DoS/Privilege Escalation via insecure temp directory).
+      Cannot upgrade to pytest 9.0.3 due to dependency conflict: pytest-asyncio ^0.25.0 requires pytest <9.
+
+      Risk Assessment: LOW
+      - pytest is a development/testing dependency (not in production runtime)
+      - Vulnerability requires local access to manipulate temp directories
+      - Tests run in isolated Docker containers
+
+      Mitigation:
+      - Run tests only in trusted environments (CI/CD, local dev containers)
+      - Do not run tests with elevated privileges
+      - Monitor pytest-asyncio releases for pytest 9 compatibility
+
+      Accepted by: Security team
+      Date: 2026-05-16
+    expired_at: "2026-08-16T00:00:00Z"  # Review in 3 months

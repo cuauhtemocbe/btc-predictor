@@ -36,3 +36,7 @@ CLAUDE.md
 
 # CodeGraph
 .codegraph/
+
+# Docker-created directories (root-owned, empty)
+/api/
+/jobs/

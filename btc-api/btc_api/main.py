@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 
-from app.api.routes import router
+from btc_api.routers import router
 
-app = FastAPI(title="dockyard2sail-py", version="0.1.0")
+app = FastAPI(title="BTC Predictor", version="0.1.0")
 app.include_router(router)
 
 
