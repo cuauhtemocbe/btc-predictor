@@ -82,6 +82,12 @@ btc-predictor/
 │   │   │   ├── models.py       # Definición de tablas ORM
 │   │   │   └── crud.py         # Operaciones reutilizables (insert, query)
 │   │   └── utils.py            # Helpers: cálculo de error, PnL
+│   ├── tests/                  # Tests del shared package
+│   │   ├── __init__.py
+│   │   ├── test_config.py      # Tests de configuración
+│   │   ├── test_models.py      # Tests de modelos SQLAlchemy
+│   │   ├── test_crud.py        # Tests de operaciones DB
+│   │   └── test_utils.py       # Tests de helpers (PnL, errores)
 │   └── alembic/                # Migraciones de base de datos
 │       ├── alembic.ini
 │       ├── env.py
@@ -90,36 +96,346 @@ btc-predictor/
 ├── api/                        # Service 1 (Web API)
 │   ├── pyproject.toml
 │   ├── Dockerfile
-│   └── btc_api/
+│   ├── btc_api/
+│   │   ├── __init__.py
+│   │   ├── main.py             # App FastAPI, monta routers
+│   │   ├── routers/
+│   │   │   ├── prices.py       # GET /api/prices
+│   │   │   └── predictions.py  # GET /api/predictions/*
+│   │   └── templates/
+│   │       └── dashboard.html  # Jinja2: tabla de predicciones + PnL acumulado
+│   └── tests/                  # Tests del API
 │       ├── __init__.py
-│       ├── main.py             # App FastAPI, monta routers
-│       ├── routers/
-│       │   ├── prices.py       # GET /api/prices
-│       │   └── predictions.py  # GET /api/predictions/*
-│       └── templates/
-│           └── dashboard.html  # Jinja2: tabla de predicciones + PnL acumulado
+│       ├── conftest.py         # Fixtures de pytest (test DB, test client)
+│       ├── test_main.py        # Tests de endpoints principales
+│       ├── test_prices.py      # Tests de /api/prices
+│       └── test_predictions.py # Tests de /api/predictions/*
 │
 └── jobs/
     ├── fetch_price/            # Service 2 (Cron horario)
     │   ├── pyproject.toml
     │   ├── Dockerfile
-    │   └── fetch_price/
+    │   ├── fetch_price/
+    │   │   ├── __init__.py
+    │   │   ├── main.py         # Entry point del cron
+    │   │   └── binance.py      # Cliente Binance API
+    │   └── tests/              # Tests del fetch_price job
     │       ├── __init__.py
-    │       ├── main.py         # Entry point del cron
-    │       └── binance.py      # Cliente Binance API
+    │       ├── test_binance.py # Tests del cliente Binance (mocked)
+    │       └── test_main.py    # Tests de integración del job
     │
     └── daily/                  # Service 3 (Cron diario)
         ├── pyproject.toml
         ├── Dockerfile
-        └── daily/
+        ├── daily/
+        │   ├── __init__.py
+        │   ├── main.py         # Orquesta: evaluate → train → predict
+        │   ├── evaluator.py    # Calcula error_abs, error_pct, direction, PnL
+        │   ├── trainer.py      # Entrena y serializa modelo
+        │   ├── predictor.py    # Predice precio de mañana
+        │   └── models/
+        │       ├── base.py     # Clase abstracta BaseModel
+        │       └── linear.py   # LinearRegressionModel (ventana deslizante)
+        └── tests/              # Tests del daily job
             ├── __init__.py
-            ├── main.py         # Orquesta: evaluate → train → predict
-            ├── evaluator.py    # Calcula error_abs, error_pct, direction, PnL
-            ├── trainer.py      # Entrena y serializa modelo
-            ├── predictor.py    # Predice precio de mañana
-            └── models/
-                ├── base.py     # Clase abstracta BaseModel
-                └── linear.py   # LinearRegressionModel (ventana deslizante)
+            ├── test_evaluator.py   # Tests de evaluación de predicciones
+            ├── test_trainer.py     # Tests de entrenamiento de modelos
+            ├── test_predictor.py   # Tests de predicción
+            └── test_models.py      # Tests de BaseModel y LinearRegression
+```
+
+---
+
+## Testing Strategy
+
+### Regla Fundamental
+
+**Cada criterio de aceptación (Gherkin) DEBE tener al menos 1 test automatizado.**
+
+- No se acepta: "lo probé manualmente", "se ve bien en el browser", "confío en que funciona"
+- Si el criterio no tiene un test que falla cuando se rompe, el criterio no está cubierto
+- Esta regla es **no negociable**
+
+### Tipos de Tests
+
+#### 1. Unit Tests
+**Qué testear:**
+- Funciones puras (`calculate_pnl`, `calculate_error_pct`)
+- Modelos ML (`BaseModel.train()`, `LinearRegressionModel.predict()`)
+- Validaciones de Pydantic (config, API schemas)
+- Lógica de negocio sin dependencias externas
+
+**Herramientas:**
+- `pytest` (test runner)
+- `pytest-mock` (para mocking)
+
+**Ejemplo:**
+```python
+# shared/tests/test_utils.py
+def test_calculate_pnl_predicted_up_went_up():
+    pnl = calculate_pnl(
+        predicted_price=68000,
+        price_at_prediction=67000,
+        actual_price=68500
+    )
+    assert pnl == 1500  # profit
+```
+
+---
+
+#### 2. Integration Tests (con base de datos)
+**Qué testear:**
+- Operaciones CRUD (insert, query, update)
+- Migraciones de Alembic (up/down)
+- Constraints de DB (UNIQUE, FK, NOT NULL)
+- Transacciones y rollbacks
+
+**Herramientas:**
+- `pytest` + `pytest-asyncio`
+- Test database (PostgreSQL en Docker o SQLite in-memory para CI)
+- Fixtures en `conftest.py` para setup/teardown
+
+**Ejemplo:**
+```python
+# shared/tests/test_crud.py
+@pytest.mark.asyncio
+async def test_insert_btc_price_duplicate_timestamp_fails(db_session):
+    # Arrange
+    timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
+    
+    # Act: insert first record
+    insert_btc_price(db_session, timestamp=timestamp, close=67000)
+    
+    # Act: attempt duplicate insert
+    with pytest.raises(IntegrityError):
+        insert_btc_price(db_session, timestamp=timestamp, close=67100)
+```
+
+---
+
+#### 3. API Tests (FastAPI endpoints)
+**Qué testear:**
+- Endpoints REST (status codes, response schema)
+- Query params validation
+- Error handling (404, 422, 500)
+- Dashboard rendering (HTML)
+
+**Herramientas:**
+- `httpx.AsyncClient` (async HTTP client)
+- `FastAPI.TestClient` (sync alternative)
+- Fixtures para test DB y app instance
+
+**Ejemplo:**
+```python
+# api/tests/test_prices.py
+@pytest.mark.asyncio
+async def test_get_prices_returns_json_array(client: httpx.AsyncClient):
+    # Arrange: insert test data
+    insert_test_prices(count=10)
+    
+    # Act
+    response = await client.get("/api/prices?limit=5")
+    
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 5
+    assert "timestamp" in data[0]
+    assert "close" in data[0]
+```
+
+---
+
+#### 4. Job Tests (cron jobs)
+**Qué testear:**
+- Idempotencia (correr el job 2 veces no duplica datos)
+- Error handling (Binance timeout, DB connection failure)
+- Mocking de APIs externas (Binance)
+
+**Herramientas:**
+- `pytest-mock` o `unittest.mock`
+- `respx` (para mockear httpx requests)
+
+**Ejemplo:**
+```python
+# jobs/fetch_price/tests/test_main.py
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_price_idempotent(db_session):
+    # Arrange: mock Binance API
+    respx.get("https://api.binance.com/api/v3/klines").mock(
+        return_value=httpx.Response(200, json=[...])
+    )
+    
+    # Act: run job twice
+    await fetch_price_main()
+    await fetch_price_main()
+    
+    # Assert: only 1 record inserted (idempotency)
+    count = db_session.query(BtcPrice).count()
+    assert count == 1
+```
+
+---
+
+### Test Database Setup
+
+**Opción 1: PostgreSQL en Docker (preferida para local)**
+```yaml
+# docker-compose.test.yml
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: btcpredictor_test
+    ports:
+      - "5433:5432"
+```
+
+**Opción 2: SQLite in-memory (para CI rápido)**
+```python
+# conftest.py
+@pytest.fixture
+def db_session():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+```
+
+---
+
+### Cobertura de Tests
+
+**Target:** >80% code coverage
+
+```bash
+# Instalar coverage
+poetry add --group dev pytest-cov
+
+# Correr tests con cobertura
+pytest --cov=btc_shared --cov=btc_api --cov=fetch_price --cov=daily
+
+# Reporte HTML
+pytest --cov=btc_shared --cov-report=html
+open htmlcov/index.html
+```
+
+---
+
+### Fixtures Comunes
+
+**`shared/tests/conftest.py`**
+```python
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from btc_shared.db.models import Base
+
+@pytest.fixture
+def db_engine():
+    engine = create_engine("postgresql://test:test@localhost:5433/btcpredictor_test")
+    Base.metadata.create_all(engine)
+    yield engine
+    Base.metadata.drop_all(engine)
+
+@pytest.fixture
+def db_session(db_engine):
+    Session = sessionmaker(bind=db_engine)
+    session = Session()
+    yield session
+    session.rollback()
+    session.close()
+```
+
+**`api/tests/conftest.py`**
+```python
+import pytest
+from httpx import AsyncClient
+from btc_api.main import app
+
+@pytest.fixture
+async def client():
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
+```
+
+---
+
+### Comandos de Testing
+
+```bash
+# Correr todos los tests
+pytest
+
+# Correr tests de un paquete específico
+pytest shared/tests/
+pytest api/tests/
+pytest jobs/fetch_price/tests/
+pytest jobs/daily/tests/
+
+# Correr un archivo específico
+pytest shared/tests/test_utils.py
+
+# Correr un test específico
+pytest shared/tests/test_utils.py::test_calculate_pnl_predicted_up_went_up
+
+# Verbose output
+pytest -v
+
+# Ver print statements
+pytest -s
+
+# Correr en paralelo (más rápido)
+pytest -n auto  # requiere pytest-xdist
+```
+
+---
+
+### CI/CD con GitHub Actions
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: btcpredictor_test
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      
+      - name: Install Poetry
+        run: pip install poetry
+      
+      - name: Install dependencies
+        run: poetry install
+      
+      - name: Run tests
+        run: poetry run pytest --cov --cov-report=xml
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/btcpredictor_test
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
 ```
 
 ---
