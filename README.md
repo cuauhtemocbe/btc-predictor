@@ -184,23 +184,85 @@ Evaluator → Trainer → Predictor
 
 ## 🧪 Testing
 
-**Regla fundamental:** Cada criterio de aceptación (Gherkin) debe tener al menos 1 test automatizado.
+### Regla Fundamental
+
+**Cada criterio de aceptación (Gherkin) debe tener al menos 1 test automatizado.**
+
+Esta regla es **no negociable**:
+- Si el criterio no tiene un test que falla cuando se rompe, el criterio no está cubierto
+- "Lo probé manualmente", "se ve bien en el browser", "confío en que funciona" **NO son aceptables**
+- Una User Story no se puede cerrar hasta que todos sus escenarios Gherkin tengan tests que pasen
+
+### Estructura de Tests
+
+Cada servicio tiene su carpeta `tests/`:
+
+```
+shared/tests/           # Config, models, CRUD, utils
+api/tests/              # API endpoints + dashboard
+jobs/fetch_price/tests/ # Binance client + job
+jobs/daily/tests/       # Evaluator, trainer, predictor, models ML
+```
+
+### Tipos de Tests
+
+- **Unit:** Funciones puras (`calculate_pnl`, model `predict()`)
+- **Integration:** Operaciones de DB, migraciones Alembic
+- **API:** Endpoints FastAPI con `httpx.AsyncClient`
+- **Job:** Idempotencia, error handling, mocking de APIs externas
+
+### Comandos Comunes
 
 ```bash
 # Correr todos los tests
 pytest
 
-# Correr tests específicos
-pytest tests/test_main.py -v
+# Tests de un servicio específico
+pytest shared/tests/
+pytest api/tests/
+pytest jobs/fetch_price/tests/
+pytest jobs/daily/tests/
 
-# Cobertura
-pytest --cov=btc_shared --cov=btc_api --cov=fetch_price --cov=daily
+# Tests con cobertura (target: >80%)
+pytest --cov --cov-report=term-missing
+pytest --cov --cov-report=html  # genera htmlcov/index.html
+
+# Un test específico
+pytest shared/tests/test_utils.py::test_calculate_pnl
+
+# Verbose + print statements
+pytest -v -s
+
+# Tests en paralelo (más rápido)
+pytest -n auto  # requiere: pip install pytest-xdist
 ```
 
-**Frameworks:**
-- `pytest` (test runner)
-- `httpx` (async HTTP client para API tests)
-- `pytest-asyncio` (para tests async)
+### Test Database
+
+**Opción 1: PostgreSQL en Docker** (preferida para local)
+```bash
+docker compose -f docker-compose.test.yml up postgres-test
+export DATABASE_URL=postgresql://test:test@localhost:5433/btcpredictor_test
+```
+
+**Opción 2: SQLite in-memory** (para CI rápido)
+```python
+# conftest.py usa sqlite:///:memory: automáticamente
+```
+
+### Frameworks & Tools
+
+- `pytest` — test runner principal
+- `pytest-asyncio` — soporte para tests async
+- `httpx` — async HTTP client para API tests
+- `pytest-mock` / `respx` — mocking (Binance API, etc.)
+- `pytest-cov` — reportes de cobertura
+- `pytest-xdist` — ejecución en paralelo
+
+### Ver Testing Strategy Completa
+
+Para ejemplos detallados, fixtures, y configuración de CI/CD:
+- **[ARCHITECTURE.md](ARCHITECTURE.md#testing-strategy)** — Sección Testing Strategy
 
 ---
 
