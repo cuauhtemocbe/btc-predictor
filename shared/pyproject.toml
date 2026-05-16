@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "btc-shared"
+version = "0.1.0"
+description = "Shared package with database configuration and utilities for BTC Predictor"
+authors = ["Cuauhtémoc <cuauhtemocbe@gmail.com>"]
+readme = "README.md"
+packages = [{include = "btc_shared"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic-settings = "^2.0"
+sqlalchemy = "^2.0"
+psycopg2-binary = "^2.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4"
+pytest-cov = "^4.1"
+pytest-mock = "^3.12"
+pytest-asyncio = "^0.23"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
