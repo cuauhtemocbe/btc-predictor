@@ -135,14 +135,26 @@ El comando `docker compose up` levanta:
 # Levantar servicios (si no están corriendo)
 docker compose up -d
 
-# Ejecutar tests dentro del contenedor api
+# Ejecutar TODOS los tests del proyecto (shared + api-service + workers)
 docker compose exec api pytest
 
 # Con coverage
 docker compose exec api pytest --cov --cov-report=term-missing
 
-# Tests específicos
-docker compose exec api pytest shared/tests/test_utils.py
+# Tests de un servicio específico
+docker compose exec api pytest shared/tests/
+docker compose exec api pytest api-service/tests/
+docker compose exec api pytest workers/fetch_price/tests/
+docker compose exec api pytest workers/daily/tests/
+
+# Un test específico
+docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
+
+# Verbose + mostrar prints
+docker compose exec api pytest -v -s
+
+# Tests en paralelo (más rápido)
+docker compose exec api pytest -n auto
 ```
 
 **⚠️ NUNCA ejecutes `pytest` directamente en el host** — no tendrá acceso al entorno correcto.
@@ -247,11 +259,13 @@ workers/daily/tests/       # Evaluator, trainer, predictor, models ML
 
 **⚠️ IMPORTANTE:** Todos los comandos de test deben ejecutarse con `docker compose exec api`.
 
+**El comando `docker compose exec api pytest` (sin argumentos) ejecuta TODOS los tests del proyecto** — no solo los del API, sino también shared, workers, fetch_price, daily, etc.
+
 ```bash
 # Levantar servicios (si no están corriendo)
 docker compose up -d
 
-# Correr todos los tests
+# ✅ Correr TODOS los tests del proyecto (shared + api-service + workers)
 docker compose exec api pytest
 
 # Tests de un servicio específico

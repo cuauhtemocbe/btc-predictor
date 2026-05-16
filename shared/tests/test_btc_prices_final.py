@@ -139,50 +139,64 @@ class TestGherkinScenario3:
     And the second record is not saved
     """
 
-    def test_duplicate_timestamp_raises_integrity_error(self, session):
+    def test_duplicate_timestamp_raises_integrity_error(self, engine):
         """Test that duplicate timestamp is rejected by UNIQUE constraint."""
-        test_time = datetime(2026, 5, 16, 15, 0, 0, tzinfo=timezone.utc)
+        from sqlalchemy.orm import sessionmaker
 
-        # Arrange: Insert first record
-        first = BtcPrice(
-            timestamp=test_time,
-            open=Decimal("50000.00"),
-            high=Decimal("51000.00"),
-            low=Decimal("49000.00"),
-            close=Decimal("50500.00"),
-            volume=Decimal("100.0"),
-            source="binance"
-        )
-        session.add(first)
-        session.commit()
-        first_id = first.id
+        # Create a session with real commits for this test
+        SessionLocal = sessionmaker(bind=engine)
+        session = SessionLocal()
 
-        # Act & Assert: Try to insert duplicate
-        duplicate = BtcPrice(
-            timestamp=test_time,  # Same timestamp!
-            open=Decimal("51000.00"),
-            high=Decimal("52000.00"),
-            low=Decimal("50000.00"),
-            close=Decimal("51500.00"),
-            volume=Decimal("200.0"),
-            source="binance"
-        )
-        session.add(duplicate)
+        try:
+            test_time = datetime(2026, 5, 16, 15, 0, 0, tzinfo=timezone.utc)
 
-        with pytest.raises(IntegrityError) as exc:
+            # Arrange: Insert first record and commit
+            first = BtcPrice(
+                timestamp=test_time,
+                open=Decimal("50000.00"),
+                high=Decimal("51000.00"),
+                low=Decimal("49000.00"),
+                close=Decimal("50500.00"),
+                volume=Decimal("100.0"),
+                source="binance"
+            )
+            session.add(first)
             session.commit()
 
-        # Assert: Error mentions unique/duplicate
-        error_msg = str(exc.value).lower()
-        assert "unique" in error_msg or "duplicate" in error_msg, \
-            "Error should mention unique constraint violation"
+            # Act & Assert: Try to insert duplicate
+            duplicate = BtcPrice(
+                timestamp=test_time,  # Same timestamp!
+                open=Decimal("51000.00"),
+                high=Decimal("52000.00"),
+                low=Decimal("50000.00"),
+                close=Decimal("51500.00"),
+                volume=Decimal("200.0"),
+                source="binance"
+            )
+            session.add(duplicate)
 
-        # Rollback and verify only one record exists
-        session.rollback()
-        count = session.query(BtcPrice).filter(
-            BtcPrice.timestamp == test_time
-        ).count()
-        assert count == 1, "Should have exactly one record with this timestamp"
+            with pytest.raises(IntegrityError) as exc:
+                session.commit()
+
+            # Assert: Error mentions unique/duplicate
+            error_msg = str(exc.value).lower()
+            assert "unique" in error_msg or "duplicate" in error_msg, \
+                "Error should mention unique constraint violation"
+
+            # Rollback the failed transaction
+            session.rollback()
+
+            # Verify only one record exists (in new transaction)
+            count = session.query(BtcPrice).filter(
+                BtcPrice.timestamp == test_time
+            ).count()
+            assert count == 1, "Should have exactly one record with this timestamp"
+
+        finally:
+            # Clean up: delete test data
+            session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).delete()
+            session.commit()
+            session.close()
 
 
 class TestGherkinScenario4:

@@ -114,46 +114,59 @@ class TestDuplicateTimestampRejected:
     And the second record is not saved
     """
 
-    def test_duplicate_timestamp_raises_integrity_error(self, db_session, apply_migrations):
+    def test_duplicate_timestamp_raises_integrity_error(self, db_engine, apply_migrations):
         """Test that inserting duplicate timestamp raises IntegrityError."""
-        # Arrange: Insert first record
-        test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
-        first_price = BtcPrice(
-            timestamp=test_timestamp,
-            open=Decimal("50000.00"),
-            high=Decimal("51000.00"),
-            low=Decimal("49000.00"),
-            close=Decimal("50500.00"),
-            volume=Decimal("100.0"),
-            source="binance",
-        )
-        db_session.add(first_price)
-        db_session.commit()
+        from sqlalchemy.orm import sessionmaker
 
-        # Act & Assert: Attempt to insert duplicate timestamp
-        duplicate_price = BtcPrice(
-            timestamp=test_timestamp,  # Same timestamp
-            open=Decimal("51000.00"),  # Different prices
-            high=Decimal("52000.00"),
-            low=Decimal("50000.00"),
-            close=Decimal("51500.00"),
-            volume=Decimal("200.0"),
-            source="binance",
-        )
-        db_session.add(duplicate_price)
+        # Use a real committed transaction for this test
+        SessionLocal = sessionmaker(bind=db_engine)
+        session = SessionLocal()
 
-        with pytest.raises(IntegrityError) as exc_info:
-            db_session.commit()
+        try:
+            # Arrange: Insert first record and commit it
+            test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
+            first_price = BtcPrice(
+                timestamp=test_timestamp,
+                open=Decimal("50000.00"),
+                high=Decimal("51000.00"),
+                low=Decimal("49000.00"),
+                close=Decimal("50500.00"),
+                volume=Decimal("100.0"),
+                source="binance",
+            )
+            session.add(first_price)
+            session.commit()
 
-        # Assert: Error message mentions unique constraint
-        assert "unique constraint" in str(exc_info.value).lower() or "duplicate key" in str(exc_info.value).lower()
+            # Act & Assert: Attempt to insert duplicate timestamp
+            duplicate_price = BtcPrice(
+                timestamp=test_timestamp,  # Same timestamp
+                open=Decimal("51000.00"),  # Different prices
+                high=Decimal("52000.00"),
+                low=Decimal("50000.00"),
+                close=Decimal("51500.00"),
+                volume=Decimal("200.0"),
+                source="binance",
+            )
+            session.add(duplicate_price)
 
-        # Rollback to clean up
-        db_session.rollback()
+            with pytest.raises(IntegrityError) as exc_info:
+                session.commit()
 
-        # Assert: Only one record exists in database
-        count = db_session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).count()
-        assert count == 1, "Should have only one record with this timestamp"
+            # Assert: Error message mentions unique constraint
+            assert "unique constraint" in str(exc_info.value).lower() or "duplicate key" in str(exc_info.value).lower()
+
+            # Rollback the failed transaction
+            session.rollback()
+
+            # Verify only one record exists (in a new transaction)
+            count = session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).count()
+            assert count == 1, "Should have only one record with this timestamp"
+
+        finally:
+            # Clean up: delete test data
+            session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).delete()
+            session.commit()
+            session.close()
 
 
 class TestDowngradeMigrationRemovesTable:
