@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: btcpredictor
+      POSTGRES_PASSWORD: btcpredictor
+      POSTGRES_DB: btcpredictor
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U btcpredictor"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
@@ -7,9 +23,21 @@ services:
       - "8000:8000"
     volumes:
       - ./src:/app/src
+      - ./shared:/app/shared
+      - ./api:/app/api
+      - ./jobs:/app/jobs
       - ./tests:/app/tests
       - ./poetry.lock:/app/poetry.lock
+      - ./pyproject.toml:/app/pyproject.toml
     environment:
       - ENVIRONMENT=development
-    env_file:
-      - .env.example
+      - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
+      - BINANCE_BASE_URL=https://api.binance.com
+      - TZ=America/Mexico_City
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:

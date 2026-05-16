@@ -100,19 +100,20 @@ btc-predictor/
 
 ### Prerrequisitos
 
-- Python 3.13
-- Poetry
-- Docker + Docker Compose
-- PostgreSQL (o usar docker-compose)
+- **Docker + Docker Compose** (OBLIGATORIO)
+- Git
+- Un editor de código (VS Code, PyCharm, etc.)
 
-### Desarrollo Local
+**IMPORTANTE:** NO necesitas instalar Python, Poetry, ni PostgreSQL en tu máquina local. Todo se ejecuta dentro de contenedores.
+
+### Desarrollo Local (Container-First)
 
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/cuauhtemocbe/btc-predictor.git
 cd btc-predictor
 
-# 2. Copiar variables de entorno
+# 2. Copiar variables de entorno (opcional - hay defaults)
 cp .env.example .env
 
 # 3. Levantar servicios con Docker Compose
@@ -123,16 +124,47 @@ open http://localhost:8000/docs  # Swagger UI
 open http://localhost:8000/health  # Health check
 ```
 
-### Correr Tests
+El comando `docker compose up` levanta:
+- ✅ PostgreSQL en puerto 5432
+- ✅ API con hot-reload en puerto 8000
+- ✅ Todos los volumes montados para desarrollo
+
+### Correr Tests (SIEMPRE dentro del contenedor)
 
 ```bash
-docker compose run --rm api pytest
+# Levantar servicios (si no están corriendo)
+docker compose up -d
+
+# Ejecutar tests dentro del contenedor api
+docker compose exec api pytest
+
+# Con coverage
+docker compose exec api pytest --cov --cov-report=term-missing
+
+# Tests específicos
+docker compose exec api pytest shared/tests/test_utils.py
 ```
+
+**⚠️ NUNCA ejecutes `pytest` directamente en el host** — no tendrá acceso al entorno correcto.
+
+**Aislamiento de datos:** Los tests usan fixtures de pytest (`conftest.py`) que crean datos de entrada y los eliminan automáticamente al final de cada test (patrón `yield`).
 
 ### Aplicar Migraciones (después de Iteración 1)
 
 ```bash
-cd shared
+# Ejecutar dentro del contenedor
+docker compose exec api sh -c "cd shared && alembic upgrade head"
+```
+
+### Shell Interactivo (para debugging)
+
+```bash
+# Acceder al contenedor
+docker compose exec api bash
+
+# Desde dentro del contenedor puedes ejecutar:
+pytest
+python -m fetch_price.main
 alembic upgrade head
 ```
 
@@ -211,39 +243,70 @@ jobs/daily/tests/       # Evaluator, trainer, predictor, models ML
 - **API:** Endpoints FastAPI con `httpx.AsyncClient`
 - **Job:** Idempotencia, error handling, mocking de APIs externas
 
-### Comandos Comunes
+### Comandos de Tests (SIEMPRE dentro del contenedor)
+
+**⚠️ IMPORTANTE:** Todos los comandos de test deben ejecutarse con `docker compose exec api`.
 
 ```bash
+# Levantar servicios (si no están corriendo)
+docker compose up -d
+
 # Correr todos los tests
-pytest
+docker compose exec api pytest
 
 # Tests de un servicio específico
-pytest shared/tests/
-pytest api/tests/
-pytest jobs/fetch_price/tests/
-pytest jobs/daily/tests/
+docker compose exec api pytest shared/tests/
+docker compose exec api pytest api/tests/
+docker compose exec api pytest jobs/fetch_price/tests/
+docker compose exec api pytest jobs/daily/tests/
 
 # Tests con cobertura (target: >80%)
-pytest --cov --cov-report=term-missing
-pytest --cov --cov-report=html  # genera htmlcov/index.html
+docker compose exec api pytest --cov --cov-report=term-missing
+docker compose exec api pytest --cov --cov-report=html  # genera htmlcov/index.html
 
 # Un test específico
-pytest shared/tests/test_utils.py::test_calculate_pnl
+docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
 
 # Verbose + print statements
-pytest -v -s
+docker compose exec api pytest -v -s
 
 # Tests en paralelo (más rápido)
-pytest -n auto  # requiere: pip install pytest-xdist
+docker compose exec api pytest -n auto
 ```
 
-### Test Database
+**❌ NO ejecutes `pytest` directamente en el host** — no tendrá el entorno Python correcto ni acceso a la base de datos.
 
-**Opción 1: PostgreSQL en Docker** (preferida para local)
-```bash
-docker compose -f docker-compose.test.yml up postgres-test
-export DATABASE_URL=postgresql://test:test@localhost:5433/btcpredictor_test
+### Aislamiento de Tests
+
+**Estrategia simple:** Los tests usan la misma base de datos `postgres` que desarrollo.
+
+El aislamiento se logra mediante **fixtures de pytest** en `conftest.py`:
+
+```python
+# Ejemplo: tests/conftest.py
+@pytest.fixture
+def db_session():
+    """Session con rollback automático"""
+    session = SessionLocal()
+    yield session
+    session.rollback()  # Deshace cambios después del test
+    session.close()
+
+@pytest.fixture
+def sample_data(db_session):
+    """Crea datos de prueba, auto-eliminados al terminar"""
+    data = MyModel(name="test")
+    db_session.add(data)
+    db_session.commit()
+    yield data
+    # Cleanup automático por rollback de session
 ```
+
+**Beneficios:**
+- ✅ Simple: una sola base de datos
+- ✅ Rápido: no necesitas levantar contenedores adicionales
+- ✅ Seguro: fixtures garantizan cleanup automático
+- ✅ Estándar: patrón común en pytest
 
 **Opción 2: SQLite in-memory** (para CI rápido)
 ```python
