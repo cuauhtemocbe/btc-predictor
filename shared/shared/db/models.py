@@ -4,6 +4,7 @@ SQLAlchemy models for BTC Predictor.
 Models:
 - BtcPrice: Historical Bitcoin OHLCV price data
 - Model: Trained ML models with versioning
+- Prediction: Daily price predictions with evaluation metrics
 """
 
 from datetime import date, datetime
@@ -14,12 +15,13 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     LargeBinary,
     String,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import NUMERIC
 
 
@@ -131,4 +133,89 @@ class Model(Base):
         return (
             f"<Model(name={self.name}, version={self.version}, "
             f"is_active={self.is_active}, trained_at={self.trained_at})>"
+        )
+
+
+class Prediction(Base):
+    """
+    Daily Bitcoin price predictions with evaluation metrics.
+
+    Two-phase lifecycle:
+    1. Insert: Predictor job creates record with predicted_price,
+       evaluation fields NULL
+    2. Update: Evaluator job fills actual_price, errors,
+       direction_correct, pnl_simulated
+
+    Tracks model accuracy, error rates, and simulated trading profitability.
+    """
+
+    __tablename__ = "predictions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_id: Mapped[int] = mapped_column(
+        ForeignKey("models.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Foreign key to models table",
+    )
+    predicted_for: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+        comment="Date being predicted (usually tomorrow)",
+    )
+    predicted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="Timestamp when prediction was made",
+    )
+    price_at_prediction: Mapped[Decimal] = mapped_column(
+        NUMERIC(10, 2),
+        nullable=False,
+        comment="BTC price when prediction was made (in USDT)",
+    )
+    predicted_price: Mapped[Decimal] = mapped_column(
+        NUMERIC(10, 2), nullable=False, comment="Predicted BTC price (in USDT)"
+    )
+    actual_price: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(10, 2),
+        nullable=True,
+        comment="Actual BTC price (filled by evaluator, NULL until evaluated)",
+    )
+    evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when evaluation was performed",
+    )
+    error_abs: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(10, 2),
+        nullable=True,
+        comment="Absolute error: |actual_price - predicted_price|",
+    )
+    error_pct: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(5, 2),
+        nullable=True,
+        comment="Percentage error: "
+        "(actual_price - predicted_price) / actual_price * 100",
+    )
+    direction_correct: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="True if predicted direction (up/down) was correct",
+    )
+    pnl_simulated: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(10, 2),
+        nullable=True,
+        comment="Simulated profit/loss from trading strategy (in USDT)",
+    )
+
+    # Relationship to Model
+    model: Mapped["Model"] = relationship("Model")
+
+    def __repr__(self) -> str:
+        return (
+            f"<Prediction(id={self.id}, model_id={self.model_id}, "
+            f"predicted_for={self.predicted_for}, "
+            f"predicted_price={self.predicted_price}, "
+            f"actual_price={self.actual_price})>"
         )

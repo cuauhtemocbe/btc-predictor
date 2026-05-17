@@ -4,7 +4,7 @@ Pytest configuration and fixtures for shared package tests.
 
 import pytest
 import os
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -12,7 +12,7 @@ from alembic import command
 from alembic.config import Config
 
 from shared.config import settings
-from shared.db.models import Base, BtcPrice
+from shared.db.models import Base, BtcPrice, Model, Prediction
 
 
 @pytest.fixture
@@ -129,3 +129,144 @@ def sample_btc_price(db_session):
         return price
 
     return _create_price
+
+
+@pytest.fixture
+def sample_model(db_session):
+    """
+    Factory fixture for creating sample Model records.
+    Automatically cleans up after test (via db_session rollback).
+    """
+    def _create_model(
+        name: str = "test_model",
+        version: str = "1.0.0",
+        params: dict = None,
+        artifact: bytes = b"fake_pickle_data",
+        trained_at: datetime = None,
+        train_from: date = None,
+        train_to: date = None,
+        is_active: bool = False,
+    ) -> Model:
+        if params is None:
+            params = {"window_days": 30}
+        if trained_at is None:
+            trained_at = datetime.now(timezone.utc)
+        if train_from is None:
+            train_from = date.today() - timedelta(days=30)
+        if train_to is None:
+            train_to = date.today()
+
+        model = Model(
+            name=name,
+            version=version,
+            params=params,
+            artifact=artifact,
+            trained_at=trained_at,
+            train_from=train_from,
+            train_to=train_to,
+            is_active=is_active,
+        )
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        return model
+
+    return _create_model
+
+
+@pytest.fixture
+def sample_prediction(db_session, sample_model):
+    """
+    Factory fixture for creating sample Prediction records (phase 1 - before evaluation).
+    Evaluation fields (actual_price, errors, pnl) are NULL.
+    Automatically cleans up after test (via db_session rollback).
+    """
+    def _create_prediction(
+        model_id: int = None,
+        predicted_for: date = None,
+        predicted_at: datetime = None,
+        price_at_prediction: Decimal = Decimal("67000.00"),
+        predicted_price: Decimal = Decimal("68000.00"),
+    ) -> Prediction:
+        if model_id is None:
+            # Create a default model if not provided
+            model = sample_model()
+            model_id = model.id
+        if predicted_for is None:
+            predicted_for = date.today() + timedelta(days=1)
+        if predicted_at is None:
+            predicted_at = datetime.now(timezone.utc)
+
+        prediction = Prediction(
+            model_id=model_id,
+            predicted_for=predicted_for,
+            predicted_at=predicted_at,
+            price_at_prediction=price_at_prediction,
+            predicted_price=predicted_price,
+            # Phase 1: evaluation fields NULL
+            actual_price=None,
+            evaluated_at=None,
+            error_abs=None,
+            error_pct=None,
+            direction_correct=None,
+            pnl_simulated=None,
+        )
+        db_session.add(prediction)
+        db_session.commit()
+        db_session.refresh(prediction)
+        return prediction
+
+    return _create_prediction
+
+
+@pytest.fixture
+def evaluated_prediction(db_session, sample_model):
+    """
+    Factory fixture for creating evaluated Prediction records (phase 2 - after evaluation).
+    All evaluation fields are filled.
+    Automatically cleans up after test (via db_session rollback).
+    """
+    def _create_evaluated_prediction(
+        model_id: int = None,
+        predicted_for: date = None,
+        predicted_at: datetime = None,
+        price_at_prediction: Decimal = Decimal("67000.00"),
+        predicted_price: Decimal = Decimal("68000.00"),
+        actual_price: Decimal = Decimal("67500.00"),
+        evaluated_at: datetime = None,
+        error_abs: Decimal = Decimal("500.00"),
+        error_pct: Decimal = Decimal("0.74"),
+        direction_correct: bool = True,
+        pnl_simulated: Decimal = Decimal("500.00"),
+    ) -> Prediction:
+        if model_id is None:
+            # Create a default model if not provided
+            model = sample_model()
+            model_id = model.id
+        if predicted_for is None:
+            predicted_for = date.today()
+        if predicted_at is None:
+            predicted_at = datetime.now(timezone.utc) - timedelta(days=1)
+        if evaluated_at is None:
+            evaluated_at = datetime.now(timezone.utc)
+
+        prediction = Prediction(
+            model_id=model_id,
+            predicted_for=predicted_for,
+            predicted_at=predicted_at,
+            price_at_prediction=price_at_prediction,
+            predicted_price=predicted_price,
+            # Phase 2: evaluation fields filled
+            actual_price=actual_price,
+            evaluated_at=evaluated_at,
+            error_abs=error_abs,
+            error_pct=error_pct,
+            direction_correct=direction_correct,
+            pnl_simulated=pnl_simulated,
+        )
+        db_session.add(prediction)
+        db_session.commit()
+        db_session.refresh(prediction)
+        return prediction
+
+    return _create_evaluated_prediction
