@@ -264,3 +264,102 @@ def sample_prediction_for_tomorrow(
     db_session.refresh(prediction)
 
     return prediction
+
+
+# ============================================================================
+# Evaluator test fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def sample_unevaluated_prediction_for_today(
+    db_session: Session, sample_trained_model: Model
+) -> Prediction:
+    """
+    Create an unevaluated prediction record for today.
+
+    Returns:
+        Prediction record with predicted_for=today, actual_price=NULL
+    """
+    today = date.today()
+
+    prediction = Prediction(
+        model_id=sample_trained_model.id,
+        predicted_for=today,
+        predicted_at=datetime.now(UTC) - timedelta(days=1),  # Made yesterday
+        price_at_prediction=Decimal("66000.00"),
+        predicted_price=Decimal("67000.00"),
+        actual_price=None,
+        evaluated_at=None,
+        error_abs=None,
+        error_pct=None,
+        direction_correct=None,
+        pnl_simulated=None,
+    )
+
+    db_session.add(prediction)
+    db_session.commit()
+    db_session.refresh(prediction)
+
+    return prediction
+
+
+@pytest.fixture
+def sample_actual_price_for_today(db_session: Session) -> BtcPrice:
+    """
+    Create today's 7am BTC price record.
+
+    Returns:
+        BtcPrice record with timestamp=today 7am
+    """
+    today = date.today()
+    timestamp_7am = datetime.combine(today, datetime.min.time().replace(hour=7), tzinfo=UTC)
+
+    price_record = BtcPrice(
+        timestamp=timestamp_7am,
+        open=Decimal("67000.00"),
+        high=Decimal("67800.00"),
+        low=Decimal("66800.00"),
+        close=Decimal("67500.00"),
+        volume=Decimal("1500.0"),
+        source="test",
+    )
+
+    db_session.add(price_record)
+    db_session.commit()
+    db_session.refresh(price_record)
+
+    return price_record
+
+
+@pytest.fixture
+def sample_evaluated_prediction_for_today(
+    db_session: Session, sample_trained_model: Model
+) -> Prediction:
+    """
+    Create an already-evaluated prediction record for today.
+
+    Returns:
+        Prediction record with actual_price != NULL (already evaluated)
+    """
+    today = date.today()
+
+    prediction = Prediction(
+        model_id=sample_trained_model.id,
+        predicted_for=today,
+        predicted_at=datetime.now(UTC) - timedelta(days=1),
+        price_at_prediction=Decimal("66000.00"),
+        predicted_price=Decimal("67000.00"),
+        actual_price=Decimal("67500.00"),
+        evaluated_at=datetime.now(UTC),
+        error_abs=Decimal("500.00"),
+        error_pct=Decimal("0.74"),
+        direction_correct=True,
+        pnl_simulated=Decimal("1500.00"),
+    )
+
+    db_session.add(prediction)
+    db_session.commit()
+    db_session.refresh(prediction)
+
+    return prediction
