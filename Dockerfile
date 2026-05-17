@@ -23,11 +23,11 @@ COPY shared/ ./shared/
 # Install root dependencies
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
-# Copy API application code
-COPY api-service/ ./api/
+# Copy API service (includes api package + pyproject.toml)
+COPY api-service/ ./api-service/
 
 # Install API dependencies
-WORKDIR /app/api
+WORKDIR /app/api-service
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
 # Change ownership and switch to non-root user
@@ -35,4 +35,8 @@ WORKDIR /app
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Set working directory to api-service for uvicorn
+WORKDIR /app/api-service
+
+# Run uvicorn (using JSON array format for proper signal handling)
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
