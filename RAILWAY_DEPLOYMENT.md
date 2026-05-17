@@ -73,13 +73,18 @@ Railway will automatically use this from the Dockerfile.
 3. **Variables**:
    - `DATABASE_URL` — Auto-inherited from postgres ✅
    - `TZ` — `America/Mexico_City`
+   - `BINANCE_BASE_URL` — (Optional) Default: `https://api.binance.com`
 4. **Settings** → **Deploy**:
-   - **Start Command:** `python -m jobs.fetch_price.main`
+   - **Start Command:** `python -m workers.fetch_price.main`
 5. **Settings** → **Cron Schedule**:
    - **Schedule:** `0 * * * *` (every hour)
    - **Region:** Use same as your database
 
-⚠️ **Note:** This service won't work until you implement US-003 (Binance client) and US-004 (fetch_price job).
+✅ **Ready to deploy!** US-003 (Binance client) and US-004 (fetch_price job) are complete. This service will:
+- Fetch hourly BTC/USDT prices from Binance API
+- Store OHLCV data in `btc_prices` table
+- Handle idempotency (skips duplicate timestamps)
+- Implement rate limiting and error handling
 
 ---
 
@@ -94,7 +99,7 @@ Railway will automatically use this from the Dockerfile.
    - `DATABASE_URL` — Auto-inherited ✅
    - `TZ` — `America/Mexico_City`
 4. **Settings** → **Deploy**:
-   - **Start Command:** `python -m jobs.daily.main`
+   - **Start Command:** `python -m workers.daily.main`
 5. **Settings** → **Cron Schedule**:
    - **Schedule:** `0 13 * * *` (7am Mexico City = 1pm UTC)
    - **Region:** Use same as your database
@@ -112,6 +117,7 @@ All services automatically inherit these from Railway:
 | `DATABASE_URL` | PostgreSQL plugin | Connection string (auto-injected) |
 | `PORT` | Railway | Service port (api only) |
 | `TZ` | Manual | Timezone for cron jobs |
+| `BINANCE_BASE_URL` | Manual (optional) | Binance API endpoint (default: `https://api.binance.com`) |
 
 **No `.env` file needed** — Railway injects everything!
 
@@ -195,31 +201,92 @@ COPY shared/btc_shared/ ./shared/btc_shared/
 **Solution:**
 1. Verify cron schedule syntax: `0 * * * *` (cron format)
 2. Check service logs for errors
-3. Ensure `python -m jobs.fetch_price.main` can run locally first
+3. Ensure `python -m workers.fetch_price.main` can run locally first
+
+### Issue: Binance API errors
+
+**Solution:**
+1. Check if Binance API is accessible: `curl https://api.binance.com/api/v3/ping`
+2. Verify `BINANCE_BASE_URL` environment variable is correct
+3. Check logs for rate limiting errors (429 status code)
+4. Binance public API has rate limits: 1200 requests/minute, 20 orders/second
+
+---
+
+## 🎯 Fetch-Price Service Details
+
+### What it does:
+- Runs every hour (`0 * * * *`)
+- Fetches latest BTC/USDT price from Binance API
+- Stores OHLCV data (Open, High, Low, Close, Volume) in `btc_prices` table
+- Implements idempotency: skips if data for that hour already exists
+
+### API endpoint used:
+```bash
+GET https://api.binance.com/api/v3/klines
+  ?symbol=BTCUSDT
+  &interval=1h
+  &limit=1
+```
+
+### Expected behavior:
+- **First run:** Inserts 1 row into `btc_prices`
+- **Subsequent runs (same hour):** Skips insertion (UNIQUE constraint on timestamp)
+- **Next hour:** Inserts new row
+
+### How to verify it's working:
+
+```bash
+# Check logs
+railway logs --service fetch-price
+
+# Expected output (success):
+INFO: Fetched price for 2026-05-16 15:00:00: $67234.56
+INFO: Successfully saved price to database
+
+# Expected output (duplicate):
+INFO: Fetched price for 2026-05-16 15:00:00: $67234.56
+INFO: Price already exists, skipping (idempotent)
+```
+
+### Query the database:
+
+```bash
+# Via Railway CLI
+railway run --service api python -c "
+from shared.db.database import get_engine
+from sqlalchemy import text
+engine = get_engine()
+with engine.connect() as conn:
+    result = conn.execute(text('SELECT COUNT(*) FROM btc_prices'))
+    print(f'Total prices: {result.scalar()}')
+"
+```
 
 ---
 
 ## 📊 Current Status
 
-After deploying with shared package (US-001):
+After implementing US-001 to US-004:
 
 | Service | Status | Ready to Deploy? |
 |---------|--------|------------------|
 | **postgres** | ✅ Ready | Yes |
-| **api** | ✅ Ready | Yes (hello world) |
-| **fetch-price** | ⏳ Waiting | No (needs US-003, US-004) |
+| **api** | ✅ Ready | Yes (health endpoint, foundation for US-005) |
+| **fetch-price** | ✅ Ready | Yes (US-003, US-004 complete) |
 | **daily** | ⏳ Waiting | No (needs US-006 to US-010) |
 
 ---
 
 ## 🎯 Next Steps
 
-1. ✅ Deploy **postgres** + **api** now (they work)
-2. ⏳ Implement **US-002** (database models + migrations)
-3. ⏳ Implement **US-003, US-004** (Binance client + fetch_price job)
-4. ⏳ Deploy **fetch-price** cron after US-004
-5. ⏳ Implement **US-006 to US-010** (ML models, predictions)
-6. ⏳ Deploy **daily** cron after US-010
+1. ✅ Deploy **postgres** + **api** (working)
+2. ✅ Implement **US-002** (database models + migrations)
+3. ✅ Implement **US-003, US-004** (Binance client + fetch_price job)
+4. 🚀 **Deploy fetch-price cron** (ready to deploy!)
+5. ⏳ Implement **US-005** (API endpoint to query prices)
+6. ⏳ Implement **US-006 to US-010** (ML models, predictions)
+7. ⏳ Deploy **daily** cron after US-010
 
 ---
 

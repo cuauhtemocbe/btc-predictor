@@ -18,17 +18,18 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 COPY shared/ ./shared/
 COPY api-service/ ./api-service/
+COPY entrypoint.sh ./
 
 # Install all dependencies from root (ensures consistent versions via poetry.lock)
 RUN poetry install --no-interaction --no-ansi --only main --no-root
+
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
 
 # Change ownership and switch to non-root user
 WORKDIR /app
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-# Set working directory to api-service for uvicorn
-WORKDIR /app/api-service
-
-# Run uvicorn (using JSON array format for proper signal handling)
-CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run entrypoint script (migrations + uvicorn)
+CMD ["/app/entrypoint.sh"]
