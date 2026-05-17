@@ -2,8 +2,16 @@
 Shared test fixtures for workers.daily tests.
 """
 
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+
 import numpy as np
 import pytest
+from shared.db.models import Base, BtcPrice, Model, Prediction
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from workers.daily.models import LinearRegressionModel
 
 
 @pytest.fixture
@@ -90,3 +98,169 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
         >>> assert X_new.shape == (1, 30)
     """
     return synthetic_prices_60_days[-30:].reshape(1, -1)
+
+
+# ============================================================================
+# Predictor test fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def db_session() -> Session:
+    """
+    Create a test database session with automatic cleanup.
+
+    Uses in-memory SQLite database for fast, isolated tests.
+    All changes are rolled back after each test.
+    """
+    # Create in-memory SQLite database
+    engine = create_engine("sqlite:///:memory:")
+
+    # Create all tables
+    Base.metadata.create_all(engine)
+
+    # Create session
+    TestSessionLocal = sessionmaker(bind=engine)
+    session = TestSessionLocal()
+
+    yield session
+
+    # Cleanup
+    session.rollback()
+    session.close()
+    engine.dispose()
+
+
+@pytest.fixture
+def sample_trained_model(
+    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
+) -> Model:
+    """
+    Create a trained LinearRegressionModel and save it to the database.
+
+    Returns:
+        Model record with is_active=True
+    """
+    X, y = sliding_window_data
+
+    # Train model
+    lr_model = LinearRegressionModel(window_days=30)
+    lr_model.train(X, y)
+
+    # Serialize and save to database
+    model_record = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={"window_days": 30},
+        artifact=lr_model.serialize(),
+        trained_at=datetime.now(UTC),
+        train_from=date.today() - timedelta(days=60),
+        train_to=date.today() - timedelta(days=1),
+        is_active=True,
+    )
+
+    db_session.add(model_record)
+    db_session.commit()
+    db_session.refresh(model_record)
+
+    return model_record
+
+
+@pytest.fixture
+def sample_btc_prices_30_days(db_session: Session) -> list[BtcPrice]:
+    """
+    Create 30 days of BTC price records in the database.
+
+    Returns:
+        List of 30 BtcPrice records
+    """
+    prices = []
+    base_time = datetime.now(UTC) - timedelta(days=30)
+
+    for i in range(30):
+        timestamp = base_time + timedelta(days=i)
+        # Prices range from $50,000 to $51,500
+        close_price = Decimal("50000") + Decimal(str(i * 50))
+
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=close_price - Decimal("100"),
+            high=close_price + Decimal("200"),
+            low=close_price - Decimal("150"),
+            close=close_price,
+            volume=Decimal("1000.5"),
+            source="test",
+        )
+
+        db_session.add(price_record)
+        prices.append(price_record)
+
+    db_session.commit()
+
+    return prices
+
+
+@pytest.fixture
+def sample_btc_prices_10_days(db_session: Session) -> list[BtcPrice]:
+    """
+    Create only 10 days of BTC price records (insufficient for 30-day window).
+
+    Returns:
+        List of 10 BtcPrice records
+    """
+    prices = []
+    base_time = datetime.now(UTC) - timedelta(days=10)
+
+    for i in range(10):
+        timestamp = base_time + timedelta(days=i)
+        close_price = Decimal("50000") + Decimal(str(i * 50))
+
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=close_price - Decimal("100"),
+            high=close_price + Decimal("200"),
+            low=close_price - Decimal("150"),
+            close=close_price,
+            volume=Decimal("1000.5"),
+            source="test",
+        )
+
+        db_session.add(price_record)
+        prices.append(price_record)
+
+    db_session.commit()
+
+    return prices
+
+
+@pytest.fixture
+def sample_prediction_for_tomorrow(
+    db_session: Session, sample_trained_model: Model
+) -> Prediction:
+    """
+    Create a prediction record for tomorrow (to test idempotency).
+
+    Returns:
+        Prediction record with predicted_for=tomorrow
+    """
+    tomorrow = date.today() + timedelta(days=1)
+
+    prediction = Prediction(
+        model_id=sample_trained_model.id,
+        predicted_for=tomorrow,
+        predicted_at=datetime.now(UTC),
+        price_at_prediction=Decimal("51000.00"),
+        predicted_price=Decimal("51500.00"),
+        actual_price=None,
+        evaluated_at=None,
+        error_abs=None,
+        error_pct=None,
+        direction_correct=None,
+        pnl_simulated=None,
+    )
+
+    db_session.add(prediction)
+    db_session.commit()
+    db_session.refresh(prediction)
+
+    return prediction
