@@ -2,7 +2,7 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app:/app/workers \
     POETRY_VERSION=2.3.3 \
     POETRY_HOME=/opt/poetry \
     POETRY_VIRTUALENVS_CREATE=false
@@ -18,6 +18,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 COPY shared/ ./shared/
 COPY api-service/ ./api-service/
+COPY workers/ ./workers/
 COPY entrypoint.sh ./
 
 # Install all dependencies from root (ensures consistent versions via poetry.lock)
