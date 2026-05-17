@@ -99,12 +99,15 @@ Railway will automatically use this from the Dockerfile.
    - `DATABASE_URL` — Auto-inherited ✅
    - `TZ` — `America/Mexico_City`
 4. **Settings** → **Deploy**:
-   - **Start Command:** `python -m workers.daily.main`
+   - **Start Command:** `python -m workers.daily`
 5. **Settings** → **Cron Schedule**:
    - **Schedule:** `0 13 * * *` (7am Mexico City = 1pm UTC)
    - **Region:** Use same as your database
 
-⚠️ **Note:** This service won't work until you implement US-006 to US-010 (ML models, predictions, evaluation).
+✅ **Ready to deploy!** US-006 to US-010 are complete. This service will:
+- **Evaluator**: Evaluate yesterday's prediction (update with actual price, errors, PnL)
+- **Predictor**: Generate tomorrow's prediction using active ML model
+- Run daily orchestration: evaluator → predictor
 
 ---
 
