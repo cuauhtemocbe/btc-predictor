@@ -14,20 +14,12 @@ RUN pip install --no-cache-dir --upgrade pip==26.1 && \
 
 WORKDIR /app
 
-# Copy root dependencies
+# Copy all source code and dependencies
 COPY pyproject.toml poetry.lock* ./
-
-# Copy shared package first (needed by api)
 COPY shared/ ./shared/
-
-# Install root dependencies
-RUN poetry install --no-interaction --no-ansi --only main --no-root
-
-# Copy API service (includes api package + pyproject.toml)
 COPY api-service/ ./api-service/
 
-# Install API dependencies
-WORKDIR /app/api-service
+# Install all dependencies from root (ensures consistent versions via poetry.lock)
 RUN poetry install --no-interaction --no-ansi --only main --no-root
 
 # Change ownership and switch to non-root user
