@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 
 from api.main import app
@@ -39,11 +39,25 @@ def db_session(db_engine):
     """
     Create a database session with automatic rollback after test.
     This ensures test isolation - changes are not persisted.
+
+    Uses nested transactions (savepoints) to ensure all commits
+    within the test are rolled back at the end.
     """
     connection = db_engine.connect()
     transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection)
+    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
     session = SessionLocal()
+
+    # Start a savepoint (nested transaction)
+    # This allows commits within the test to succeed without
+    # actually committing to the database
+    session.begin_nested()
+
+    # When the application code calls commit(), restart the savepoint
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(session, transaction):
+        if transaction.nested and not transaction._parent.nested:
+            session.begin_nested()
 
     # Override the get_db dependency to use this test session
     def override_get_db():

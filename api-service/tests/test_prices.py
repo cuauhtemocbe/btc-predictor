@@ -85,7 +85,10 @@ async def test_get_prices_empty_table(client, db_session):
     Then the response status is 200 OK
     And the response body is an empty JSON array []
     """
-    # Given: Empty table (db_session fixture ensures clean state)
+    # Given: Empty table - explicitly clean to ensure isolation
+    from shared.db.models import BtcPrice
+    db_session.query(BtcPrice).delete()
+    db_session.commit()
 
     # When: GET /api/prices
     response = await client.get("/api/prices")

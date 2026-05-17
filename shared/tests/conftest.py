@@ -6,7 +6,7 @@ import pytest
 import os
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from alembic import command
 from alembic.config import Config
@@ -60,11 +60,23 @@ def db_session(db_engine, apply_migrations):
     Create a database session with automatic rollback after test.
     This ensures test isolation - changes are not persisted.
     Depends on apply_migrations to ensure table exists.
+
+    Uses nested transactions (savepoints) to ensure all commits
+    within the test are rolled back at the end.
     """
     connection = db_engine.connect()
     transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection)
+    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
     session = SessionLocal()
+
+    # Start a savepoint (nested transaction)
+    session.begin_nested()
+
+    # When the application code calls commit(), restart the savepoint
+    @event.listens_for(session, "after_transaction_end")
+    def restart_savepoint(session, transaction):
+        if transaction.nested and not transaction._parent.nested:
+            session.begin_nested()
 
     yield session
 

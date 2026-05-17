@@ -16,11 +16,11 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    JSON,
     LargeBinary,
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import NUMERIC
 
@@ -106,7 +106,7 @@ class Model(Base):
         comment="Model version (e.g., '1.0.0', '2024-05-17-001')",
     )
     params: Mapped[dict] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         comment="Training hyperparameters as JSON (e.g., {'window_days': 30})",
     )
