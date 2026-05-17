@@ -22,8 +22,8 @@ class TestFetchPrices:
 
     @pytest.mark.asyncio
     async def test_fetch_prices_success(self):
-        """Test fetching prices successfully from Binance."""
-        # Mock BinanceClient
+        """Test fetching prices successfully from CoinGecko."""
+        # Mock CoinGeckoClient (note: volume is 0.0 from CoinGecko)
         mock_candles = [
             (
                 datetime(2024, 5, 1, 2, 0, 0, tzinfo=timezone.utc),
@@ -31,7 +31,7 @@ class TestFetchPrices:
                 63600.00,
                 63300.00,
                 63500.00,
-                800.12345678
+                0.0  # CoinGecko OHLC doesn't include volume
             ),
             (
                 datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
@@ -39,21 +39,21 @@ class TestFetchPrices:
                 63450.00,
                 63100.00,
                 63400.00,
-                950.98765432
+                0.0  # CoinGecko OHLC doesn't include volume
             )
         ]
 
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
-            prices = await fetch_prices(limit=2)
+            prices = await fetch_prices(days=1)
 
-            # Verify BinanceClient was called correctly
+            # Verify CoinGeckoClient was called correctly
             mock_instance.fetch_ohlcv.assert_called_once_with(
-                symbol="BTCUSDT",
-                interval="1h",
-                limit=2
+                coin_id="bitcoin",
+                vs_currency="usd",
+                days=1
             )
 
             # Verify returned data
@@ -63,34 +63,34 @@ class TestFetchPrices:
             assert prices[0]["high"] == Decimal("63600.00")
             assert prices[0]["low"] == Decimal("63300.00")
             assert prices[0]["close"] == Decimal("63500.00")
-            assert prices[0]["volume"] == Decimal("800.12345678")
-            assert prices[0]["source"] == "binance"
+            assert prices[0]["volume"] == Decimal("0.0")
+            assert prices[0]["source"] == "coingecko"
 
     @pytest.mark.asyncio
     async def test_fetch_prices_empty_response(self):
-        """Test handling empty response from Binance."""
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+        """Test handling empty response from CoinGecko."""
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=[])
 
-            prices = await fetch_prices(limit=1)
+            prices = await fetch_prices(days=1)
 
             assert prices == []
 
     @pytest.mark.asyncio
     async def test_fetch_prices_timeout(self):
-        """Test handling Binance API timeout."""
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+        """Test handling CoinGecko API timeout."""
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
-            mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("Binance API timeout"))
+            mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("CoinGecko API timeout"))
 
             with pytest.raises(TimeoutError):
                 await fetch_prices()
 
     @pytest.mark.asyncio
     async def test_fetch_prices_rate_limit(self):
-        """Test handling Binance rate limit error."""
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+        """Test handling CoinGecko rate limit error."""
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(
                 side_effect=RateLimitError("Rate limit exceeded", retry_after=60)
@@ -121,7 +121,7 @@ class TestFilterExistingTimestamps:
                 low=Decimal("63100.00"),
                 close=Decimal("63400.00"),
                 volume=Decimal("950.98765432"),
-                source="binance"
+                source="coingecko"
             ),
             BtcPrice(
                 timestamp=datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -129,8 +129,8 @@ class TestFilterExistingTimestamps:
                 high=Decimal("63500.75"),
                 low=Decimal("62800.25"),
                 close=Decimal("63200.00"),
-                volume=Decimal("1234.56789012"),
-                source="binance"
+                volume=Decimal("0.0"),
+                source="coingecko"
             )
         ]
         test_db_session.add_all(existing)
@@ -153,7 +153,7 @@ class TestFilterExistingTimestamps:
             low=Decimal("63100.00"),
             close=Decimal("63400.00"),
             volume=Decimal("950.98765432"),
-            source="binance"
+            source="coingecko"
         )
         test_db_session.add(existing)
         test_db_session.commit()
@@ -166,8 +166,8 @@ class TestFilterExistingTimestamps:
                 "high": Decimal("63450.00"),
                 "low": Decimal("63100.00"),
                 "close": Decimal("63400.00"),
-                "volume": Decimal("950.98765432"),
-                "source": "binance"
+                "volume": Decimal("0.0"),
+                "source": "coingecko"
             }
         ]
 
@@ -231,13 +231,13 @@ class TestMain:
         Gherkin Scenario: First run inserts new prices
 
         Given the btc_prices table is empty
-        And the Binance API returns 24 candles (last 24 hours)
+        And the CoinGecko API returns 24 candles (last 24 hours)
         When I run the job
         Then 24 records are inserted into btc_prices
-        And all records have source="binance"
+        And all records have source="coingecko"
         And no IntegrityError occurs
         """
-        # Generate 24 mock candles
+        # Generate 24 mock candles (volume=0.0 from CoinGecko)
         mock_candles = [
             (
                 datetime(2024, 5, 1, i, 0, 0, tzinfo=timezone.utc),
@@ -245,15 +245,15 @@ class TestMain:
                 63100.0 + i * 10,
                 62900.0 + i * 10,
                 63050.0 + i * 10,
-                1000.0 + i
+                0.0  # CoinGecko OHLC doesn't include volume
             )
             for i in range(24)
         ]
 
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
              patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
-            # Mock Binance client
+            # Mock CoinGecko client
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
@@ -274,7 +274,7 @@ class TestMain:
             mock_session.add_all.assert_called_once()
             added_prices = mock_session.add_all.call_args[0][0]
             assert len(added_prices) == 24
-            assert all(p.source == "binance" for p in added_prices)
+            assert all(p.source == "coingecko" for p in added_prices)
 
             # Verify commit was called
             mock_session.commit.assert_called_once()
@@ -285,7 +285,7 @@ class TestMain:
         Gherkin Scenario: Second run skips existing prices
 
         Given the btc_prices table already has records for timestamps T1, T2, T3
-        And the Binance API returns candles for T1, T2, T3, T4 (T4 is new)
+        And the CoinGecko API returns candles for T1, T2, T3, T4 (T4 is new)
         When I run the job
         Then only 1 new record (T4) is inserted
         And existing records (T1, T2, T3) are unchanged
@@ -298,7 +298,7 @@ class TestMain:
                 63400.0,
                 63200.0,
                 63350.0,
-                1003.0,
+                0.0,  # CoinGecko OHLC doesn't include volume
             ),
             # Existing
             (
@@ -307,7 +307,7 @@ class TestMain:
                 63300.0,
                 63100.0,
                 63250.0,
-                1002.0,
+                0.0,
             ),
             # Existing
             (
@@ -316,7 +316,7 @@ class TestMain:
                 63200.0,
                 63000.0,
                 63150.0,
-                1001.0,
+                0.0,
             ),
             # Existing
             (
@@ -325,7 +325,7 @@ class TestMain:
                 63100.0,
                 62900.0,
                 63050.0,
-                1000.0,
+                0.0,
             ),
         ]
 
@@ -336,7 +336,7 @@ class TestMain:
             (datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),),
         ]
 
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
              patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
             mock_instance = mock_client_cls.return_value
@@ -361,21 +361,21 @@ class TestMain:
             assert added_prices[0].timestamp == datetime(2024, 5, 1, 3, 0, 0, tzinfo=timezone.utc)
 
     @pytest.mark.asyncio
-    async def test_gherkin_binance_timeout(self):
+    async def test_gherkin_coingecko_timeout(self):
         """
-        Gherkin Scenario: Binance API timeout during fetch
+        Gherkin Scenario: CoinGecko API timeout during fetch
 
-        Given the Binance API times out
+        Given the CoinGecko API times out
         When I run the job
         Then a TimeoutError is logged
         And the job exits with code 1 (error)
         And no partial data is saved to the database
         """
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
              patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
             mock_instance = mock_client_cls.return_value
-            mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("Binance API timeout"))
+            mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("CoinGecko API timeout"))
 
             mock_session = MagicMock()
             mock_session_cls.return_value = mock_session
@@ -405,11 +405,11 @@ class TestMain:
                 63100.0,
                 62900.0,
                 63050.0,
-                1000.0,
+                0.0,  # CoinGecko OHLC doesn't include volume
             )
         ]
 
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
              patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
             mock_instance = mock_client_cls.return_value
@@ -428,10 +428,10 @@ class TestMain:
         """
         ZOMBIES: Zero case
 
-        When Binance returns 0 candles
+        When CoinGecko returns 0 candles
         Then log "No data fetched" and exit 0
         """
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
              patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
             mock_instance = mock_client_cls.return_value
@@ -453,11 +453,11 @@ class TestMain:
 
     @pytest.mark.asyncio
     async def test_invalid_symbol_error(self):
-        """Test handling invalid symbol error from Binance."""
-        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+        """Test handling invalid coin_id error from CoinGecko."""
+        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(
-                side_effect=InvalidSymbolError("Invalid symbol: BTCUSDT")
+                side_effect=InvalidSymbolError("Invalid coin_id: bitcoin")
             )
 
             exit_code = await main()

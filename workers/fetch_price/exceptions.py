@@ -1,20 +1,21 @@
-"""Custom exceptions for Binance API client."""
+"""Custom exceptions for price API clients (Binance, CoinGecko, etc.)."""
 
 from typing import Optional
 
 
-class BinanceAPIError(Exception):
-    """Base exception for Binance API errors.
+class PriceAPIError(Exception):
+    """Base exception for price API errors.
 
-    All custom Binance exceptions inherit from this class.
-    Use this to catch any Binance-related error.
+    All custom price API exceptions inherit from this class.
+    Use this to catch any price API-related error from any provider
+    (Binance, CoinGecko, etc.).
     """
 
     pass
 
 
-class RateLimitError(BinanceAPIError):
-    """Raised when Binance API returns 429 Too Many Requests.
+class RateLimitError(PriceAPIError):
+    """Raised when API returns 429 Too Many Requests.
 
     Attributes:
         retry_after: Optional number of seconds to wait before retrying
@@ -32,11 +33,18 @@ class RateLimitError(BinanceAPIError):
         self.retry_after = retry_after
 
 
-class InvalidSymbolError(BinanceAPIError):
-    """Raised when Binance API returns 400 for an invalid trading symbol.
+class InvalidSymbolError(PriceAPIError):
+    """Raised when API returns error for an invalid trading symbol or coin ID.
 
-    This typically happens when the symbol doesn't exist on Binance
-    (e.g., "FOOBAR" instead of "BTCUSDT").
+    This typically happens when the symbol/coin doesn't exist.
+    Examples:
+    - Binance: "FOOBAR" instead of "BTCUSDT"
+    - CoinGecko: "invalid-coin" instead of "bitcoin"
     """
 
     pass
+
+
+# Legacy aliases for backward compatibility with existing code
+BinanceAPIError = PriceAPIError
+CoinGeckoAPIError = PriceAPIError

@@ -14,9 +14,9 @@ from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice
 from sqlalchemy.orm import Session
 
-from fetch_price.binance_client import BinanceClient
+from fetch_price.coingecko_client import CoinGeckoClient
 from fetch_price.exceptions import (
-    BinanceAPIError,
+    PriceAPIError,
     InvalidSymbolError,
     RateLimitError,
 )
@@ -30,27 +30,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def fetch_prices(limit: int = 24) -> List[Dict]:
+async def fetch_prices(days: int = 1) -> List[Dict]:
     """
-    Fetch BTC/USDT prices from Binance.
+    Fetch BTC/USD prices from CoinGecko.
 
     Args:
-        limit: Number of hourly candles to fetch (default: 24 = last 24 hours)
+        days: Number of days of data to fetch (default: 1 = last ~24 hours)
 
     Returns:
         List of price dictionaries with keys: timestamp, open, high, low, close, volume
+        Note: volume will be 0 (CoinGecko OHLC doesn't include volume)
 
     Raises:
-        TimeoutError: Binance API timeout
-        RateLimitError: Binance rate limit exceeded
-        InvalidSymbolError: Invalid trading symbol
-        BinanceAPIError: Other Binance API errors
+        TimeoutError: CoinGecko API timeout
+        RateLimitError: CoinGecko rate limit exceeded
+        InvalidSymbolError: Invalid coin identifier
+        PriceAPIError: Other CoinGecko API errors
     """
-    client = BinanceClient()
+    client = CoinGeckoClient()
 
-    # Fetch candles from Binance
+    # Fetch candles from CoinGecko
     # Returns List[Tuple[datetime, float, float, float, float, float]]
-    candles = await client.fetch_ohlcv(symbol="BTCUSDT", interval="1h", limit=limit)
+    candles = await client.fetch_ohlcv(coin_id="bitcoin", vs_currency="usd", days=days)
 
     # Convert tuples to dictionaries for easier handling
     prices = []
@@ -62,10 +63,10 @@ async def fetch_prices(limit: int = 24) -> List[Dict]:
             "low": Decimal(str(low)),
             "close": Decimal(str(close)),
             "volume": Decimal(str(volume)),
-            "source": "binance"
+            "source": "coingecko"
         })
 
-    logger.info(f"Fetched {len(prices)} candles from Binance")
+    logger.info(f"Fetched {len(prices)} candles from CoinGecko")
     return prices
 
 
@@ -143,8 +144,8 @@ async def main() -> int:
     try:
         logger.info("Fetch price job starting")
 
-        # Fetch prices from Binance
-        prices = await fetch_prices(limit=24)
+        # Fetch prices from CoinGecko
+        prices = await fetch_prices(days=1)
 
         # Filter and save
         with SessionLocal() as session:
@@ -161,8 +162,8 @@ async def main() -> int:
 
         return 0
 
-    except (TimeoutError, RateLimitError, InvalidSymbolError, BinanceAPIError) as e:
-        logger.error(f"Binance API error: {e}")
+    except (TimeoutError, RateLimitError, InvalidSymbolError, PriceAPIError) as e:
+        logger.error(f"CoinGecko API error: {e}")
         return 1
 
     except Exception as e:
