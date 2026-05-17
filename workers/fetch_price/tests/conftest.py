@@ -1,6 +1,13 @@
 """Pytest configuration and fixtures for fetch_price tests."""
 
+from datetime import datetime, timezone
+from decimal import Decimal
+
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from shared.db.models import Base, BtcPrice
 
 
 @pytest.fixture
@@ -77,3 +84,85 @@ def sample_binance_multiple_candles():
             "0"
         ]
     ]
+
+
+@pytest.fixture
+def test_db_engine():
+    """Create in-memory SQLite engine for tests."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    yield engine
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture
+def test_db_session(test_db_engine):
+    """Create database session for tests with automatic cleanup."""
+    test_session_local = sessionmaker(bind=test_db_engine)
+    session = test_session_local()
+    yield session
+    session.rollback()
+    session.close()
+
+
+@pytest.fixture
+def sample_price_data():
+    """Sample price data as dictionaries (ready for database)."""
+    return [
+        {
+            "timestamp": datetime(2024, 5, 1, 2, 0, 0, tzinfo=timezone.utc),
+            "open": Decimal("63400.00"),
+            "high": Decimal("63600.00"),
+            "low": Decimal("63300.00"),
+            "close": Decimal("63500.00"),
+            "volume": Decimal("800.12345678"),
+            "source": "binance"
+        },
+        {
+            "timestamp": datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
+            "open": Decimal("63200.00"),
+            "high": Decimal("63450.00"),
+            "low": Decimal("63100.00"),
+            "close": Decimal("63400.00"),
+            "volume": Decimal("950.98765432"),
+            "source": "binance"
+        },
+        {
+            "timestamp": datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            "open": Decimal("63000.50"),
+            "high": Decimal("63500.75"),
+            "low": Decimal("62800.25"),
+            "close": Decimal("63200.00"),
+            "volume": Decimal("1234.56789012"),
+            "source": "binance"
+        }
+    ]
+
+
+@pytest.fixture
+def existing_btc_prices(test_db_session):
+    """Pre-populate database with 2 existing prices."""
+    prices = [
+        BtcPrice(
+            timestamp=datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
+            open=Decimal("63200.00"),
+            high=Decimal("63450.00"),
+            low=Decimal("63100.00"),
+            close=Decimal("63400.00"),
+            volume=Decimal("950.98765432"),
+            source="binance"
+        ),
+        BtcPrice(
+            timestamp=datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            open=Decimal("63000.50"),
+            high=Decimal("63500.75"),
+            low=Decimal("62800.25"),
+            close=Decimal("63200.00"),
+            volume=Decimal("1234.56789012"),
+            source="binance"
+        )
+    ]
+    test_db_session.add_all(prices)
+    test_db_session.commit()
+    return prices
