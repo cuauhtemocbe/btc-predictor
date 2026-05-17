@@ -10,9 +10,10 @@ Tests all Gherkin scenarios:
 6. NOT NULL constraints
 """
 
-import pytest
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+
+import pytest
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
@@ -83,8 +84,10 @@ def test_insert_prediction_phase1(db_session, sample_model):
     Gherkin Scenario: Insert new prediction (before evaluation)
 
     Given a trained model with id=123
-    When I insert a prediction for predicted_for="2026-05-17" with predicted_price=68000.0
-    And actual_price, error_abs, error_pct, direction_correct, pnl_simulated are NULL
+    When I insert a prediction for predicted_for="2026-05-17"
+         with predicted_price=68000.0
+    And actual_price, error_abs, error_pct, direction_correct,
+        pnl_simulated are NULL
     Then the record is saved successfully
     """
     # Given: trained model
@@ -129,9 +132,11 @@ def test_update_prediction_phase2(db_session, sample_prediction):
     """
     Gherkin Scenario: Update prediction with evaluation (next day)
 
-    Given a prediction exists for predicted_for="2026-05-16" with predicted_price=67000.0
+    Given a prediction exists for predicted_for="2026-05-16"
+          with predicted_price=67000.0
     And actual_price is NULL
-    When I update the record with actual_price=67500.0, error_abs=500.0, error_pct=0.74
+    When I update the record with actual_price=67500.0,
+         error_abs=500.0, error_pct=0.74
     Then the record is updated successfully
     And evaluated_at is set to current timestamp
     """
