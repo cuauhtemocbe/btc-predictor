@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "dockyard2sail-py"
+name = "btc-predictor"
 version = "0.1.0"
 description = ""
 authors = []

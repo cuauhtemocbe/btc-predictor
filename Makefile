@@ -1,4 +1,4 @@
-IMAGE = dockyard2sail-py
+IMAGE = btc-predictor
 
 # --- Docker ---
 build:
