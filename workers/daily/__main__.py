@@ -3,7 +3,8 @@ Daily cron job orchestration.
 
 This job runs daily and orchestrates the following workflow:
 1. Evaluator: Evaluate yesterday's prediction (update with actual price and metrics)
-2. Predictor: Generate tomorrow's prediction
+2. Trainer: Train/retrain ML model on historical data
+3. Predictor: Generate tomorrow's prediction using active model
 
 Entry point: python -m workers.daily
 """
@@ -11,7 +12,7 @@ Entry point: python -m workers.daily
 import logging
 import sys
 
-from workers.daily import evaluator, predictor
+from workers.daily import evaluator, predictor, trainer
 
 # Configure logging
 logging.basicConfig(
@@ -25,7 +26,7 @@ def main() -> int:
     """
     Main entry point for the daily job.
 
-    Runs evaluator followed by predictor.
+    Runs evaluator → trainer → predictor in sequence.
 
     Returns:
         Exit code (0 = success, non-zero = failure)
@@ -40,10 +41,18 @@ def main() -> int:
 
     if evaluator_exit != 0:
         logger.error(f"Evaluator failed with exit code {evaluator_exit}")
-        logger.info("Continuing to predictor despite evaluator failure")
+        logger.info("Continuing to trainer despite evaluator failure")
 
-    # Step 2: Generate tomorrow's prediction
-    logger.info("Step 2: Running predictor")
+    # Step 2: Train/retrain model
+    logger.info("Step 2: Running trainer")
+    trainer_exit = trainer.main()
+
+    if trainer_exit != 0:
+        logger.error(f"Trainer failed with exit code {trainer_exit}")
+        logger.info("Continuing to predictor despite trainer failure")
+
+    # Step 3: Generate tomorrow's prediction
+    logger.info("Step 3: Running predictor")
     predictor_exit = predictor.main()
 
     if predictor_exit != 0:
