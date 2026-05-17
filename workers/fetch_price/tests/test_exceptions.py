@@ -1,6 +1,7 @@
 """Tests for custom Binance API exceptions."""
 
 import pytest
+
 from fetch_price.exceptions import (
     BinanceAPIError,
     InvalidSymbolError,

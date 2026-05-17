@@ -4,10 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from shared.db.models import Base, BtcPrice
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-from shared.db.models import Base, BtcPrice
 
 
 @pytest.fixture

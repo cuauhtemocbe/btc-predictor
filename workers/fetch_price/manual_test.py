@@ -63,18 +63,18 @@ async def main():
         print(f"   Response time: {elapsed:.2f}s (target: <5s)")
 
         if elapsed >= 5.0:
-            print(f"   ⚠️  Warning: Response time exceeds 5s target")
+            print("   ⚠️  Warning: Response time exceeds 5s target")
         else:
-            print(f"   ✅ Response time meets target (<5s)")
+            print("   ✅ Response time meets target (<5s)")
 
         # Verify ordering (newest first)
         timestamps = [candle[0] for candle in result]
         is_descending = all(timestamps[i] >= timestamps[i+1] for i in range(len(timestamps)-1))
 
         if is_descending:
-            print(f"   ✅ Candles ordered correctly (newest first)")
+            print("   ✅ Candles ordered correctly (newest first)")
         else:
-            print(f"   ❌ Candles NOT ordered correctly")
+            print("   ❌ Candles NOT ordered correctly")
             return 1
 
         print(f"   Newest: {result[0][0]} - Close: ${result[0][4]:,.2f}")

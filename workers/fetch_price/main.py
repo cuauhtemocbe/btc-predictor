@@ -10,6 +10,8 @@ from datetime import timezone
 from decimal import Decimal
 from typing import Dict, List
 
+from shared.db.database import SessionLocal
+from shared.db.models import BtcPrice
 from sqlalchemy.orm import Session
 
 from fetch_price.binance_client import BinanceClient
@@ -18,8 +20,6 @@ from fetch_price.exceptions import (
     InvalidSymbolError,
     RateLimitError,
 )
-from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice
 
 # Configure logging
 logging.basicConfig(

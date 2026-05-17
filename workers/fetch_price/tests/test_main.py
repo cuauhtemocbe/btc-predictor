@@ -5,11 +5,16 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from shared.db.models import BtcPrice
 from sqlalchemy.exc import OperationalError
 
 from fetch_price.exceptions import InvalidSymbolError, RateLimitError
-from fetch_price.main import fetch_prices, filter_existing_timestamps, save_prices, main
-from shared.db.models import BtcPrice
+from fetch_price.main import (
+    fetch_prices,
+    filter_existing_timestamps,
+    main,
+    save_prices,
+)
 
 
 class TestFetchPrices:
@@ -38,8 +43,8 @@ class TestFetchPrices:
             )
         ]
 
-        with patch("fetch_price.main.BinanceClient") as MockClient:
-            mock_instance = MockClient.return_value
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
             prices = await fetch_prices(limit=2)
@@ -64,8 +69,8 @@ class TestFetchPrices:
     @pytest.mark.asyncio
     async def test_fetch_prices_empty_response(self):
         """Test handling empty response from Binance."""
-        with patch("fetch_price.main.BinanceClient") as MockClient:
-            mock_instance = MockClient.return_value
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=[])
 
             prices = await fetch_prices(limit=1)
@@ -75,8 +80,8 @@ class TestFetchPrices:
     @pytest.mark.asyncio
     async def test_fetch_prices_timeout(self):
         """Test handling Binance API timeout."""
-        with patch("fetch_price.main.BinanceClient") as MockClient:
-            mock_instance = MockClient.return_value
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("Binance API timeout"))
 
             with pytest.raises(TimeoutError):
@@ -85,8 +90,8 @@ class TestFetchPrices:
     @pytest.mark.asyncio
     async def test_fetch_prices_rate_limit(self):
         """Test handling Binance rate limit error."""
-        with patch("fetch_price.main.BinanceClient") as MockClient:
-            mock_instance = MockClient.return_value
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(
                 side_effect=RateLimitError("Rate limit exceeded", retry_after=60)
             )
@@ -245,11 +250,11 @@ class TestMain:
             for i in range(24)
         ]
 
-        with patch("fetch_price.main.BinanceClient") as MockClient, \
-             patch("fetch_price.main.SessionLocal") as MockSession:
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+             patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
             # Mock Binance client
-            mock_instance = MockClient.return_value
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
             # Mock empty database session
@@ -257,7 +262,7 @@ class TestMain:
             mock_session.__enter__ = MagicMock(return_value=mock_session)
             mock_session.__exit__ = MagicMock(return_value=False)
             mock_session.query.return_value.filter.return_value.all.return_value = []
-            MockSession.return_value = mock_session
+            mock_session_cls.return_value = mock_session
 
             # Run job
             exit_code = await main()
@@ -286,10 +291,42 @@ class TestMain:
         And existing records (T1, T2, T3) are unchanged
         """
         mock_candles = [
-            (datetime(2024, 5, 1, 3, 0, 0, tzinfo=timezone.utc), 63300.0, 63400.0, 63200.0, 63350.0, 1003.0),  # New
-            (datetime(2024, 5, 1, 2, 0, 0, tzinfo=timezone.utc), 63200.0, 63300.0, 63100.0, 63250.0, 1002.0),  # Existing
-            (datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc), 63100.0, 63200.0, 63000.0, 63150.0, 1001.0),  # Existing
-            (datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc), 63000.0, 63100.0, 62900.0, 63050.0, 1000.0),  # Existing
+            # New
+            (
+                datetime(2024, 5, 1, 3, 0, 0, tzinfo=timezone.utc),
+                63300.0,
+                63400.0,
+                63200.0,
+                63350.0,
+                1003.0,
+            ),
+            # Existing
+            (
+                datetime(2024, 5, 1, 2, 0, 0, tzinfo=timezone.utc),
+                63200.0,
+                63300.0,
+                63100.0,
+                63250.0,
+                1002.0,
+            ),
+            # Existing
+            (
+                datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
+                63100.0,
+                63200.0,
+                63000.0,
+                63150.0,
+                1001.0,
+            ),
+            # Existing
+            (
+                datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+                63000.0,
+                63100.0,
+                62900.0,
+                63050.0,
+                1000.0,
+            ),
         ]
 
         # Mock existing timestamps T1, T2, T3
@@ -299,17 +336,19 @@ class TestMain:
             (datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),),
         ]
 
-        with patch("fetch_price.main.BinanceClient") as MockClient, \
-             patch("fetch_price.main.SessionLocal") as MockSession:
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+             patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
-            mock_instance = MockClient.return_value
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
             mock_session = MagicMock()
             mock_session.__enter__ = MagicMock(return_value=mock_session)
             mock_session.__exit__ = MagicMock(return_value=False)
-            mock_session.query.return_value.filter.return_value.all.return_value = existing_timestamps
-            MockSession.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.all.return_value = (
+                existing_timestamps
+            )
+            mock_session_cls.return_value = mock_session
 
             exit_code = await main()
 
@@ -332,14 +371,14 @@ class TestMain:
         And the job exits with code 1 (error)
         And no partial data is saved to the database
         """
-        with patch("fetch_price.main.BinanceClient") as MockClient, \
-             patch("fetch_price.main.SessionLocal") as MockSession:
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+             patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
-            mock_instance = MockClient.return_value
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("Binance API timeout"))
 
             mock_session = MagicMock()
-            MockSession.return_value = mock_session
+            mock_session_cls.return_value = mock_session
 
             exit_code = await main()
 
@@ -360,17 +399,24 @@ class TestMain:
         And the job exits with code 1 (error)
         """
         mock_candles = [
-            (datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc), 63000.0, 63100.0, 62900.0, 63050.0, 1000.0)
+            (
+                datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+                63000.0,
+                63100.0,
+                62900.0,
+                63050.0,
+                1000.0,
+            )
         ]
 
-        with patch("fetch_price.main.BinanceClient") as MockClient, \
-             patch("fetch_price.main.SessionLocal") as MockSession:
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+             patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
-            mock_instance = MockClient.return_value
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
             # Mock database connection failure
-            MockSession.side_effect = OperationalError("statement", "params", "orig")
+            mock_session_cls.side_effect = OperationalError("statement", "params", "orig")
 
             exit_code = await main()
 
@@ -385,17 +431,17 @@ class TestMain:
         When Binance returns 0 candles
         Then log "No data fetched" and exit 0
         """
-        with patch("fetch_price.main.BinanceClient") as MockClient, \
-             patch("fetch_price.main.SessionLocal") as MockSession:
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls, \
+             patch("fetch_price.main.SessionLocal") as mock_session_cls:
 
-            mock_instance = MockClient.return_value
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=[])
 
             mock_session = MagicMock()
             mock_session.__enter__ = MagicMock(return_value=mock_session)
             mock_session.__exit__ = MagicMock(return_value=False)
             mock_session.query.return_value.filter.return_value.all.return_value = []
-            MockSession.return_value = mock_session
+            mock_session_cls.return_value = mock_session
 
             exit_code = await main()
 
@@ -408,8 +454,8 @@ class TestMain:
     @pytest.mark.asyncio
     async def test_invalid_symbol_error(self):
         """Test handling invalid symbol error from Binance."""
-        with patch("fetch_price.main.BinanceClient") as MockClient:
-            mock_instance = MockClient.return_value
+        with patch("fetch_price.main.BinanceClient") as mock_client_cls:
+            mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(
                 side_effect=InvalidSymbolError("Invalid symbol: BTCUSDT")
             )

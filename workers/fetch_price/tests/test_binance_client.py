@@ -1,8 +1,10 @@
 """Tests for BinanceClient."""
 
-import pytest
-import httpx
 from datetime import datetime
+
+import httpx
+import pytest
+
 from fetch_price.binance_client import BinanceClient
 from fetch_price.exceptions import (
     BinanceAPIError,
@@ -252,11 +254,11 @@ class TestFetchOHLCV:
         _, open_price, high, low, close, volume = result[0]
 
         # All should be floats, not strings
-        assert type(open_price) == float
-        assert type(high) == float
-        assert type(low) == float
-        assert type(close) == float
-        assert type(volume) == float
+        assert isinstance(open_price, float)
+        assert isinstance(high, float)
+        assert isinstance(low, float)
+        assert isinstance(close, float)
+        assert isinstance(volume, float)
 
         # Verify values are positive
         assert open_price > 0
