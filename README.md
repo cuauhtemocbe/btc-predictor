@@ -6,8 +6,9 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 
 ## 🚀 Estado del Proyecto
 
-**Iteración actual:** Iteración 0 ✅ (Hello World completado)  
-**Próxima iteración:** Iteración 1 - Database Foundation (US-001, US-002)
+✅ **Proyecto Completo** — Todas las User Stories implementadas y desplegadas a Railway  
+✅ **16 User Stories (US-001 a US-016)** — 8 iteraciones completadas  
+✅ **Deployed:** [Railway Production](https://btc-predictor.railway.app)
 
 [Ver User Stories en GitHub →](https://github.com/cuauhtemocbe/btc-predictor/issues)  
 [Ver Proyecto Board →](https://github.com/users/cuauhtemocbe/projects/1/views/1)
@@ -20,7 +21,7 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 - **Framework Web:** FastAPI + Jinja2
 - **Base de datos:** PostgreSQL + SQLAlchemy 2.0 + Alembic
 - **Machine Learning:** scikit-learn, pandas, numpy
-- **Fuente de datos:** Binance Public API (sin autenticación)
+- **Fuente de datos:** CoinGecko API (migrado desde Binance)
 - **Deploy:** Railway (4 servicios: postgres, api, fetch-price, daily)
 - **Gestión de dependencias:** Poetry (monorepo con paquetes internos)
 
@@ -40,7 +41,7 @@ El proyecto se despliega como **4 servicios en Railway**:
 └─────────────┘
       ↓
 ┌─────────────┐
-│ fetch-price │  Cron cada hora: obtiene precios de Binance
+│ fetch-price │  Cron cada hora: obtiene precios de CoinGecko
 └─────────────┘
       ↓
 ┌─────────────┐
@@ -48,7 +49,7 @@ El proyecto se despliega como **4 servicios en Railway**:
 └─────────────┘
 ```
 
-**Ver documentación completa:** [ARCHITECTURE.md](ARCHITECTURE.md)
+**Ver documentación completa:** [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)
 
 ---
 
@@ -75,7 +76,7 @@ btc-predictor/
         └── models/      # BaseModel abstract + modelos ML
 ```
 
-**Nota:** Estructura actualizada y reorganizada. Próximos pasos: implementar workers de cron (US-003+).
+**Nota:** Estructura final implementada. Todos los workers están funcionando en Railway.
 
 ---
 
@@ -83,7 +84,7 @@ btc-predictor/
 
 ### Tablas principales
 
-1. **`btc_prices`** — Precios horarios OHLCV desde Binance
+1. **`btc_prices`** — Precios horarios OHLCV desde CoinGecko
    - Constraint UNIQUE en `timestamp` (idempotencia)
 
 2. **`models`** — Modelos ML entrenados (serializados con pickle)
@@ -184,22 +185,14 @@ alembic upgrade head
 
 ## 📡 API Endpoints
 
-### Actuales (Iteración 0)
-
 | Método | Ruta | Descripción |
 |--------|------|-------------|
+| `GET` | `/` | Dashboard HTML con predicciones y PnL |
 | `GET` | `/health` | Health check del servicio |
-| `GET` | `/api/v1/hello?name=` | Endpoint de prueba |
+| `GET` | `/api/prices?days=7` | Últimos N días de precios horarios |
+| `GET` | `/api/predictions/history?days=30` | Historial de predicciones evaluadas |
+| `GET` | `/api/predictions/pnl?days=30` | PnL acumulado simulado |
 | `GET` | `/docs` | Swagger UI (auto-generado) |
-
-### Futuros (según iteraciones)
-
-| Método | Ruta | Iteración | Descripción |
-|--------|------|-----------|-------------|
-| `GET` | `/api/prices?limit=168` | 3 | Últimos N precios horarios |
-| `GET` | `/api/predictions/history` | 6 | Historial de predicciones evaluadas |
-| `GET` | `/api/predictions/pnl` | 7 | PnL acumulado simulado |
-| `GET` | `/` | 6 | Dashboard HTML con tabla de predicciones |
 
 ---
 
@@ -208,11 +201,11 @@ alembic upgrade head
 ### Cada hora: `fetch-price` (cron)
 
 ```
-Binance API → fetch-price job → btc_prices table
+CoinGecko API → fetch-price job → btc_prices table
 ```
 
-1. Consulta Binance Public API: `GET /api/v3/klines`
-2. Inserta nuevo precio en `btc_prices` (skip si ya existe)
+1. Consulta CoinGecko API: `GET /api/v3/coins/bitcoin/market_chart`
+2. Inserta nuevo precio en `btc_prices` (skip si ya existe, idempotente)
 
 ### Cada día (7am): `daily` (cron)
 
@@ -339,7 +332,7 @@ def sample_data(db_session):
 ### Ver Testing Strategy Completa
 
 Para ejemplos detallados, fixtures, y configuración de CI/CD:
-- **[ARCHITECTURE.md](ARCHITECTURE.md#testing-strategy)** — Sección Testing Strategy
+- **[IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md#testing-strategy)** — Testing Strategy completa
 
 ---
 
@@ -350,7 +343,7 @@ Para ejemplos detallados, fixtures, y configuración de CI/CD:
 DATABASE_URL=postgresql://user:password@localhost:5432/btcpredictor
 
 # Opcionales (defaults)
-BINANCE_BASE_URL=https://api.binance.com
+COINGECKO_BASE_URL=https://api.coingecko.com
 MODEL_WINDOW_DAYS=30
 MODEL_NAME=linear_v1
 TZ=America/Mexico_City
@@ -392,29 +385,29 @@ railway logs --service daily
 
 ## 📈 Desarrollo Iterativo
 
-El proyecto sigue un enfoque **incremental y deployable**. Cada iteración agrega features y se puede deployar a Railway.
+El proyecto siguió un enfoque **incremental y deployable**. Cada iteración agregó features y fue desplegada a Railway.
 
 | Iteración | Goal | User Stories | Status |
 |-----------|------|--------------|--------|
 | 0 | Hello World | - | ✅ Done |
-| 1 | Database Foundation | US-001, US-002 | 🔲 Todo |
-| 2 | Fetch BTC Prices | US-003, US-004 | 🔲 Todo |
-| 3 | Prices API | US-005 | 🔲 Todo |
-| 4 | ML Foundation | US-006, US-007 | 🔲 Todo |
-| 5 | Predictions & Evaluation | US-008, US-009, US-010 | 🔲 Todo |
-| 6 | Dashboard UI | US-011, US-012 | 🔲 Todo |
-| 7 | PnL Simulation | US-013, US-014 | 🔲 Todo |
-| 8 | Production Crons | US-015, US-016 | 🔲 Todo |
+| 1 | Database Foundation | US-001, US-002 | ✅ Done |
+| 2 | Fetch BTC Prices | US-003, US-004 | ✅ Done |
+| 3 | Prices API | US-005 | ✅ Done |
+| 4 | ML Foundation | US-006, US-007 | ✅ Done |
+| 5 | Predictions & Evaluation | US-008, US-009, US-010 | ✅ Done |
+| 6 | Dashboard UI | US-011, US-012 | ✅ Done |
+| 7 | PnL Simulation | US-013, US-014 | ✅ Done |
+| 8 | Production Crons | US-015, US-016 | ✅ Done |
 
-**Regla de oro:** No pasar a la próxima iteración hasta que la actual esté testeada y deployada.
+**Todas las iteraciones completadas** — Ver historial detallado en [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)
 
 ---
 
 ## 📚 Documentación
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — Arquitectura completa del sistema
-- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** — Contexto del proyecto para Claude AI
-- **[User Stories](https://github.com/cuauhtemocbe/btc-predictor/issues)** — Backlog en GitHub Issues
+- **[IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)** — Historial completo de implementación (8 iteraciones)
+- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** — Contexto del proyecto para Claude Code
+- **[User Stories](https://github.com/cuauhtemocbe/btc-predictor/issues)** — 16 User Stories (todas cerradas ✅)
 
 ---
 
