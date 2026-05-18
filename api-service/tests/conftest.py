@@ -2,17 +2,19 @@
 Pytest configuration and fixtures for API service tests.
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+import pickle
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+
+import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from api.main import app
 from shared.config import settings
-from shared.db.models import BtcPrice
 from shared.db.database import get_db
+from shared.db.models import BtcPrice, Model, Prediction
 
 
 @pytest.fixture
@@ -117,3 +119,108 @@ def sample_prices(db_session):
         return prices
 
     return _create_prices
+
+
+@pytest.fixture
+def sample_model(db_session: Session) -> Model:
+    """
+    Create a sample ML model for testing predictions.
+    Automatically cleaned up via db_session rollback.
+    """
+    # Create a dummy model artifact (minimal sklearn LinearRegression)
+    from sklearn.linear_model import LinearRegression
+    import numpy as np
+
+    dummy_model = LinearRegression()
+    dummy_model.fit(np.array([[1], [2], [3]]), np.array([1, 2, 3]))
+    artifact = pickle.dumps(dummy_model)
+
+    model = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={"window_days": 30},
+        artifact=artifact,
+        trained_at=datetime.now(timezone.utc),
+        train_from=date.today() - timedelta(days=30),
+        train_to=date.today() - timedelta(days=1),
+        is_active=True,
+    )
+    db_session.add(model)
+    db_session.commit()
+    db_session.refresh(model)
+    return model
+
+
+@pytest.fixture
+def sample_predictions_factory(db_session: Session, sample_model: Model):
+    """
+    Factory fixture for creating prediction records.
+
+    Usage:
+        sample_predictions_factory(count=10, evaluated=True)
+    """
+
+    def _create_predictions(count: int = 10, evaluated: bool = True):
+        predictions = []
+        base_date = date.today()
+
+        for i in range(count):
+            predicted_for = base_date - timedelta(days=i)
+            predicted_at = datetime.combine(
+                predicted_for - timedelta(days=1),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            ).replace(hour=19)  # 7pm day before
+
+            price_at_prediction = Decimal("67000.0") + Decimal(i * 100)
+            predicted_price = Decimal("67500.0") + Decimal(i * 100)
+
+            prediction = Prediction(
+                model_id=sample_model.id,
+                predicted_for=predicted_for,
+                predicted_at=predicted_at,
+                price_at_prediction=price_at_prediction,
+                predicted_price=predicted_price,
+            )
+
+            # Add evaluation fields if evaluated=True
+            if evaluated:
+                actual_price = Decimal("67800.0") + Decimal(i * 100)
+                prediction.actual_price = actual_price
+                prediction.evaluated_at = datetime.combine(
+                    predicted_for, datetime.min.time(), tzinfo=timezone.utc
+                ).replace(hour=7, minute=1)  # 7:01am on prediction day
+                prediction.error_abs = abs(actual_price - predicted_price)
+                prediction.error_pct = (
+                    abs(actual_price - predicted_price) / actual_price * 100
+                )
+                prediction.direction_correct = (
+                    (
+                        predicted_price > price_at_prediction
+                        and actual_price > price_at_prediction
+                    )
+                    or (
+                        predicted_price < price_at_prediction
+                        and actual_price < price_at_prediction
+                    )
+                    or (
+                        predicted_price == price_at_prediction
+                        and actual_price == price_at_prediction
+                    )
+                )
+                # Simple PnL: if predicted up, gain = actual - price_at_prediction
+                if predicted_price > price_at_prediction:
+                    prediction.pnl_simulated = actual_price - price_at_prediction
+                else:
+                    prediction.pnl_simulated = Decimal("0.0")
+
+            db_session.add(prediction)
+            predictions.append(prediction)
+
+        db_session.commit()
+        for p in predictions:
+            db_session.refresh(p)
+
+        return predictions
+
+    return _create_predictions
