@@ -270,26 +270,39 @@ with engine.connect() as conn:
 
 ## 📊 Current Status
 
-After implementing US-001 to US-004:
+**All User Stories Complete! (US-001 to US-016)**
 
-| Service | Status | Ready to Deploy? |
-|---------|--------|------------------|
-| **postgres** | ✅ Ready | Yes |
-| **api** | ✅ Ready | Yes (health endpoint, foundation for US-005) |
-| **fetch-price** | ✅ Ready | Yes (US-003, US-004 complete) |
-| **daily** | ⏳ Waiting | No (needs US-006 to US-010) |
+| Service | Status | Implementation | Ready to Deploy? |
+|---------|--------|----------------|------------------|
+| **postgres** | ✅ Deployed | US-001, US-002 | Yes |
+| **api** | ✅ Deployed | US-005, US-011, US-012, US-014 | Yes |
+| **fetch-price** | 🚀 Ready | US-003, US-004, **US-015** | **Deploy Now!** |
+| **daily** | 🚀 Ready | US-006 to US-010, **US-016** | **Deploy Now!** |
+
+### Deployment Guides
+
+- **US-015 (fetch-price cron)**: See `US-015-DEPLOYMENT.md` for step-by-step guide
+- **US-016 (daily cron)**: See `US-016-DEPLOYMENT.md` for step-by-step guide
 
 ---
 
-## 🎯 Next Steps
+## 🎯 Deployment Checklist
 
-1. ✅ Deploy **postgres** + **api** (working)
-2. ✅ Implement **US-002** (database models + migrations)
-3. ✅ Implement **US-003, US-004** (Binance client + fetch_price job)
-4. 🚀 **Deploy fetch-price cron** (ready to deploy!)
-5. ⏳ Implement **US-005** (API endpoint to query prices)
-6. ⏳ Implement **US-006 to US-010** (ML models, predictions)
-7. ⏳ Deploy **daily** cron after US-010
+### Completed ✅
+1. ✅ Deploy **postgres** database
+2. ✅ Deploy **api** service
+3. ✅ Implement US-001 to US-014 (all core features)
+4. ✅ Create deployment guides for cron services
+
+### Ready to Deploy Now 🚀
+5. 🚀 **Deploy fetch-price cron** (US-015) - Follow `US-015-DEPLOYMENT.md`
+6. 🚀 **Deploy daily cron** (US-016) - Follow `US-016-DEPLOYMENT.md`
+
+### Post-Deployment
+7. ⏭️ Monitor cron executions for 24-48 hours
+8. ⏭️ Verify predictions are being created daily
+9. ⏭️ Check PnL calculations are working
+10. ⏭️ Close GitHub issues #16 and #17
 
 ---
 
