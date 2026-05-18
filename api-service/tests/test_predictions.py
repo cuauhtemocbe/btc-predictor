@@ -8,7 +8,7 @@ Tests the /api/predictions/history endpoint with various scenarios:
 """
 
 import pickle
-from datetime import date, datetime, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -25,8 +25,8 @@ def sample_model(db_session: Session) -> Model:
     Automatically cleaned up via db_session rollback.
     """
     # Create a dummy model artifact (minimal sklearn LinearRegression)
-    from sklearn.linear_model import LinearRegression
     import numpy as np
+    from sklearn.linear_model import LinearRegression
 
     dummy_model = LinearRegression()
     dummy_model.fit(np.array([[1], [2], [3]]), np.array([1, 2, 3]))
@@ -37,7 +37,7 @@ def sample_model(db_session: Session) -> Model:
         version="1.0.0",
         params={"window_days": 30},
         artifact=artifact,
-        trained_at=datetime.now(timezone.utc),
+        trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=30),
         train_to=date.today() - timedelta(days=1),
         is_active=True,
@@ -65,7 +65,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
             predicted_at = datetime.combine(
                 predicted_for - timedelta(days=1),
                 datetime.min.time(),
-                tzinfo=timezone.utc
+                tzinfo=UTC
             ).replace(hour=19)  # 7pm day before
 
             price_at_prediction = Decimal("67000.0") + Decimal(i * 100)
@@ -86,18 +86,26 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
                 prediction.evaluated_at = datetime.combine(
                     predicted_for,
                     datetime.min.time(),
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 ).replace(hour=7, minute=1)  # 7:01am on prediction day
                 prediction.error_abs = abs(actual_price - predicted_price)
                 prediction.error_pct = (
                     abs(actual_price - predicted_price) / actual_price * 100
                 )
+                # Direction correctness
+                pred_up = predicted_price > price_at_prediction
+                pred_down = predicted_price < price_at_prediction
+                actual_up = actual_price > price_at_prediction
+                actual_down = actual_price < price_at_prediction
                 prediction.direction_correct = (
-                    (predicted_price > price_at_prediction and actual_price > price_at_prediction)
-                    or (predicted_price < price_at_prediction and actual_price < price_at_prediction)
-                    or (predicted_price == price_at_prediction and actual_price == price_at_prediction)
+                    (pred_up and actual_up)
+                    or (pred_down and actual_down)
+                    or (
+                        predicted_price == price_at_prediction
+                        and actual_price == price_at_prediction
+                    )
                 )
-                # Simple PnL: if predicted up, gain = actual - price_at_prediction, else 0
+                # Simple PnL calculation
                 if predicted_price > price_at_prediction:
                     prediction.pnl_simulated = actual_price - price_at_prediction
                 else:
@@ -200,8 +208,11 @@ async def test_filter_by_date_range(
     sample_predictions_factory,
 ):
     """
-    Given I send GET /api/predictions/history?from=2026-05-01&to=2026-05-15
-    Then the response contains only predictions where predicted_for is between those dates
+    Test filtering predictions by date range.
+
+    Given predictions spanning multiple days
+    When I filter by from and to dates
+    Then only predictions within that range are returned
     """
     # Arrange: Create predictions spanning 30 days
     sample_predictions_factory(count=30, evaluated=True)
@@ -245,7 +256,8 @@ async def test_filter_from_date_only(
 
     # Act: Filter by from_date only
     from_date = date.today() - timedelta(days=9)
-    response = await client.get(f"/api/predictions/history?from={from_date.isoformat()}")
+    url = f"/api/predictions/history?from={from_date.isoformat()}"
+    response = await client.get(url)
 
     # Assert
     assert response.status_code == 200
@@ -289,3 +301,158 @@ async def test_filter_to_date_only(
     for item in data:
         prediction_date = date.fromisoformat(item["predicted_for"])
         assert prediction_date <= to_date
+
+
+# ============================================================================
+# Tests for GET /api/predictions/pnl endpoint (US-014)
+# ============================================================================
+
+
+# Gherkin Scenario 1: Calculate total PnL
+@pytest.mark.asyncio
+async def test_get_total_pnl_with_evaluated_predictions(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_factory,
+):
+    """
+    Given the predictions table has 30 evaluated records
+    And the sum of pnl_simulated is 12345.67
+    When I send GET /api/predictions/pnl
+    Then the response status is 200 OK
+    And the response body is {"total_pnl": 12345.67, "evaluated_predictions": 30}
+    """
+    # Arrange: Create 30 evaluated predictions
+    predictions = sample_predictions_factory(count=30, evaluated=True)
+
+    # Calculate expected total PnL (predictions have pnl_simulated already set)
+    expected_pnl = sum(float(p.pnl_simulated) for p in predictions)
+    expected_count = 30
+
+    # Act: Fetch total PnL
+    response = await client.get("/api/predictions/pnl")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify response structure
+    assert "total_pnl" in data
+    assert "evaluated_predictions" in data
+
+    # Verify values
+    assert data["evaluated_predictions"] == expected_count
+    # Use approximate comparison for floating-point
+    assert abs(data["total_pnl"] - expected_pnl) < 0.01
+
+
+# Gherkin Scenario 2: No evaluated predictions yet
+@pytest.mark.asyncio
+async def test_get_total_pnl_no_evaluated_predictions(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_factory,
+):
+    """
+    Given all predictions have pnl_simulated = NULL
+    When I send GET /api/predictions/pnl
+    Then the response body is {"total_pnl": 0, "evaluated_predictions": 0}
+    """
+    # Arrange: Create only unevaluated predictions (pnl_simulated is NULL)
+    sample_predictions_factory(count=5, evaluated=False)
+
+    # Act
+    response = await client.get("/api/predictions/pnl")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_pnl"] == 0.0
+    assert data["evaluated_predictions"] == 0
+
+
+# Edge case: Mix of evaluated and unevaluated predictions
+@pytest.mark.asyncio
+async def test_get_total_pnl_mixed_predictions(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_factory,
+):
+    """
+    Test that PnL endpoint only counts evaluated predictions and ignores unevaluated.
+    """
+    # Arrange: Create 20 evaluated + 10 unevaluated predictions
+    evaluated = sample_predictions_factory(count=20, evaluated=True)
+    sample_predictions_factory(count=10, evaluated=False)
+
+    # Calculate expected PnL (only from evaluated predictions)
+    expected_pnl = sum(float(p.pnl_simulated) for p in evaluated)
+    expected_count = 20
+
+    # Act
+    response = await client.get("/api/predictions/pnl")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["evaluated_predictions"] == expected_count
+    assert abs(data["total_pnl"] - expected_pnl) < 0.01
+
+
+# Edge case: Negative total PnL (losses)
+@pytest.mark.asyncio
+async def test_get_total_pnl_with_losses(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model: Model,
+):
+    """
+    Test that PnL endpoint correctly handles negative total PnL.
+    """
+    # Arrange: Create predictions with negative PnL (predicted up but actual down)
+    predictions = []
+    for i in range(5):
+        predicted_for = date.today() - timedelta(days=i)
+        predicted_at = datetime.combine(
+            predicted_for - timedelta(days=1),
+            datetime.min.time(),
+            tzinfo=UTC
+        ).replace(hour=19)
+
+        price_at_prediction = Decimal("67000.0")
+        predicted_price = Decimal("68000.0")  # Predicted UP
+        actual_price = Decimal("66000.0")  # Actual DOWN → loss
+
+        prediction = Prediction(
+            model_id=sample_model.id,
+            predicted_for=predicted_for,
+            predicted_at=predicted_at,
+            price_at_prediction=price_at_prediction,
+            predicted_price=predicted_price,
+            actual_price=actual_price,
+            evaluated_at=datetime.now(UTC),
+            error_abs=Decimal("2000.0"),
+            error_pct=Decimal("3.03"),
+            direction_correct=False,
+            pnl_simulated=Decimal("-1000.0"),  # Loss: 66000 - 67000 = -1000
+        )
+        db_session.add(prediction)
+        predictions.append(prediction)
+
+    db_session.commit()
+
+    # Expected: 5 predictions × -1000 = -5000 total PnL
+    expected_pnl = -5000.0
+    expected_count = 5
+
+    # Act
+    response = await client.get("/api/predictions/pnl")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["evaluated_predictions"] == expected_count
+    assert abs(data["total_pnl"] - expected_pnl) < 0.01

@@ -49,3 +49,30 @@ class PredictionHistoryResponse(BaseModel):
     model_version: str = Field(description="Version of the model used")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PnlResponse(BaseModel):
+    """
+    Aggregated profit/loss summary across all evaluated predictions.
+
+    Used by GET /api/predictions/pnl endpoint to return total accumulated
+    PnL and count of evaluated predictions.
+
+    Example JSON:
+    ```json
+    {
+        "total_pnl": 12345.67,
+        "evaluated_predictions": 30
+    }
+    ```
+    """
+
+    total_pnl: float = Field(
+        description=(
+            "Total accumulated profit/loss in USD "
+            "across all evaluated predictions"
+        )
+    )
+    evaluated_predictions: int = Field(
+        description="Number of predictions that have been evaluated"
+    )
