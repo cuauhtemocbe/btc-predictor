@@ -192,6 +192,42 @@ INFO - Processing batch 22/22 (2100/2160 records, 97%)
 INFO - Backfill completed: 2160 new prices inserted, 0 duplicates skipped
 ```
 
+### Backtesting Walk-Forward (US-020)
+
+Para validar la efectividad del modelo simulando predicciones históricas:
+
+```bash
+# Backtest de mayo 2024 (30 días)
+docker compose exec api python scripts/backtest.py \
+  --start-date=2024-05-01 --end-date=2024-05-30
+
+# Backtest con ventana de entrenamiento de 60 días
+docker compose exec api python scripts/backtest.py \
+  --start-date=2024-05-01 --end-date=2024-05-30 \
+  --training-window=60
+
+# Backtest de últimos 90 días
+docker compose exec api python scripts/backtest.py \
+  --start-date=2024-02-01 --end-date=2024-04-30
+```
+
+**Características:**
+- ✅ **Walk-Forward Testing:** Entrena modelo progresivamente sin lookahead bias
+- ✅ **4 Estrategias PnL:** Simple, Long/Short, Threshold, Realistic (con fees)
+- ✅ **UUID por Run:** Distingue múltiples simulaciones
+- ✅ **Progress Logging:** Muestra progreso cada 10 días
+- ✅ **Manejo de Errores:** Skipea días con datos faltantes o errores de entrenamiento
+
+**Ver resultados:**
+```bash
+docker compose exec postgres psql -U btcpredictor -d btcpredictor \
+  -c "SELECT backtest_run_id, COUNT(*) AS predictions, 
+      SUM(pnl_realistic) AS total_pnl 
+      FROM backtest_results GROUP BY backtest_run_id;"
+```
+
+**Documentación completa:** Ver [docs/BACKTESTING.md](docs/BACKTESTING.md)
+
 ### Aplicar Migraciones (después de Iteración 1)
 
 ```bash

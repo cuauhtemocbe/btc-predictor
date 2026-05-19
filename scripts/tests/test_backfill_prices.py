@@ -23,26 +23,26 @@ class TestParseArgs:
 
     def test_default_days_is_90(self):
         """Test that default days value is 90."""
-        with patch('sys.argv', ['backfill_prices.py']):
+        with patch("sys.argv", ["backfill_prices.py"]):
             args = parse_args()
             assert args.days == 90
             assert args.verbose is False
 
     def test_custom_days_parsed(self):
         """Test that custom --days argument is parsed correctly."""
-        with patch('sys.argv', ['backfill_prices.py', '--days=7']):
+        with patch("sys.argv", ["backfill_prices.py", "--days=7"]):
             args = parse_args()
             assert args.days == 7
 
     def test_verbose_flag_parsed(self):
         """Test that --verbose flag is parsed correctly."""
-        with patch('sys.argv', ['backfill_prices.py', '--verbose']):
+        with patch("sys.argv", ["backfill_prices.py", "--verbose"]):
             args = parse_args()
             assert args.verbose is True
 
     def test_days_and_verbose_together(self):
         """Test parsing both --days and --verbose."""
-        with patch('sys.argv', ['backfill_prices.py', '--days=30', '--verbose']):
+        with patch("sys.argv", ["backfill_prices.py", "--days=30", "--verbose"]):
             args = parse_args()
             assert args.days == 30
             assert args.verbose is True
@@ -105,8 +105,12 @@ class TestInsertPricesBatch:
 
         price = BtcPrice(
             timestamp=datetime(2024, 5, 1, tzinfo=UTC),
-            open=63000.0, high=63000.0, low=63000.0, close=63000.0,
-            volume=0.0, source="coingecko"
+            open=63000.0,
+            high=63000.0,
+            low=63000.0,
+            close=63000.0,
+            volume=0.0,
+            source="coingecko",
         )
 
         inserted, skipped = await insert_prices_batch(mock_session, [price])
@@ -127,16 +131,18 @@ class TestInsertPricesBatch:
         prices = [
             BtcPrice(
                 timestamp=datetime(2024, 5, 1 + i // 24, i % 24, 0, 0, tzinfo=UTC),
-                open=63000.0, high=63000.0, low=63000.0, close=63000.0,
-                volume=0.0, source="coingecko"
+                open=63000.0,
+                high=63000.0,
+                low=63000.0,
+                close=63000.0,
+                volume=0.0,
+                source="coingecko",
             )
             for i in range(250)
         ]
 
         inserted, skipped = await insert_prices_batch(
-            mock_session,
-            prices,
-            batch_size=100
+            mock_session, prices, batch_size=100
         )
 
         assert inserted == 250
@@ -153,8 +159,12 @@ class TestInsertPricesBatch:
 
         price = BtcPrice(
             timestamp=datetime(2024, 5, 1, tzinfo=UTC),
-            open=63000.0, high=63000.0, low=63000.0, close=63000.0,
-            volume=0.0, source="coingecko"
+            open=63000.0,
+            high=63000.0,
+            low=63000.0,
+            close=63000.0,
+            volume=0.0,
+            source="coingecko",
         )
 
         inserted, skipped = await insert_prices_batch(mock_session, [price])
@@ -179,8 +189,12 @@ class TestInsertPricesBatch:
         prices = [
             BtcPrice(
                 timestamp=datetime(2024, 5, 1, i, tzinfo=UTC),
-                open=63000.0, high=63000.0, low=63000.0, close=63000.0,
-                volume=0.0, source="coingecko"
+                open=63000.0,
+                high=63000.0,
+                low=63000.0,
+                close=63000.0,
+                volume=0.0,
+                source="coingecko",
             )
             for i in range(3)
         ]
@@ -214,10 +228,7 @@ class TestBackfillPrices:
         return session
 
     async def test_successfully_fetch_and_insert_90_days(
-        self,
-        mock_coingecko_client,
-        mock_session,
-        mocker
+        self, mock_coingecko_client, mock_session, mocker
     ):
         """Scenario: Successfully fetch and insert 90 days of hourly prices."""
         # Mock CoinGecko API response (90 days * 24 hours = 2160 prices)
@@ -228,36 +239,36 @@ class TestBackfillPrices:
         mock_coingecko_client.fetch_historical_prices.return_value = mock_prices
 
         # Mock database
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
-        mocker.patch('scripts.backfill_prices.SessionLocal', return_value=mock_session)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
+        mocker.patch("scripts.backfill_prices.SessionLocal", return_value=mock_session)
 
         # Run backfill
         await backfill_prices(days=90)
 
         # Verify API call
         mock_coingecko_client.fetch_historical_prices.assert_called_once_with(
-            coin_id="bitcoin",
-            vs_currency="usd",
-            days=90,
-            max_retries=5
+            coin_id="bitcoin", vs_currency="usd", days=90, max_retries=5
         )
 
         # Verify insertion (2160 calls to session.add)
         assert mock_session.add.call_count == 2160
 
     async def test_empty_response_exits_cleanly(
-        self,
-        mock_coingecko_client,
-        mock_session,
-        mocker
+        self, mock_coingecko_client, mock_session, mocker
     ):
         """Scenario: Handle empty response from CoinGecko."""
         # Mock empty response
         mock_coingecko_client.fetch_historical_prices.return_value = []
 
         # Mock database
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
-        mocker.patch('scripts.backfill_prices.SessionLocal', return_value=mock_session)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
+        mocker.patch("scripts.backfill_prices.SessionLocal", return_value=mock_session)
 
         # Run backfill (should not raise, should log warning)
         await backfill_prices(days=90)
@@ -265,11 +276,7 @@ class TestBackfillPrices:
         # Verify no insertion attempted
         mock_session.add.assert_not_called()
 
-    async def test_rate_limit_handled_by_client(
-        self,
-        mock_coingecko_client,
-        mocker
-    ):
+    async def test_rate_limit_handled_by_client(self, mock_coingecko_client, mocker):
         """Scenario: Handle CoinGecko rate limit (429 error).
 
         Note: Rate limit handling is tested in CoinGeckoClient tests.
@@ -279,11 +286,13 @@ class TestBackfillPrices:
 
         # Mock rate limit error
         mock_coingecko_client.fetch_historical_prices.side_effect = RateLimitError(
-            "Rate limit exceeded",
-            retry_after=60
+            "Rate limit exceeded", retry_after=60
         )
 
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
 
         # Should raise RateLimitError
         with pytest.raises(RateLimitError):
@@ -291,27 +300,24 @@ class TestBackfillPrices:
 
         # Verify max_retries=5 was passed
         mock_coingecko_client.fetch_historical_prices.assert_called_once_with(
-            coin_id="bitcoin",
-            vs_currency="usd",
-            days=90,
-            max_retries=5
+            coin_id="bitcoin", vs_currency="usd", days=90, max_retries=5
         )
 
     async def test_different_time_ranges(
-        self,
-        mock_coingecko_client,
-        mock_session,
-        mocker
+        self, mock_coingecko_client, mock_session, mocker
     ):
         """Scenario Outline: Backfill different time ranges (7, 30, 90, 365 days)."""
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
-        mocker.patch('scripts.backfill_prices.SessionLocal', return_value=mock_session)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
+        mocker.patch("scripts.backfill_prices.SessionLocal", return_value=mock_session)
 
         test_cases = [
-            (7, 168),      # 7 days * 24 hours
-            (30, 720),     # 30 days * 24 hours
-            (90, 2160),    # 90 days * 24 hours
-            (365, 8760),   # 365 days * 24 hours
+            (7, 168),  # 7 days * 24 hours
+            (30, 720),  # 30 days * 24 hours
+            (90, 2160),  # 90 days * 24 hours
+            (365, 8760),  # 365 days * 24 hours
         ]
 
         for days, expected_count in test_cases:
@@ -331,10 +337,7 @@ class TestBackfillPrices:
 
             # Verify correct days parameter
             mock_coingecko_client.fetch_historical_prices.assert_called_once_with(
-                coin_id="bitcoin",
-                vs_currency="usd",
-                days=days,
-                max_retries=5
+                coin_id="bitcoin", vs_currency="usd", days=days, max_retries=5
             )
 
             # Verify expected number of insertions
@@ -349,10 +352,7 @@ class TestBackfillPrices:
             await backfill_prices(days=-1)
 
     async def test_data_integrity_validation(
-        self,
-        mock_coingecko_client,
-        mock_session,
-        mocker
+        self, mock_coingecko_client, mock_session, mocker
     ):
         """Scenario: Validate inserted data integrity.
 
@@ -364,14 +364,16 @@ class TestBackfillPrices:
         """
         # Mock API response
         mock_prices = [
-            (datetime(2024, 5, 1, i, tzinfo=UTC), 63000.0 + i * 100)
-            for i in range(10)
+            (datetime(2024, 5, 1, i, tzinfo=UTC), 63000.0 + i * 100) for i in range(10)
         ]
         mock_coingecko_client.fetch_historical_prices.return_value = mock_prices
 
         # Mock database
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
-        mocker.patch('scripts.backfill_prices.SessionLocal', return_value=mock_session)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
+        mocker.patch("scripts.backfill_prices.SessionLocal", return_value=mock_session)
 
         # Run backfill
         await backfill_prices(days=7)
@@ -389,10 +391,7 @@ class TestBackfillPrices:
             assert price.source == "coingecko"
 
     async def test_prices_ordered_chronologically(
-        self,
-        mock_coingecko_client,
-        mock_session,
-        mocker
+        self, mock_coingecko_client, mock_session, mocker
     ):
         """Scenario: Validate timestamps are in chronological order."""
         # Mock API response with unordered timestamps
@@ -404,8 +403,11 @@ class TestBackfillPrices:
         mock_coingecko_client.fetch_historical_prices.return_value = mock_prices
 
         # Mock database
-        mocker.patch('scripts.backfill_prices.CoinGeckoClient', return_value=mock_coingecko_client)
-        mocker.patch('scripts.backfill_prices.SessionLocal', return_value=mock_session)
+        mocker.patch(
+            "scripts.backfill_prices.CoinGeckoClient",
+            return_value=mock_coingecko_client,
+        )
+        mocker.patch("scripts.backfill_prices.SessionLocal", return_value=mock_session)
 
         # Run backfill
         await backfill_prices(days=7)
@@ -413,8 +415,7 @@ class TestBackfillPrices:
         # The CoinGeckoClient should return sorted data (tested separately),
         # but we verify that transformation preserves the order
         timestamps = [
-            call_args[0][0].timestamp
-            for call_args in mock_session.add.call_args_list
+            call_args[0][0].timestamp for call_args in mock_session.add.call_args_list
         ]
 
         # Note: CoinGeckoClient.fetch_historical_prices already sorts ascending,

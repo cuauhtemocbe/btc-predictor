@@ -5,10 +5,12 @@ Models:
 - BtcPrice: Historical Bitcoin OHLCV price data
 - Model: Trained ML models with versioning
 - Prediction: Daily price predictions with evaluation metrics
+- BacktestResult: Walk-forward backtesting simulation results
 """
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import (
     JSON,
@@ -21,6 +23,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import NUMERIC
 
@@ -230,6 +233,98 @@ class Prediction(Base):
     def __repr__(self) -> str:
         return (
             f"<Prediction(id={self.id}, model_id={self.model_id}, "
+            f"predicted_for={self.predicted_for}, "
+            f"predicted_price={self.predicted_price}, "
+            f"actual_price={self.actual_price})>"
+        )
+
+
+class BacktestResult(Base):
+    """
+    Walk-forward backtesting simulation results.
+
+    Stores historical backtest predictions where each day:
+    1. Model is trained on rolling window of past data
+    2. Next day's price is predicted
+    3. Actual price is fetched
+    4. All 4 PnL strategies are calculated
+
+    Each backtest run has a unique backtest_run_id (UUID) to distinguish
+    different simulation runs.
+    """
+
+    __tablename__ = "backtest_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    backtest_run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+        comment="Unique ID for this backtest run (UUID)",
+    )
+    predicted_for: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+        comment="Date being predicted in the backtest",
+    )
+    predicted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="Timestamp when prediction was made (simulated)",
+    )
+    price_at_prediction: Mapped[Decimal] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=False,
+        comment="BTC price at prediction time (in USDT)",
+    )
+    predicted_price: Mapped[Decimal] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=False,
+        comment="Predicted BTC price (in USDT)",
+    )
+    actual_price: Mapped[Decimal] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=False,
+        comment="Actual BTC price for that day (in USDT)",
+    )
+    pnl_simple: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=True,
+        comment="PnL from simple strategy: buy if predicted up, sell if down",
+    )
+    pnl_long_short: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=True,
+        comment="PnL from long/short strategy: long if UP, short if DOWN",
+    )
+    pnl_threshold: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=True,
+        comment="PnL with threshold filter: only trade if predicted change > 1%",
+    )
+    pnl_realistic: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(15, 2),
+        nullable=True,
+        comment="PnL with trading fees (0.1%) and stop-loss (2% max loss)",
+    )
+    model_params: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Model training parameters as JSONB "
+        "(e.g., {'model_name': 'linear_v1', 'window_days': 30})",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default="NOW()",
+        comment="When this result was created",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<BacktestResult(id={self.id}, "
+            f"backtest_run_id={self.backtest_run_id}, "
             f"predicted_for={self.predicted_for}, "
             f"predicted_price={self.predicted_price}, "
             f"actual_price={self.actual_price})>"

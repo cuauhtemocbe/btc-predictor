@@ -22,7 +22,7 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 
 # Import from workers (shared Docker environment)
-sys.path.insert(0, '/app/workers')
+sys.path.insert(0, "/app/workers")
 from fetch_price.coingecko_client import CoinGeckoClient
 
 # Import from shared package
@@ -32,8 +32,7 @@ from shared.db.models import BtcPrice
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -57,20 +56,18 @@ Examples:
 
   # Fetch last year with verbose logging
   python scripts/backfill_prices.py --days=365 --verbose
-        """
+        """,
     )
 
     parser.add_argument(
-        '--days',
+        "--days",
         type=int,
         default=90,
-        help='Number of days of historical data to fetch (default: 90)'
+        help="Number of days of historical data to fetch (default: 90)",
     )
 
     parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Enable verbose (DEBUG) logging'
+        "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
     return parser.parse_args()
@@ -96,14 +93,12 @@ def transform_price_to_ohlcv(timestamp: datetime, price: float) -> BtcPrice:
         low=price,
         close=price,
         volume=0.0,  # CoinGecko market_chart doesn't provide volume
-        source="coingecko"
+        source="coingecko",
     )
 
 
 async def insert_prices_batch(
-    session,
-    prices: list[BtcPrice],
-    batch_size: int = 100
+    session, prices: list[BtcPrice], batch_size: int = 100
 ) -> tuple[int, int]:
     """Insert prices in batches and handle duplicates.
 
@@ -120,13 +115,13 @@ async def insert_prices_batch(
     total = len(prices)
 
     for i in range(0, total, batch_size):
-        batch = prices[i:i + batch_size]
+        batch = prices[i : i + batch_size]
         batch_num = i // batch_size + 1
         total_batches = (total + batch_size - 1) // batch_size
 
         logger.info(
             f"Processing batch {batch_num}/{total_batches} "
-            f"({i}/{total} records, {i*100//total}%)"
+            f"({i}/{total} records, {i * 100 // total}%)"
         )
 
         for price in batch:
@@ -174,10 +169,7 @@ async def backfill_prices(days: int) -> None:
         # Fetch historical prices from CoinGecko
         logger.info(f"Fetching {days} days of data from CoinGecko API...")
         raw_prices = await client.fetch_historical_prices(
-            coin_id="bitcoin",
-            vs_currency="usd",
-            days=days,
-            max_retries=5
+            coin_id="bitcoin", vs_currency="usd", days=days, max_retries=5
         )
 
         if not raw_prices:
@@ -200,9 +192,7 @@ async def backfill_prices(days: int) -> None:
         session = SessionLocal()
         try:
             inserted, skipped = await insert_prices_batch(
-                session,
-                prices,
-                batch_size=100
+                session, prices, batch_size=100
             )
         finally:
             session.close()
