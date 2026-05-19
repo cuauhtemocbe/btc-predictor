@@ -26,7 +26,8 @@ class PredictionHistoryResponse(BaseModel):
         "direction_correct": true,
         "pnl_simulated": 800.0,
         "model_name": "linear_v1",
-        "model_version": "1.0.0"
+        "model_version": "1.0.0",
+        "timeframe": "1d"
     }
     ```
     """
@@ -47,6 +48,7 @@ class PredictionHistoryResponse(BaseModel):
     pnl_simulated: float = Field(description="Simulated profit/loss")
     model_name: str = Field(description="Name of the model used")
     model_version: str = Field(description="Version of the model used")
+    timeframe: str = Field(description="Prediction timeframe ('1h', '1d', '1w')")
 
     model_config = ConfigDict(from_attributes=True)
 

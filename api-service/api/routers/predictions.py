@@ -33,6 +33,11 @@ async def get_prediction_history(
         description="End date filter (inclusive)",
         alias="to",
     ),
+    timeframe: str | None = Query(
+        default=None,
+        description="Timeframe filter: '1h', '1d', or '1w'",
+        pattern="^(1h|1d|1w)$",
+    ),
     db: Session = Depends(get_db),
 ) -> list[PredictionHistoryResponse]:
     """
@@ -44,6 +49,7 @@ async def get_prediction_history(
     Args:
         from_date: Optional start date filter (query param: ?from=2026-05-01)
         to_date: Optional end date filter (query param: ?to=2026-05-15)
+        timeframe: Optional timeframe filter (query param: ?timeframe=1w)
         db: Database session (injected)
 
     Returns:
@@ -53,11 +59,14 @@ async def get_prediction_history(
         - GET /api/predictions/history
         - GET /api/predictions/history?from=2026-05-01
         - GET /api/predictions/history?from=2026-05-01&to=2026-05-15
+        - GET /api/predictions/history?timeframe=1w
+        - GET /api/predictions/history?timeframe=1d&from=2026-05-01
     """
     predictions = get_evaluated_predictions(
         session=db,
         from_date=from_date,
         to_date=to_date,
+        timeframe=timeframe,
     )
 
     # Convert to response models with model info
@@ -75,6 +84,7 @@ async def get_prediction_history(
             pnl_simulated=float(p.pnl_simulated),
             model_name=p.model.name,
             model_version=p.model.version,
+            timeframe=p.timeframe,
         )
         for p in predictions
     ]

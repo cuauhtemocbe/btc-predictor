@@ -17,6 +17,7 @@ def get_evaluated_predictions(
     session: Session,
     from_date: date | None = None,
     to_date: date | None = None,
+    timeframe: str | None = None,
 ) -> list[Prediction]:
     """
     Query all evaluated predictions (actual_price IS NOT NULL) with model info.
@@ -25,6 +26,7 @@ def get_evaluated_predictions(
         session: SQLAlchemy database session
         from_date: Optional start date filter (inclusive)
         to_date: Optional end date filter (inclusive)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w')
 
     Returns:
         List of Prediction objects with model relationship loaded,
@@ -46,6 +48,8 @@ def get_evaluated_predictions(
         query = query.where(Prediction.predicted_for >= from_date)
     if to_date:
         query = query.where(Prediction.predicted_for <= to_date)
+    if timeframe:
+        query = query.where(Prediction.timeframe == timeframe)
 
     # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())
