@@ -40,3 +40,7 @@ CLAUDE.md
 # Docker-created directories (root-owned, empty)
 /api/
 /jobs/
+
+# Cosmic Ray mutation testing
+*.sqlite
+mutation_output.txt
