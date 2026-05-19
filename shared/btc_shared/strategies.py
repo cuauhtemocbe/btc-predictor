@@ -29,8 +29,9 @@ def calculate_strategy_metrics(
         - trade_count: Number of trades
     """
     # Extract PnL values for this strategy (only evaluated predictions)
+    # Convert Decimal to float to avoid type issues with numpy operations
     pnl_values = [
-        getattr(pred, strategy_key)
+        float(getattr(pred, strategy_key))
         for pred in predictions
         if pred.actual_price is not None and getattr(pred, strategy_key) is not None
     ]
@@ -48,13 +49,13 @@ def calculate_strategy_metrics(
         }
 
     # Calculate basic metrics
-    total_pnl = float(sum(pnl_values))
+    total_pnl = sum(pnl_values)
     wins = [p for p in pnl_values if p > 0]
     losses = [p for p in pnl_values if p < 0]
     trade_count = len(pnl_values)
 
     win_rate = len(wins) / trade_count if trade_count > 0 else 0.0
-    max_drawdown = float(min(pnl_values)) if pnl_values else 0.0
+    max_drawdown = min(pnl_values) if pnl_values else 0.0
     avg_win = float(np.mean(wins)) if wins else 0.0
     avg_loss = float(np.mean(losses)) if losses else 0.0
 
@@ -105,7 +106,7 @@ def calculate_cumulative_pnl(
 
     for pred in evaluated_preds:
         pnl = getattr(pred, strategy_key)
-        cumulative += pnl
+        cumulative += float(pnl)
         result.append(
             {
                 "date": pred.predicted_for.isoformat(),
