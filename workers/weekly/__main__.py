@@ -12,7 +12,7 @@ Railway cron: 0 7 * * 1 (Mondays at 7am UTC)
 import logging
 import sys
 
-from workers.weekly import predictor
+from workers.weekly import evaluator, predictor
 
 # Configure logging
 logging.basicConfig(
@@ -26,7 +26,7 @@ def main() -> int:
     """
     Main entry point for the weekly job.
 
-    Runs predictor only (evaluator will be added in Task #3).
+    Runs evaluator → predictor in sequence.
 
     Returns:
         Exit code (0 = success, non-zero = failure)
@@ -35,8 +35,16 @@ def main() -> int:
     logger.info("Starting weekly job orchestration")
     logger.info("=" * 60)
 
-    # Generate prediction for 7 days ahead
-    logger.info("Running weekly predictor")
+    # Step 1: Evaluate prediction from 7 days ago
+    logger.info("Step 1: Running weekly evaluator")
+    evaluator_exit = evaluator.main()
+
+    if evaluator_exit != 0:
+        logger.error(f"Evaluator failed with exit code {evaluator_exit}")
+        logger.info("Continuing to predictor despite evaluator failure")
+
+    # Step 2: Generate prediction for 7 days ahead
+    logger.info("Step 2: Running weekly predictor")
     predictor_exit = predictor.main()
 
     if predictor_exit != 0:
