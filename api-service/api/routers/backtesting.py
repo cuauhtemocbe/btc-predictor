@@ -295,9 +295,9 @@ async def get_backtesting_dashboard(
         metrics_data = None
 
     return templates.TemplateResponse(
-        "backtesting.html",
-        {
-            "request": request,
+        request=request,
+        name="backtesting.html",
+        context={
             "has_data": has_data,
             "error_message": error_message,
             "metrics": metrics_data.model_dump() if metrics_data else None,
