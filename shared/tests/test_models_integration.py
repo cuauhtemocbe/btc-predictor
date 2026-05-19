@@ -316,3 +316,36 @@ def test_check_constraint_violation(db_session, sample_model_artifact):
         db_session.commit()
 
     assert "valid_training_period" in str(exc_info.value)
+
+
+def test_trained_at_not_null_constraint(db_session, sample_model_artifact):
+    """
+    MUTATION TEST: Verify trained_at is NOT NULL.
+
+    This test kills mutant:
+    - nullable=False → nullable=True in trained_at field
+
+    Strategy:
+    - Try to create a Model with trained_at=None
+    - Verify IntegrityError is raised (NOT NULL constraint violation)
+    """
+    model = Model(
+        name="null_test",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=None,  # INVALID - should be NOT NULL
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    db_session.add(model)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        db_session.commit()
+
+    # Verify it's a NOT NULL constraint violation
+    error_msg = str(exc_info.value).lower()
+    assert "null" in error_msg or "not null" in error_msg
+    assert "trained_at" in error_msg

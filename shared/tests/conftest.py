@@ -8,6 +8,7 @@ from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from alembic import command
 from alembic.config import Config
 
@@ -83,6 +84,41 @@ def db_session(db_engine, apply_migrations):
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture(scope="function")
+async def async_db_session(db_engine, apply_migrations):
+    """
+    Create an async database session with automatic rollback after test.
+    This ensures test isolation - changes are not persisted.
+    Depends on apply_migrations to ensure table exists.
+    """
+    # Convert sync database URL to async
+    async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
+    async_engine = create_async_engine(async_url, echo=False)
+
+    async with async_engine.begin() as connection:
+        # Create async session bound to transaction
+        AsyncSessionLocal = async_sessionmaker(
+            bind=connection,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+
+        session = AsyncSessionLocal()
+
+        # Override commit to do nothing (let fixture handle rollback)
+        async def _do_not_commit(*args, **kwargs):
+            pass
+
+        session.commit = _do_not_commit
+
+        yield session
+
+        await session.close()
+        # Rollback happens automatically when exiting connection context
+
+    await async_engine.dispose()
 
 
 @pytest.fixture(scope="session")
