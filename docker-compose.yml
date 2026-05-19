@@ -27,6 +27,7 @@ services:
       - ./workers:/app/workers
       - ./poetry.lock:/app/poetry.lock
       - ./pyproject.toml:/app/pyproject.toml
+      - ./cosmic-ray.toml:/app/cosmic-ray.toml
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor

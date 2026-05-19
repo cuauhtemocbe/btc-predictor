@@ -1,0 +1,11 @@
+[cosmic-ray]
+module-path = "shared/shared"
+timeout = 30.0
+excluded-modules = []
+test-command = "pytest shared/tests/"
+
+[cosmic-ray.execution-engine]
+name = "local"
+
+[cosmic-ray.distributor]
+name = "local"
