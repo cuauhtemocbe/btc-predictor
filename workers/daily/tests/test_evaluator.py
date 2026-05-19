@@ -16,9 +16,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
+from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily import evaluator
 
 # ============================================================================
@@ -268,7 +268,7 @@ class TestUpdatePrediction:
     def test_update_prediction_success(
         self, db_session: Session, sample_unevaluated_prediction_for_today: Prediction
     ) -> None:
-        """Should update all evaluation fields."""
+        """Should update all evaluation fields including new PnL strategies."""
         prediction = sample_unevaluated_prediction_for_today
         actual_price = Decimal("67500.00")
         metrics = {
@@ -276,6 +276,9 @@ class TestUpdatePrediction:
             "error_pct": Decimal("0.74"),
             "direction_correct": True,
             "pnl_simulated": Decimal("1500.00"),
+            "pnl_long_short": Decimal("1500.00"),
+            "pnl_threshold": Decimal("1500.00"),
+            "pnl_realistic": Decimal("1368.00"),
         }
 
         evaluator.update_prediction(db_session, prediction, actual_price, metrics)
@@ -289,6 +292,9 @@ class TestUpdatePrediction:
         assert prediction.error_pct == Decimal("0.74")
         assert prediction.direction_correct is True
         assert prediction.pnl_simulated == Decimal("1500.00")
+        assert prediction.pnl_long_short == Decimal("1500.00")
+        assert prediction.pnl_threshold == Decimal("1500.00")
+        assert prediction.pnl_realistic == Decimal("1368.00")
 
 
 # ============================================================================
@@ -332,6 +338,7 @@ class TestEvaluatorMain:
 
         # Re-fetch prediction to verify it was updated
         from sqlalchemy import select
+
         from shared.db.models import Prediction
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)
@@ -403,6 +410,7 @@ class TestEvaluatorMain:
 
         # Re-fetch prediction to verify it was NOT updated
         from sqlalchemy import select
+
         from shared.db.models import Prediction
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)

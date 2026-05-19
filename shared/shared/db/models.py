@@ -184,7 +184,7 @@ class Prediction(Base):
     )
     evaluated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
+        nullable=True,
         comment="Timestamp when evaluation was performed",
     )
     error_abs: Mapped[Decimal | None] = mapped_column(
@@ -204,9 +204,24 @@ class Prediction(Base):
         comment="True if predicted direction (up/down) was correct",
     )
     pnl_simulated: Mapped[Decimal | None] = mapped_column(
-        NUMERIC( 11, 2),
+        NUMERIC(11, 2),
         nullable=True,
         comment="Simulated profit/loss from trading strategy (in USDT)",
+    )
+    pnl_long_short: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(11, 2),
+        nullable=True,
+        comment="PnL from long/short symmetric strategy: long if UP, short if DOWN",
+    )
+    pnl_threshold: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(11, 2),
+        nullable=True,
+        comment="PnL with threshold filter: only trade if predicted change > 1%",
+    )
+    pnl_realistic: Mapped[Decimal | None] = mapped_column(
+        NUMERIC(11, 2),
+        nullable=True,
+        comment="PnL with trading fees (0.1%) and stop-loss (2% max loss)",
     )
 
     # Relationship to Model

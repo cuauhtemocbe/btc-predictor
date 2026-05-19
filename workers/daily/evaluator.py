@@ -21,7 +21,12 @@ from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Prediction
-from shared.utils import calculate_pnl
+from shared.utils import (
+    calculate_pnl,
+    calculate_pnl_long_short,
+    calculate_pnl_realistic,
+    calculate_pnl_threshold,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -152,6 +157,9 @@ def calculate_metrics(
     - error_pct: Percentage error = (error_abs / actual_price) * 100
     - direction_correct: Whether predicted direction matches actual
     - pnl_simulated: Simulated profit/loss from trading strategy
+    - pnl_long_short: PnL from long/short symmetric strategy
+    - pnl_threshold: PnL with threshold filter (only trade if change > 1%)
+    - pnl_realistic: PnL with trading fees and stop-loss
 
     Args:
         prediction: Prediction record to evaluate
@@ -179,8 +187,26 @@ def calculate_metrics(
         actual_price,
     )
 
-    # Simulated PnL
+    # Calculate all 4 PnL strategies
     pnl_simulated = calculate_pnl(
+        prediction.predicted_price,
+        prediction.price_at_prediction,
+        actual_price,
+    )
+
+    pnl_long_short = calculate_pnl_long_short(
+        prediction.predicted_price,
+        prediction.price_at_prediction,
+        actual_price,
+    )
+
+    pnl_threshold = calculate_pnl_threshold(
+        prediction.predicted_price,
+        prediction.price_at_prediction,
+        actual_price,
+    )
+
+    pnl_realistic = calculate_pnl_realistic(
         prediction.predicted_price,
         prediction.price_at_prediction,
         actual_price,
@@ -190,7 +216,10 @@ def calculate_metrics(
         f"Calculated metrics: error_abs=${error_abs:.2f}, "
         f"error_pct={error_pct:.2f}%, "
         f"direction_correct={direction_correct}, "
-        f"pnl_simulated=${pnl_simulated:.2f}"
+        f"pnl_simulated=${pnl_simulated:.2f}, "
+        f"pnl_long_short=${pnl_long_short:.2f}, "
+        f"pnl_threshold=${pnl_threshold:.2f}, "
+        f"pnl_realistic=${pnl_realistic:.2f}"
     )
 
     return {
@@ -198,6 +227,9 @@ def calculate_metrics(
         "error_pct": error_pct,
         "direction_correct": direction_correct,
         "pnl_simulated": pnl_simulated,
+        "pnl_long_short": pnl_long_short,
+        "pnl_threshold": pnl_threshold,
+        "pnl_realistic": pnl_realistic,
     }
 
 
@@ -225,6 +257,9 @@ def update_prediction(
     prediction.error_pct = metrics["error_pct"]
     prediction.direction_correct = metrics["direction_correct"]
     prediction.pnl_simulated = metrics["pnl_simulated"]
+    prediction.pnl_long_short = metrics["pnl_long_short"]
+    prediction.pnl_threshold = metrics["pnl_threshold"]
+    prediction.pnl_realistic = metrics["pnl_realistic"]
 
     session.commit()
 
