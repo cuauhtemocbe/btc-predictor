@@ -76,3 +76,75 @@ class PnlResponse(BaseModel):
     evaluated_predictions: int = Field(
         description="Number of predictions that have been evaluated"
     )
+
+
+class CumulativePnlPoint(BaseModel):
+    """Single point in cumulative PnL time series."""
+
+    date: str = Field(description="Prediction date (ISO format)")
+    cumulative_pnl: float = Field(description="Cumulative PnL up to this date")
+
+
+class StrategyMetrics(BaseModel):
+    """
+    Performance metrics for a single PnL strategy.
+
+    Example JSON:
+    ```json
+    {
+        "name": "long_short",
+        "display_name": "Long Short",
+        "color": "green",
+        "total_pnl": 2800.50,
+        "win_rate": 0.6300,
+        "max_drawdown": -450.00,
+        "avg_win": 220.30,
+        "avg_loss": -180.50,
+        "sharpe_ratio": 1.25,
+        "trade_count": 30,
+        "cumulative_pnl": [...]
+    }
+    ```
+    """
+
+    name: str = Field(description="Strategy identifier (e.g., 'long_short')")
+    display_name: str = Field(description="Human-readable strategy name")
+    color: str = Field(description="Chart color for this strategy")
+    total_pnl: float = Field(description="Total accumulated PnL")
+    win_rate: float = Field(description="Percentage of winning trades (0-1)")
+    max_drawdown: float = Field(description="Worst single loss")
+    avg_win: float = Field(description="Average profit of winning trades")
+    avg_loss: float = Field(description="Average loss of losing trades")
+    sharpe_ratio: float = Field(description="Risk-adjusted return metric")
+    trade_count: int = Field(description="Number of trades executed")
+    cumulative_pnl: list[CumulativePnlPoint] = Field(
+        description="Time series of cumulative PnL"
+    )
+
+
+class StrategiesResponse(BaseModel):
+    """
+    Collection of metrics for all trading strategies.
+
+    Used by GET /api/predictions/strategies endpoint.
+
+    Example JSON:
+    ```json
+    {
+        "strategies": [
+            {
+                "name": "simple",
+                "display_name": "Simple",
+                "color": "blue",
+                "total_pnl": 1200.50,
+                ...
+            },
+            ...
+        ]
+    }
+    ```
+    """
+
+    strategies: list[StrategyMetrics] = Field(
+        description="List of strategy performance metrics"
+    )

@@ -6,7 +6,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from api.models.predictions import PnlResponse, PredictionHistoryResponse
+from api.models.predictions import (
+    PnlResponse,
+    PredictionHistoryResponse,
+    StrategiesResponse,
+    StrategyMetrics,
+    CumulativePnlPoint,
+)
+from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 from shared.db.models import Prediction
@@ -112,3 +119,69 @@ async def get_total_pnl(
         total_pnl=total_pnl,
         evaluated_predictions=evaluated_predictions,
     )
+
+
+@router.get("/strategies", response_model=StrategiesResponse)
+async def get_strategies_comparison(
+    db: Session = Depends(get_db),
+) -> StrategiesResponse:
+    """
+    Get performance metrics for all trading strategies.
+
+    Returns aggregate metrics (Total PnL, Win Rate, Sharpe Ratio, etc.) and
+    cumulative PnL time series for all 4 strategies: Simple, Long/Short,
+    Threshold, and Realistic.
+
+    Args:
+        db: Database session (injected)
+
+    Returns:
+        Collection of strategy metrics with cumulative PnL time series.
+        If no predictions have been evaluated yet, returns all strategies
+        with zero metrics.
+
+    Examples:
+        - GET /api/predictions/strategies
+          Response: {
+              "strategies": [
+                  {
+                      "name": "simple",
+                      "display_name": "Simple",
+                      "color": "blue",
+                      "total_pnl": 1200.50,
+                      "win_rate": 0.63,
+                      "max_drawdown": -450.00,
+                      "avg_win": 220.30,
+                      "avg_loss": -180.50,
+                      "sharpe_ratio": 1.25,
+                      "trade_count": 30,
+                      "cumulative_pnl": [...]
+                  },
+                  ...
+              ]
+          }
+    """
+    strategies_data = get_all_strategies_metrics(db)
+
+    # Convert to Pydantic models
+    strategies = [
+        StrategyMetrics(
+            name=s["name"],
+            display_name=s["display_name"],
+            color=s["color"],
+            total_pnl=s["total_pnl"],
+            win_rate=s["win_rate"],
+            max_drawdown=s["max_drawdown"],
+            avg_win=s["avg_win"],
+            avg_loss=s["avg_loss"],
+            sharpe_ratio=s["sharpe_ratio"],
+            trade_count=s["trade_count"],
+            cumulative_pnl=[
+                CumulativePnlPoint(date=point["date"], cumulative_pnl=point["cumulative_pnl"])
+                for point in s["cumulative_pnl"]
+            ],
+        )
+        for s in strategies_data
+    ]
+
+    return StrategiesResponse(strategies=strategies)

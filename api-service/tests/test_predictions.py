@@ -456,3 +456,248 @@ async def test_get_total_pnl_with_losses(
 
     assert data["evaluated_predictions"] == expected_count
     assert abs(data["total_pnl"] - expected_pnl) < 0.01
+
+
+# ============================================================================
+# Tests for GET /api/predictions/strategies endpoint (US-018)
+# ============================================================================
+
+
+@pytest.fixture
+def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
+    """Create sample predictions with all 4 PnL strategy values."""
+    predictions = [
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2026, 5, 1),
+            predicted_price=Decimal("50000"),
+            actual_price=Decimal("51000"),
+            pnl_simulated=Decimal("100"),
+            pnl_long_short=Decimal("100"),
+            pnl_threshold=Decimal("100"),
+            pnl_realistic=Decimal("95"),
+        ),
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2026, 5, 2),
+            predicted_price=Decimal("51000"),
+            actual_price=Decimal("50500"),
+            pnl_simulated=Decimal("-50"),
+            pnl_long_short=Decimal("-50"),
+            pnl_threshold=Decimal("0"),  # Below threshold
+            pnl_realistic=Decimal("-52.5"),
+        ),
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2026, 5, 3),
+            predicted_price=Decimal("50500"),
+            actual_price=Decimal("52000"),
+            pnl_simulated=Decimal("200"),
+            pnl_long_short=Decimal("200"),
+            pnl_threshold=Decimal("200"),
+            pnl_realistic=Decimal("190"),
+        ),
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2026, 5, 4),
+            predicted_price=Decimal("52000"),
+            actual_price=Decimal("51700"),
+            pnl_simulated=Decimal("-30"),
+            pnl_long_short=Decimal("-30"),
+            pnl_threshold=Decimal("0"),  # Below threshold
+            pnl_realistic=Decimal("-31.5"),
+        ),
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2026, 5, 5),
+            predicted_price=Decimal("51700"),
+            actual_price=Decimal("53000"),
+            pnl_simulated=Decimal("150"),
+            pnl_long_short=Decimal("150"),
+            pnl_threshold=Decimal("150"),
+            pnl_realistic=Decimal("142.5"),
+        ),
+    ]
+    db_session.add_all(predictions)
+    db_session.commit()
+    for pred in predictions:
+        db_session.refresh(pred)
+    return predictions
+
+
+# Gherkin Scenario 1: API endpoint returns strategy metrics as JSON
+@pytest.mark.asyncio
+async def test_get_strategies_endpoint(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_pnl,
+):
+    """
+    Given the predictions table has 5 evaluated predictions with PnL values
+    When I send GET /api/predictions/strategies
+    Then the response status is 200 OK
+    And the response has structure {"strategies": [...]}
+    And each strategy has keys: name, display_name, color, total_pnl, win_rate,
+                                max_drawdown, avg_win, avg_loss, sharpe_ratio,
+                                trade_count, cumulative_pnl
+    """
+    # Act
+    response = await client.get("/api/predictions/strategies")
+
+    # Assert
+    assert response.status_code == 200
+    data = response.json()
+
+    # Verify top-level structure
+    assert "strategies" in data
+    assert isinstance(data["strategies"], list)
+    assert len(data["strategies"]) == 4  # 4 strategies
+
+    # Verify each strategy has required fields
+    for strategy in data["strategies"]:
+        assert "name" in strategy
+        assert "display_name" in strategy
+        assert "color" in strategy
+        assert "total_pnl" in strategy
+        assert "win_rate" in strategy
+        assert "max_drawdown" in strategy
+        assert "avg_win" in strategy
+        assert "avg_loss" in strategy
+        assert "sharpe_ratio" in strategy
+        assert "trade_count" in strategy
+        assert "cumulative_pnl" in strategy
+        assert isinstance(strategy["cumulative_pnl"], list)
+
+
+# Gherkin Scenario 2: Calculate aggregate metrics for each strategy
+@pytest.mark.asyncio
+async def test_strategies_metrics_calculation(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_pnl,
+):
+    """
+    Given predictions with pnl_long_short values: [100, -50, 200, -30, 150]
+    When the backend calculates metrics for "Long/Short" strategy
+    Then Total PnL = 370
+    And Win Rate = 60% (3 wins out of 5 trades)
+    And Max Drawdown = -50 (worst single loss)
+    And Avg Win = 150 (mean of 100, 200, 150)
+    And Avg Loss = -40 (mean of -50, -30)
+    """
+    # Act
+    response = await client.get("/api/predictions/strategies")
+    data = response.json()
+
+    # Find Long/Short strategy
+    long_short = next(
+        s for s in data["strategies"] if s["name"] == "long_short"
+    )
+
+    # Assert metrics
+    assert long_short["total_pnl"] == 370.0
+    assert long_short["win_rate"] == 0.6  # 60%
+    assert long_short["max_drawdown"] == -50.0
+    assert long_short["avg_win"] == 150.0  # (100 + 200 + 150) / 3
+    assert long_short["avg_loss"] == -40.0  # (-50 + -30) / 2
+    assert long_short["trade_count"] == 5
+    assert long_short["sharpe_ratio"] != 0.0
+
+
+# Gherkin Scenario 3: Cumulative PnL time series
+@pytest.mark.asyncio
+async def test_cumulative_pnl_chart_data(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_pnl,
+):
+    """
+    When I fetch strategies endpoint
+    Then cumulative_pnl is a list of objects with date and cumulative_pnl
+    And values accumulate over time
+    """
+    # Act
+    response = await client.get("/api/predictions/strategies")
+    data = response.json()
+
+    # Find Simple strategy
+    simple = next(s for s in data["strategies"] if s["name"] == "simple")
+    cumulative = simple["cumulative_pnl"]
+
+    # Assert structure
+    assert len(cumulative) == 5
+    assert all("date" in point for point in cumulative)
+    assert all("cumulative_pnl" in point for point in cumulative)
+
+    # Assert accumulation (Simple: 100, -50, 200, -30, 150)
+    assert cumulative[0]["cumulative_pnl"] == 100.0
+    assert cumulative[1]["cumulative_pnl"] == 50.0  # 100 - 50
+    assert cumulative[2]["cumulative_pnl"] == 250.0  # 50 + 200
+    assert cumulative[3]["cumulative_pnl"] == 220.0  # 250 - 30
+    assert cumulative[4]["cumulative_pnl"] == 370.0  # 220 + 150
+
+
+# Gherkin Scenario 4: Handle strategies with zero trades (threshold with no signals)
+@pytest.mark.asyncio
+async def test_strategies_with_zero_trades(
+    client: AsyncClient,
+    db_session: Session,
+):
+    """
+    Given there are no evaluated predictions
+    When I fetch strategies endpoint
+    Then all strategies return zero metrics
+    And trade_count = 0
+    """
+    # Act (no predictions in database)
+    response = await client.get("/api/predictions/strategies")
+    data = response.json()
+
+    # Assert
+    assert len(data["strategies"]) == 4
+    for strategy in data["strategies"]:
+        assert strategy["total_pnl"] == 0.0
+        assert strategy["win_rate"] == 0.0
+        assert strategy["max_drawdown"] == 0.0
+        assert strategy["avg_win"] == 0.0
+        assert strategy["avg_loss"] == 0.0
+        assert strategy["sharpe_ratio"] == 0.0
+        assert strategy["trade_count"] == 0
+        assert len(strategy["cumulative_pnl"]) == 0
+
+
+# Gherkin Scenario 5: Verify all 4 strategies are returned
+@pytest.mark.asyncio
+async def test_all_four_strategies_returned(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_pnl,
+):
+    """
+    When I fetch strategies endpoint
+    Then I receive 4 strategies: Simple, Long/Short, Threshold, Realistic
+    With correct color coding
+    """
+    # Act
+    response = await client.get("/api/predictions/strategies")
+    data = response.json()
+
+    strategies = {s["name"]: s for s in data["strategies"]}
+
+    # Assert all 4 strategies present
+    assert "simple" in strategies
+    assert "long_short" in strategies
+    assert "threshold" in strategies
+    assert "realistic" in strategies
+
+    # Assert color coding
+    assert strategies["simple"]["color"] == "blue"
+    assert strategies["long_short"]["color"] == "green"
+    assert strategies["threshold"]["color"] == "orange"
+    assert strategies["realistic"]["color"] == "purple"
+
+    # Assert display names
+    assert strategies["simple"]["display_name"] == "Simple"
+    assert strategies["long_short"]["display_name"] == "Long Short"
+    assert strategies["threshold"]["display_name"] == "Threshold"
+    assert strategies["realistic"]["display_name"] == "Realistic"

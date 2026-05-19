@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BTC Predictor - Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -225,6 +226,71 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Strategy Comparison Styles */
+        .section-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1f2937;
+            margin: 48px 0 24px 0;
+            padding-bottom: 12px;
+            border-bottom: 3px solid #f59e0b;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 32px 0;
+            background: #f9fafb;
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .best-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+        }
+
+        .strategy-table {
+            background: white;
+        }
+
+        .best-strategy-row {
+            background-color: #d1fae5 !important;
+            font-weight: 600;
+        }
+
+        .best-strategy-row:hover {
+            background-color: #a7f3d0 !important;
+        }
+
+        .positive-pnl {
+            color: #059669;
+            font-weight: 600;
+        }
+
+        .negative-pnl {
+            color: #dc2626;
+            font-weight: 600;
+        }
+
+        .strategy-color-indicator {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -287,6 +353,128 @@
                         {% endfor %}
                     </tbody>
                 </table>
+
+                <!-- Strategy Comparison Section -->
+                {% if strategies and strategies|length > 0 and strategies[0].trade_count > 0 %}
+                <h2 class="section-title">📊 Trading Strategies Comparison</h2>
+
+                <table class="strategy-table">
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Total PnL</th>
+                            <th>Win Rate</th>
+                            <th>Max Drawdown</th>
+                            <th>Avg Win</th>
+                            <th>Avg Loss</th>
+                            <th>Sharpe Ratio</th>
+                            <th>Trades</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set best_strategy = strategies|sort(attribute='total_pnl', reverse=True)|first %}
+                        {% for strategy in strategies %}
+                        <tr class="{{ 'best-strategy-row' if strategy.name == best_strategy.name else '' }}">
+                            <td>
+                                <span class="strategy-color-indicator" style="background-color: {{ strategy.color }};"></span>
+                                {{ strategy.display_name }}
+                                {% if strategy.name == best_strategy.name %}
+                                <span class="best-badge">Best Return</span>
+                                {% endif %}
+                            </td>
+                            <td class="{{ 'positive-pnl' if strategy.total_pnl >= 0 else 'negative-pnl' }}">
+                                ${{ "%.2f"|format(strategy.total_pnl) }}
+                            </td>
+                            <td>{{ "%.1f"|format(strategy.win_rate * 100) }}%</td>
+                            <td class="negative-pnl">${{ "%.2f"|format(strategy.max_drawdown) }}</td>
+                            <td class="positive-pnl">${{ "%.2f"|format(strategy.avg_win) }}</td>
+                            <td class="negative-pnl">${{ "%.2f"|format(strategy.avg_loss) }}</td>
+                            <td>{{ "%.2f"|format(strategy.sharpe_ratio) }}</td>
+                            <td>{{ strategy.trade_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <div class="chart-container">
+                    <canvas id="cumulativePnlChart"></canvas>
+                </div>
+
+                <script>
+                    const strategies = {{ strategies|tojson }};
+                    const ctx = document.getElementById('cumulativePnlChart').getContext('2d');
+
+                    // Prepare datasets for Chart.js
+                    const datasets = strategies.map(strategy => ({
+                        label: strategy.display_name,
+                        data: strategy.cumulative_pnl.map(point => ({
+                            x: point.date,
+                            y: point.cumulative_pnl
+                        })),
+                        borderColor: strategy.color,
+                        backgroundColor: strategy.color + '33', // Add transparency
+                        borderWidth: 3,
+                        tension: 0.1,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }));
+
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: { datasets },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Cumulative PnL Over Time',
+                                    font: { size: 18, weight: 'bold' },
+                                    padding: { bottom: 20 }
+                                },
+                                legend: {
+                                    display: true,
+                                    position: 'top',
+                                    labels: { font: { size: 14 }, padding: 15 }
+                                },
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    type: 'category',
+                                    title: {
+                                        display: true,
+                                        text: 'Date',
+                                        font: { size: 14, weight: 'bold' }
+                                    },
+                                    grid: { display: false }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: 'Cumulative PnL (USD)',
+                                        font: { size: 14, weight: 'bold' }
+                                    },
+                                    ticks: {
+                                        callback: function(value) {
+                                            return '$' + value.toFixed(2);
+                                        }
+                                    }
+                                }
+                            },
+                            interaction: {
+                                mode: 'nearest',
+                                axis: 'x',
+                                intersect: false
+                            }
+                        }
+                    });
+                </script>
+                {% endif %}
+
             {% else %}
                 <div class="empty-state">
                     <h2>No predictions yet</h2>

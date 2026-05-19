@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from api.routers import router
 from api.routers.predictions import router as predictions_router
 from api.routers.prices import router as prices_router
+from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 
@@ -51,10 +52,16 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         for p in predictions_data
     ]
 
+    # Fetch strategy metrics
+    strategies = get_all_strategies_metrics(db)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={"predictions": predictions}
+        context={
+            "predictions": predictions,
+            "strategies": strategies,
+        }
     )
 
 
