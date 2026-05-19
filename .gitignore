@@ -29,8 +29,8 @@ coverage.xml
 .idea/
 *.swp
 
-# Claude Code (solo configuración local, no compartida)
-.claude/settings.local.json
+# Claude Code (configuración local)
+.claude/
 .mcp.json
 
 # CodeGraph (índice local, se regenera)
