@@ -1,14 +1,15 @@
 from pathlib import Path
 
+from btc_shared.strategies import get_all_strategies_metrics
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from api.routers import router
+from api.routers.backtesting import router as backtesting_router
 from api.routers.predictions import router as predictions_router
 from api.routers.prices import router as prices_router
-from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 
@@ -16,6 +17,7 @@ app = FastAPI(title="BTC Predictor", version="0.1.0")
 app.include_router(router)
 app.include_router(prices_router)
 app.include_router(predictions_router)
+app.include_router(backtesting_router)
 
 # Configure Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
@@ -61,7 +63,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         context={
             "predictions": predictions,
             "strategies": strategies,
-        }
+        },
     )
 
 
