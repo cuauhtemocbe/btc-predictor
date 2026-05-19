@@ -72,6 +72,7 @@ def test_join_uses_exact_equality(db_session, sample_model_artifact):
     # Create predictions for each model (both evaluated)
     prediction1 = Prediction(
         model_id=model1.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 18),
         price_at_prediction=50000.00,
         predicted_price=51000.00,
@@ -85,6 +86,7 @@ def test_join_uses_exact_equality(db_session, sample_model_artifact):
 
     prediction2 = Prediction(
         model_id=model2.id,  # Different model
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 19),
         price_at_prediction=51000.00,
         predicted_price=52000.00,
@@ -151,6 +153,7 @@ def test_to_date_filter_uses_less_than_or_equal(
     # Create 3 predictions with different dates
     pred_early = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 1),  # Before to_date
         price_at_prediction=50000.00,
         predicted_price=51000.00,
@@ -164,6 +167,7 @@ def test_to_date_filter_uses_less_than_or_equal(
 
     pred_exact = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 5),  # Exactly to_date
         price_at_prediction=51000.00,
         predicted_price=52000.00,
@@ -177,6 +181,7 @@ def test_to_date_filter_uses_less_than_or_equal(
 
     pred_late = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 10),  # After to_date
         price_at_prediction=52000.00,
         predicted_price=53000.00,
@@ -235,6 +240,7 @@ def test_from_date_filter_uses_greater_than_or_equal(
     # Create 3 predictions with different dates
     pred_early = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 1),
         price_at_prediction=50000.00,
         predicted_price=51000.00,
@@ -248,6 +254,7 @@ def test_from_date_filter_uses_greater_than_or_equal(
 
     pred_exact = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 5),
         price_at_prediction=51000.00,
         predicted_price=52000.00,
@@ -261,6 +268,7 @@ def test_from_date_filter_uses_greater_than_or_equal(
 
     pred_late = Prediction(
         model_id=model.id,
+        predicted_at=datetime.now(UTC),
         predicted_for=date(2026, 5, 10),
         price_at_prediction=52000.00,
         predicted_price=53000.00,
@@ -321,6 +329,7 @@ def test_date_range_filter_both_boundaries(
         pred = Prediction(
             model_id=model.id,
             predicted_for=d,
+            predicted_at=datetime.now(UTC),
             price_at_prediction=50000.00,
             predicted_price=51000.00,
             actual_price=50500.00,

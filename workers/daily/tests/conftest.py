@@ -110,24 +110,32 @@ def db_session() -> Session:
     """
     Create a test database session with automatic cleanup.
 
-    Uses in-memory SQLite database for fast, isolated tests.
+    Uses PostgreSQL database (same as production) for real tests.
     All changes are rolled back after each test.
     """
-    # Create in-memory SQLite database
-    engine = create_engine("sqlite:///:memory:")
+    from shared.config import settings
 
-    # Create all tables
+    # Use PostgreSQL (not SQLite) to support JSONB and match production
+    engine = create_engine(settings.database_url, echo=False)
+
+    # Create all tables (equivalent to running migrations)
     Base.metadata.create_all(engine)
 
-    # Create session
-    TestSessionLocal = sessionmaker(bind=engine)
+    # Create connection and transaction for rollback isolation
+    connection = engine.connect()
+    transaction = connection.begin()
+
+    # Create session bound to this connection
+    TestSessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
     session = TestSessionLocal()
 
     yield session
 
-    # Cleanup
-    session.rollback()
+    # Cleanup: rollback all changes, drop tables, close connection
     session.close()
+    transaction.rollback()
+    Base.metadata.drop_all(engine)
+    connection.close()
     engine.dispose()
 
 

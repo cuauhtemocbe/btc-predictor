@@ -30,9 +30,19 @@ async def client():
 def db_engine():
     """
     Create a function-scoped SQLAlchemy engine for tests.
+    Automatically creates all tables before tests and drops them after.
     """
+    from shared.db.models import Base
+
     engine = create_engine(settings.database_url, echo=False)
+
+    # Create all tables (equivalent to running Alembic migrations)
+    Base.metadata.create_all(engine)
+
     yield engine
+
+    # Cleanup: drop all tables after test
+    Base.metadata.drop_all(engine)
     engine.dispose()
 
 

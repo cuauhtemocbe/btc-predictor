@@ -124,24 +124,27 @@ async def async_db_session(db_engine, apply_migrations):
 @pytest.fixture(scope="session")
 def apply_migrations(db_engine_session):
     """
-    Ensures Alembic migrations are applied for integration tests.
+    Ensures database tables exist for integration tests.
 
-    NOTE: This fixture assumes migrations have been applied externally
-    via `alembic upgrade head` before running tests. It does not
-    automatically apply migrations to avoid conflicts and slowness.
+    Automatically creates all tables using Base.metadata.create_all()
+    (equivalent to running Alembic migrations).
 
-    To prepare test database:
-        docker compose exec api sh -c "cd shared && alembic upgrade head"
+    Tables are created once per test session and dropped at the end.
     """
-    # Just verify that the table exists
     from sqlalchemy import inspect
+
+    # Check if tables already exist
     inspector = inspect(db_engine_session)
-    if "btc_prices" not in inspector.get_table_names():
-        pytest.skip("btc_prices table not found. Run 'alembic upgrade head' before tests.")
+    tables_exist = "btc_prices" in inspector.get_table_names()
+
+    if not tables_exist:
+        # Create all tables (equivalent to alembic upgrade head)
+        Base.metadata.create_all(db_engine_session)
 
     yield
 
-    # No cleanup - migrations persist between test runs
+    # Cleanup: drop all tables at end of session
+    Base.metadata.drop_all(db_engine_session)
 
 
 @pytest.fixture

@@ -1,12 +1,12 @@
 """Tests for strategy metrics calculation utilities."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import Prediction
+from shared.db.models import Model, Prediction
 from btc_shared.strategies import (
     calculate_cumulative_pnl,
     calculate_strategy_metrics,
@@ -15,11 +15,33 @@ from btc_shared.strategies import (
 
 
 @pytest.fixture
-def sample_predictions(db_session: Session) -> list[Prediction]:
+def test_model(db_session: Session) -> Model:
+    """Create a test model for predictions."""
+    model = Model(
+        name="test_model",
+        version="1.0.0",
+        params={"window_days": 30},
+        artifact=b"fake_pickle_data",
+        trained_at=datetime.now(UTC),
+        train_from=date.today() - timedelta(days=30),
+        train_to=date.today(),
+        is_active=True,
+    )
+    db_session.add(model)
+    db_session.commit()
+    db_session.refresh(model)
+    return model
+
+
+@pytest.fixture
+def sample_predictions(db_session: Session, test_model: Model) -> list[Prediction]:
     """Create sample predictions with PnL values for testing."""
     predictions = [
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 1),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("51000"),
             pnl_simulated=Decimal("100"),
@@ -28,7 +50,10 @@ def sample_predictions(db_session: Session) -> list[Prediction]:
             pnl_realistic=Decimal("95"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 2),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("51000"),
             predicted_price=Decimal("51000"),
             actual_price=Decimal("50500"),
             pnl_simulated=Decimal("-50"),
@@ -37,7 +62,10 @@ def sample_predictions(db_session: Session) -> list[Prediction]:
             pnl_realistic=Decimal("-52.5"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 3),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50500"),
             predicted_price=Decimal("50500"),
             actual_price=Decimal("52000"),
             pnl_simulated=Decimal("200"),
@@ -46,7 +74,10 @@ def sample_predictions(db_session: Session) -> list[Prediction]:
             pnl_realistic=Decimal("190"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 4),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("52000"),
             predicted_price=Decimal("52000"),
             actual_price=Decimal("51700"),
             pnl_simulated=Decimal("-30"),
@@ -55,7 +86,10 @@ def sample_predictions(db_session: Session) -> list[Prediction]:
             pnl_realistic=Decimal("-31.5"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 5),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("51700"),
             predicted_price=Decimal("51700"),
             actual_price=Decimal("53000"),
             pnl_simulated=Decimal("150"),
@@ -113,11 +147,14 @@ def test_calculate_strategy_metrics_with_empty_predictions():
     assert metrics["trade_count"] == 0
 
 
-def test_calculate_strategy_metrics_with_only_unevaluated_predictions(db_session: Session):
+def test_calculate_strategy_metrics_with_only_unevaluated_predictions(db_session: Session, test_model: Model):
     """Test metrics with predictions that haven't been evaluated yet (actual_price is NULL)."""
     predictions = [
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 6),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=None,  # Not evaluated yet
             pnl_simulated=None,
@@ -136,12 +173,15 @@ def test_calculate_strategy_metrics_with_only_unevaluated_predictions(db_session
     assert metrics["trade_count"] == 0
 
 
-def test_calculate_strategy_metrics_sharpe_ratio():
+def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model):
     """Test Sharpe Ratio calculation with known daily returns."""
     # Create predictions with specific PnL pattern
     predictions = [
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, i),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("50000"),
             pnl_simulated=Decimal(str(pnl)),
@@ -175,12 +215,15 @@ def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
     assert cumulative[4]["cumulative_pnl"] == 370.0  # 220 + 150
 
 
-def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session):
+def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session, test_model: Model):
     """Test that cumulative PnL is calculated in date order."""
     # Insert predictions out of order
     predictions = [
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 3),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("51000"),
             pnl_simulated=Decimal("200"),
@@ -189,7 +232,10 @@ def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session):
             pnl_realistic=Decimal("190"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 1),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("51000"),
             pnl_simulated=Decimal("100"),
@@ -198,7 +244,10 @@ def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session):
             pnl_realistic=Decimal("95"),
         ),
         Prediction(
+            model_id=test_model.id,
             predicted_for=date(2026, 5, 2),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("50500"),
             pnl_simulated=Decimal("-50"),
@@ -223,7 +272,7 @@ def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session):
 
 def test_get_all_strategies_metrics(db_session: Session, sample_predictions: list[Prediction]):
     """Test getting metrics for all 4 strategies at once."""
-    strategies = get_all_strategies_metrics(db)
+    strategies = get_all_strategies_metrics(db_session)
 
     assert len(strategies) == 4
     assert strategies[0]["name"] == "simple"
@@ -251,7 +300,7 @@ def test_get_all_strategies_metrics(db_session: Session, sample_predictions: lis
 
 def test_get_all_strategies_metrics_with_empty_database(db_session: Session):
     """Test all strategies metrics with no predictions."""
-    strategies = get_all_strategies_metrics(db)
+    strategies = get_all_strategies_metrics(db_session)
 
     assert len(strategies) == 4
     for strategy in strategies:

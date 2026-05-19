@@ -87,8 +87,11 @@ def sample_binance_multiple_candles():
 
 @pytest.fixture
 def test_db_engine():
-    """Create in-memory SQLite engine for tests."""
-    engine = create_engine("sqlite:///:memory:")
+    """Create PostgreSQL engine for tests (matches production)."""
+    from shared.config import settings
+
+    # Use PostgreSQL (not SQLite) to match production and support JSONB
+    engine = create_engine(settings.database_url, echo=False)
     Base.metadata.create_all(engine)
     yield engine
     Base.metadata.drop_all(engine)
@@ -98,11 +101,20 @@ def test_db_engine():
 @pytest.fixture
 def test_db_session(test_db_engine):
     """Create database session for tests with automatic cleanup."""
-    test_session_local = sessionmaker(bind=test_db_engine)
+    # Create connection and transaction for rollback isolation
+    connection = test_db_engine.connect()
+    transaction = connection.begin()
+
+    # Create session bound to this connection
+    test_session_local = sessionmaker(bind=connection, expire_on_commit=False)
     session = test_session_local()
+
     yield session
-    session.rollback()
+
+    # Cleanup: rollback all changes
     session.close()
+    transaction.rollback()
+    connection.close()
 
 
 @pytest.fixture

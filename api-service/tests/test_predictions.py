@@ -470,6 +470,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 1),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
             actual_price=Decimal("51000"),
             pnl_simulated=Decimal("100"),
@@ -480,6 +482,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 2),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("51000"),
             predicted_price=Decimal("51000"),
             actual_price=Decimal("50500"),
             pnl_simulated=Decimal("-50"),
@@ -490,6 +494,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 3),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("50500"),
             predicted_price=Decimal("50500"),
             actual_price=Decimal("52000"),
             pnl_simulated=Decimal("200"),
@@ -500,6 +506,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 4),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("52000"),
             predicted_price=Decimal("52000"),
             actual_price=Decimal("51700"),
             pnl_simulated=Decimal("-30"),
@@ -510,6 +518,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 5),
+            predicted_at=datetime.now(UTC),
+            price_at_prediction=Decimal("51700"),
             predicted_price=Decimal("51700"),
             actual_price=Decimal("53000"),
             pnl_simulated=Decimal("150"),
