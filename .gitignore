@@ -31,6 +31,7 @@ coverage.xml
 
 # Claude Code (solo configuración local, no compartida)
 .claude/settings.local.json
+.mcp.json
 
 # CodeGraph (índice local, se regenera)
 .codegraph/
