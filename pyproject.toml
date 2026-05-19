@@ -27,10 +27,11 @@ httpx = "^0.28.0"
 pytest-asyncio = "^0.25.0"
 pytest-cov = "^6.0.0"
 ruff = "^0.9.0"
+cosmic-ray = "^8.3"
+asyncpg = "^0.30.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["shared/tests", "api/tests", "workers"]
 
 [tool.ruff]
 line-length = 88
@@ -38,6 +39,15 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.cosmic-ray]
+module-path = "."
+timeout = 30.0
+excluded-modules = []
+test-command = "pytest shared/tests/ api-service/tests/ workers/fetch_price/tests/ workers/daily/tests/"
+
+[tool.cosmic-ray.distributor]
+name = "local"
 
 [build-system]
 requires = ["poetry-core"]
