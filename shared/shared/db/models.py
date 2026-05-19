@@ -184,7 +184,7 @@ class Prediction(Base):
     )
     evaluated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=True,
+        nullable=False,
         comment="Timestamp when evaluation was performed",
     )
     error_abs: Mapped[Decimal | None] = mapped_column(
@@ -204,7 +204,7 @@ class Prediction(Base):
         comment="True if predicted direction (up/down) was correct",
     )
     pnl_simulated: Mapped[Decimal | None] = mapped_column(
-        NUMERIC(10, 2),
+        NUMERIC( 11, 2),
         nullable=True,
         comment="Simulated profit/loss from trading strategy (in USDT)",
     )
