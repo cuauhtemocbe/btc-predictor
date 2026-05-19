@@ -62,7 +62,11 @@ def main() -> int:
 
         # Display table header
         print("=" * 110)
-        print(f"{'ID':<5} {'Name':<20} {'Version':<10} {'Active':<8} {'Val Error':<12} {'Trained At':<25}")
+        header = (
+            f"{'ID':<5} {'Name':<20} {'Version':<10} {'Active':<8} "
+            f"{'Val Error':<12} {'Trained At':<25}"
+        )
+        print(header)
         print("=" * 110)
 
         # Display each model
@@ -94,7 +98,11 @@ def main() -> int:
             print(f"  • Trained: {active.trained_at.strftime('%Y-%m-%d %H:%M:%S')}")
         else:
             print("\n⚠ WARNING: No active model!")
-            print("Run 'python scripts/activate_model.py --model-id=X' to activate a model.")
+            msg = (
+                "Run 'python scripts/activate_model.py --model-id=X' "
+                "to activate a model."
+            )
+            print(msg)
 
         print()
 

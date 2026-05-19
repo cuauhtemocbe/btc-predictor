@@ -304,7 +304,8 @@ def train_single_model(
         model.train(X_train, y_train)
 
         # Validate model - predict on validation set
-        y_val_pred = np.array([model.predict(X_val[i : i + 1]) for i in range(len(X_val))])
+        predictions = [model.predict(X_val[i : i + 1]) for i in range(len(X_val))]
+        y_val_pred = np.array(predictions)
 
         # Calculate MAPE validation error
         validation_error = calculate_mape(y_val, y_val_pred)
@@ -413,7 +414,9 @@ def train_all_models(
     if not successful_models:
         raise ValueError("All models failed to train")
 
-    logger.info(f"Successfully trained {len(successful_models)}/{len(MODEL_CLASSES)} models")
+    num_success = len(successful_models)
+    num_total = len(MODEL_CLASSES)
+    logger.info(f"Successfully trained {num_success}/{num_total} models")
 
     # Calculate training date range
     train_to = date.today()

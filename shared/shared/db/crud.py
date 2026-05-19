@@ -111,7 +111,7 @@ def get_active_model(session: Session) -> Model | None:
         >>> if active:
         ...     print(f"Active model: {active.name} v{active.version}")
     """
-    query = select(Model).where(Model.is_active == True)
+    query = select(Model).where(Model.is_active.is_(True))
     result = session.execute(query)
     return result.scalar_one_or_none()
 
@@ -151,7 +151,7 @@ def deactivate_all_models(session: Session) -> int:
         >>> session.commit()
         >>> print(f"Deactivated {count} models")
     """
-    query = select(Model).where(Model.is_active == True)
+    query = select(Model).where(Model.is_active.is_(True))
     result = session.execute(query)
     active_models = list(result.scalars().all())
 

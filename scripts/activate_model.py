@@ -25,10 +25,9 @@ from pathlib import Path
 # Add parent directory to path to allow imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+
 from shared.db.crud import activate_model
 from shared.db.database import SessionLocal
-from sqlalchemy import select
-from shared.db.models import Model
 
 # Configure logging
 logging.basicConfig(
