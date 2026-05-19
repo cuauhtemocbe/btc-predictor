@@ -197,7 +197,7 @@ def main() -> int:
 
     try:
         # Calculate tomorrow's date
-        tomorrow = (datetime.now(UTC) + timedelta(days=1)).date()
+        tomorrow = date.today() + timedelta(days=1)
         logger.info(f"Predicting for date: {tomorrow}")
 
         # Check if prediction already exists (idempotency)
