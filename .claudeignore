@@ -90,3 +90,11 @@ temp/
 # Git
 .git/
 .gitignore
+
+# Cosmic Ray mutation testing
+*.sqlite
+mutation_output.txt
+mutation_testing_report.md
+
+# Specs working directory
+specs/

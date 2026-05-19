@@ -29,18 +29,16 @@ coverage.xml
 .idea/
 *.swp
 
-# Claude Code
-CLAUDE.md
-.claude/
-.mcp.json
+# Claude Code (solo configuración local, no compartida)
+.claude/settings.local.json
 
-# CodeGraph
+# CodeGraph (índice local, se regenera)
 .codegraph/
 
-# Docker-created directories (root-owned, empty)
-/api/
-/jobs/
-
-# Cosmic Ray mutation testing
+# Cosmic Ray mutation testing (reportes generados)
 *.sqlite
 mutation_output.txt
+mutation_testing_report.md
+
+# Specs working directory (si se usa)
+specs/
