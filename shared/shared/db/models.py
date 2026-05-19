@@ -150,9 +150,19 @@ class Prediction(Base):
        direction_correct, pnl_simulated
 
     Tracks model accuracy, error rates, and simulated trading profitability.
+
+    Supports multiple timeframes: 1d (daily), 1w (weekly).
     """
 
     __tablename__ = "predictions"
+    __table_args__ = (
+        UniqueConstraint(
+            "predicted_for", "timeframe", name="unique_prediction_per_timeframe"
+        ),
+        CheckConstraint(
+            "timeframe IN ('1h', '1d', '1w')", name="valid_timeframe_values"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     model_id: Mapped[int] = mapped_column(
@@ -165,7 +175,13 @@ class Prediction(Base):
         Date,
         nullable=False,
         index=True,
-        comment="Date being predicted (usually tomorrow)",
+        comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",
+    )
+    timeframe: Mapped[str] = mapped_column(
+        String(2),
+        nullable=False,
+        default="1d",
+        comment="Prediction timeframe: '1h' (hourly), '1d' (daily), '1w' (weekly)",
     )
     predicted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
