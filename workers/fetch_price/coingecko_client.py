@@ -128,6 +128,145 @@ class CoinGeckoClient:
                 f"Failed to parse candle data: {str(e)}"
             ) from e
 
+    async def fetch_historical_prices(
+        self,
+        coin_id: str = "bitcoin",
+        vs_currency: str = "usd",
+        days: int = 90,
+        max_retries: int = 5
+    ) -> List[Tuple[datetime, float]]:
+        """Fetch historical price data from CoinGecko market_chart endpoint.
+
+        This endpoint returns simple price data (timestamp, price) for a given
+        time range. Unlike fetch_ohlcv, this can handle arbitrary day ranges
+        (not restricted to predefined values).
+
+        Args:
+            coin_id: Coin identifier (default: bitcoin)
+            vs_currency: Target currency (default: usd)
+            days: Number of days of historical data (default: 90)
+            max_retries: Maximum number of retry attempts on rate limit (default: 5)
+
+        Returns:
+            List of tuples: (timestamp, price)
+            Ordered by timestamp ascending (oldest first)
+
+        Raises:
+            ValueError: Invalid parameters
+            TimeoutError: API did not respond in time
+            RateLimitError: API rate limit exceeded after all retries
+            InvalidSymbolError: Invalid coin_id (404)
+            PriceAPIError: Other API errors (4xx, 5xx)
+        """
+        # Validate basic parameters
+        if not coin_id or not coin_id.strip():
+            raise ValueError("coin_id cannot be empty")
+        if not vs_currency or not vs_currency.strip():
+            raise ValueError("vs_currency cannot be empty")
+        if days <= 0:
+            raise ValueError(f"days must be positive, got {days}")
+
+        # Build request parameters
+        params = {
+            "vs_currency": vs_currency,
+            "days": days,
+            "interval": "hourly"  # Request hourly granularity
+        }
+
+        # Retry loop with exponential backoff
+        for attempt in range(max_retries + 1):
+            try:
+                # Make API request to market_chart endpoint
+                response = await self._client.get(
+                    f"/coins/{coin_id}/market_chart",
+                    params=params
+                )
+                response.raise_for_status()
+
+                # Parse response
+                data = response.json()
+                raw_prices = data.get("prices", [])
+
+                if not raw_prices:
+                    logger.warning("CoinGecko returned empty prices array")
+                    return []
+
+                # Transform to (datetime, price) tuples
+                prices = []
+                for entry in raw_prices:
+                    if len(entry) < 2:
+                        logger.warning(f"Skipping malformed price entry: {entry}")
+                        continue
+
+                    timestamp_ms = entry[0]
+                    price = float(entry[1])
+                    timestamp = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+
+                    prices.append((timestamp, price))
+
+                # Sort by timestamp ascending (oldest first)
+                prices.sort(key=lambda x: x[0])
+
+                logger.info(f"Fetched {len(prices)} historical prices from CoinGecko")
+                return prices
+
+            except httpx.TimeoutException as e:
+                raise TimeoutError(f"CoinGecko API timeout after {self.timeout}s") from e
+
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code
+
+                # Handle rate limit (429) with exponential backoff
+                if status_code == 429:
+                    retry_after = e.response.headers.get("Retry-After")
+
+                    # If this was the last attempt, raise the error
+                    if attempt >= max_retries:
+                        retry_after_int = int(retry_after) if retry_after else None
+                        raise RateLimitError(
+                            f"Rate limit exceeded after {max_retries} retries. "
+                            "Please wait before retrying.",
+                            retry_after=retry_after_int
+                        ) from e
+
+                    # Calculate backoff delay
+                    if retry_after:
+                        delay = int(retry_after)
+                    else:
+                        # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                        delay = 5 * (2 ** attempt)
+
+                    logger.warning(
+                        f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}). "
+                        f"Waiting {delay}s before retry..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                # Handle invalid coin_id (404)
+                elif status_code == 404:
+                    raise InvalidSymbolError(
+                        f"Invalid coin_id: {coin_id}. Please check the coin identifier."
+                    ) from e
+
+                # Handle other HTTP errors
+                else:
+                    raise PriceAPIError(
+                        f"CoinGecko API error (HTTP {status_code}): {str(e)}"
+                    ) from e
+
+            except httpx.ConnectError as e:
+                raise PriceAPIError(
+                    f"Network error: Could not connect to CoinGecko API. {str(e)}"
+                ) from e
+
+            except httpx.HTTPError as e:
+                raise PriceAPIError(
+                    f"HTTP error while fetching data from CoinGecko: {str(e)}"
+                ) from e
+
+        raise PriceAPIError("Unexpected error: retry loop completed without returning")
+
     async def fetch_ohlcv(
         self,
         coin_id: str = "bitcoin",

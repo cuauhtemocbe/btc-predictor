@@ -25,6 +25,7 @@ services:
       - ./api-service:/app/api
       - ./shared:/app/shared
       - ./workers:/app/workers
+      - ./scripts:/app/scripts
       - ./poetry.lock:/app/poetry.lock
       - ./pyproject.toml:/app/pyproject.toml
       - ./cosmic-ray.toml:/app/cosmic-ray.toml
@@ -33,7 +34,7 @@ services:
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
       - BINANCE_BASE_URL=https://api.binance.com
       - TZ=America/Mexico_City
-      - PYTHONPATH=/app:/app/api
+      - PYTHONPATH=/app:/app/api:/app/shared:/app/scripts
     depends_on:
       postgres:
         condition: service_healthy

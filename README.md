@@ -162,6 +162,36 @@ docker compose exec api pytest -n auto
 
 **Aislamiento de datos:** Los tests usan fixtures de pytest (`conftest.py`) que crean datos de entrada y los eliminan automáticamente al final de cada test (patrón `yield`).
 
+### Backfill de Precios Históricos (US-019)
+
+Para cargar datos históricos de BTC desde CoinGecko y acelerar el desarrollo sin esperar meses de datos:
+
+```bash
+# Cargar últimos 90 días de precios horarios (default)
+docker compose exec api python scripts/backfill_prices.py
+
+# Cargar últimos 7 días
+docker compose exec api python scripts/backfill_prices.py --days=7
+
+# Cargar último año con logs verbose
+docker compose exec api python scripts/backfill_prices.py --days=365 --verbose
+```
+
+**Características:**
+- ✅ **Idempotente:** Seguro ejecutar múltiples veces (UNIQUE constraint previene duplicados)
+- ✅ **Rate Limiting:** Maneja HTTP 429 automáticamente con exponential backoff
+- ✅ **Progress Logging:** Muestra progreso cada 100 registros
+- ✅ **Batch Insertion:** Inserta en chunks de 100 para performance
+
+**Ejemplo de salida:**
+```
+INFO - Fetching 90 days of data from CoinGecko API...
+INFO - Fetched 2160 price points from CoinGecko
+INFO - Processing batch 1/22 (0/2160 records, 0%)
+INFO - Processing batch 22/22 (2100/2160 records, 97%)
+INFO - Backfill completed: 2160 new prices inserted, 0 duplicates skipped
+```
+
 ### Aplicar Migraciones (después de Iteración 1)
 
 ```bash

@@ -495,3 +495,254 @@ class TestDefaultParameters:
             "/coins/ethereum/ohlc",
             params={"vs_currency": "usd", "days": 1}
         )
+
+
+class TestFetchHistoricalPrices:
+    """Tests for fetch_historical_prices method (market_chart endpoint)."""
+
+    @pytest.fixture
+    def sample_market_chart_response(self):
+        """Sample CoinGecko market_chart API response.
+
+        Format: {"prices": [[timestamp_ms, price], ...], ...}
+        """
+        return {
+            "prices": [
+                [1714521600000, 63000.50],
+                [1714525200000, 63200.00],
+                [1714528800000, 63400.00],
+            ],
+            "market_caps": [[1714521600000, 1234567890]],
+            "total_volumes": [[1714521600000, 9876543210]]
+        }
+
+    async def test_fetch_90_days_default(self, mocker, sample_market_chart_response):
+        """Test fetching 90 days of historical data (default)."""
+        client = CoinGeckoClient()
+
+        # Mock the httpx response
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = sample_market_chart_response
+        mock_response.raise_for_status = mocker.Mock()
+
+        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        # Call fetch_historical_prices with default (90 days)
+        result = await client.fetch_historical_prices()
+
+        # Verify API was called correctly
+        mock_get.assert_called_once_with(
+            "/coins/bitcoin/market_chart",
+            params={"vs_currency": "usd", "days": 90, "interval": "hourly"}
+        )
+
+        # Verify result structure
+        assert len(result) == 3
+        timestamp, price = result[0]
+
+        # Verify data types
+        assert isinstance(timestamp, datetime)
+        assert isinstance(price, float)
+
+        # Verify values
+        assert price == 63000.50
+
+    async def test_fetch_custom_days(self, mocker, sample_market_chart_response):
+        """Test fetching custom number of days."""
+        client = CoinGeckoClient()
+
+        # Mock the httpx response
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = sample_market_chart_response
+        mock_response.raise_for_status = mocker.Mock()
+
+        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        # Call with custom days (7 days)
+        await client.fetch_historical_prices(days=7)
+
+        # Verify API was called with correct days parameter
+        mock_get.assert_called_once_with(
+            "/coins/bitcoin/market_chart",
+            params={"vs_currency": "usd", "days": 7, "interval": "hourly"}
+        )
+
+    async def test_prices_sorted_ascending(self, mocker):
+        """Test that prices are sorted by timestamp ascending (oldest first)."""
+        client = CoinGeckoClient()
+
+        # Mock response with unsorted prices
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "prices": [
+                [1714528800000, 63400.00],  # Newest
+                [1714521600000, 63000.50],  # Oldest
+                [1714525200000, 63200.00],  # Middle
+            ]
+        }
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        result = await client.fetch_historical_prices()
+
+        # Verify sorted ascending (oldest first)
+        timestamps = [ts for ts, _ in result]
+        assert timestamps == sorted(timestamps), "Prices should be sorted ascending"
+
+        # Verify oldest is first
+        assert result[0][1] == 63000.50
+        # Verify newest is last
+        assert result[-1][1] == 63400.00
+
+    async def test_empty_response_returns_empty_list(self, mocker):
+        """Test that empty prices array returns empty list."""
+        client = CoinGeckoClient()
+
+        # Mock empty response
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"prices": []}
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        result = await client.fetch_historical_prices()
+
+        assert result == []
+
+    async def test_rate_limit_with_exponential_backoff(self, mocker):
+        """Test that rate limit (429) triggers exponential backoff."""
+        client = CoinGeckoClient()
+
+        # Mock 429 response (all retries fail)
+        mock_response = mocker.Mock()
+        mock_response.status_code = 429
+        mock_response.headers = {"Retry-After": "10"}
+
+        mocker.patch.object(
+            client._client,
+            'get',
+            side_effect=httpx.HTTPStatusError(
+                "Rate limit exceeded",
+                request=mocker.Mock(),
+                response=mock_response
+            )
+        )
+
+        # Mock asyncio.sleep to verify backoff
+        mock_sleep = mocker.patch('fetch_price.coingecko_client.asyncio.sleep')
+
+        with pytest.raises(RateLimitError):
+            await client.fetch_historical_prices(max_retries=3)
+
+        # Verify exponential backoff: 10s, 10s, 10s (uses Retry-After header)
+        assert mock_sleep.call_count == 3
+
+    async def test_invalid_coin_id_raises_error(self, mocker):
+        """Test that invalid coin_id raises InvalidSymbolError."""
+        client = CoinGeckoClient()
+
+        # Mock 404 response
+        mock_response = mocker.Mock()
+        mock_response.status_code = 404
+
+        mocker.patch.object(
+            client._client,
+            'get',
+            side_effect=httpx.HTTPStatusError(
+                "Not found",
+                request=mocker.Mock(),
+                response=mock_response
+            )
+        )
+
+        with pytest.raises(InvalidSymbolError):
+            await client.fetch_historical_prices(coin_id="invalid-coin")
+
+    async def test_timeout_raises_timeout_error(self, mocker):
+        """Test that timeout raises TimeoutError."""
+        client = CoinGeckoClient(timeout=5.0)
+
+        mocker.patch.object(
+            client._client,
+            'get',
+            side_effect=httpx.TimeoutException("Request timeout")
+        )
+
+        with pytest.raises(TimeoutError):
+            await client.fetch_historical_prices()
+
+    async def test_malformed_price_entry_skipped(self, mocker):
+        """Test that malformed price entries are skipped gracefully."""
+        client = CoinGeckoClient()
+
+        # Mock response with one malformed entry
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "prices": [
+                [1714521600000, 63000.50],   # Valid
+                [1714525200000],              # Malformed (missing price)
+                [1714528800000, 63400.00],   # Valid
+            ]
+        }
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        result = await client.fetch_historical_prices()
+
+        # Should return only 2 valid entries
+        assert len(result) == 2
+        assert result[0][1] == 63000.50
+        assert result[1][1] == 63400.00
+
+    async def test_zero_days_raises_value_error(self):
+        """Test that days=0 raises ValueError."""
+        client = CoinGeckoClient()
+
+        with pytest.raises(ValueError, match="days must be positive"):
+            await client.fetch_historical_prices(days=0)
+
+    async def test_negative_days_raises_value_error(self):
+        """Test that negative days raises ValueError."""
+        client = CoinGeckoClient()
+
+        with pytest.raises(ValueError, match="days must be positive"):
+            await client.fetch_historical_prices(days=-1)
+
+    async def test_empty_coin_id_raises_value_error(self):
+        """Test that empty coin_id raises ValueError."""
+        client = CoinGeckoClient()
+
+        with pytest.raises(ValueError, match="coin_id cannot be empty"):
+            await client.fetch_historical_prices(coin_id="")
+
+    async def test_timestamp_converted_to_utc_datetime(self, mocker, sample_market_chart_response):
+        """Test that timestamps are converted to UTC datetime objects."""
+        client = CoinGeckoClient()
+
+        mock_response = mocker.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = sample_market_chart_response
+        mock_response.raise_for_status = mocker.Mock()
+
+        mocker.patch.object(client._client, 'get', return_value=mock_response)
+
+        result = await client.fetch_historical_prices()
+
+        timestamp = result[0][0]
+
+        # Verify it's a datetime object with UTC timezone
+        assert isinstance(timestamp, datetime)
+        assert timestamp.tzinfo == timezone.utc
+
+        # Verify the timestamp value
+        # 1714521600000 ms = 2024-05-01 00:00:00 UTC
+        assert timestamp.year == 2024
+        assert timestamp.month == 5
+        assert timestamp.day == 1
