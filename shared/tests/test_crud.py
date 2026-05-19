@@ -11,7 +11,13 @@ from datetime import UTC, date, datetime
 import numpy as np
 import pytest
 
-from shared.db.crud import get_evaluated_predictions
+from shared.db.crud import (
+    activate_model,
+    deactivate_all_models,
+    get_active_model,
+    get_all_models,
+    get_evaluated_predictions,
+)
 from shared.db.models import Model, Prediction
 
 
@@ -355,3 +361,306 @@ def test_date_range_filter_both_boundaries(
 
     result_dates = {pred.predicted_for for pred in results}
     assert result_dates == {date(2026, 5, 3), date(2026, 5, 5), date(2026, 5, 7)}
+
+
+# ============================================================================
+# Model Activation CRUD Tests (US-024)
+# ============================================================================
+
+
+def test_get_active_model_returns_active_model(db_session, sample_model_artifact):
+    """Test that get_active_model returns the model with is_active=True."""
+    # Create 2 models: one active, one inactive
+    inactive_model = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={"window_days": 30},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    active_model = Model(
+        name="linear_v2",
+        version="2.0.0",
+        params={"window_days": 60},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,  # This one is active
+    )
+
+    db_session.add_all([inactive_model, active_model])
+    db_session.commit()
+
+    # Query active model
+    result = get_active_model(db_session)
+
+    assert result is not None
+    assert result.id == active_model.id
+    assert result.name == "linear_v2"
+    assert result.is_active is True
+
+
+def test_get_active_model_returns_none_when_no_active(
+    db_session, sample_model_artifact
+):
+    """Test that get_active_model returns None when no models are active."""
+    # Create 2 inactive models
+    model1 = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={"window_days": 30},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    model2 = Model(
+        name="lstm_v1",
+        version="1.0.0",
+        params={"window_days": 60},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    db_session.add_all([model1, model2])
+    db_session.commit()
+
+    # Query active model
+    result = get_active_model(db_session)
+
+    assert result is None
+
+
+def test_get_all_models_returns_all_ordered_by_trained_at(
+    db_session, sample_model_artifact
+):
+    """Test that get_all_models returns all models ordered by trained_at DESC."""
+    # Create 3 models with different trained_at timestamps
+    old_model = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime(2024, 1, 1, tzinfo=UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    recent_model = Model(
+        name="lstm_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime(2024, 5, 1, tzinfo=UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,
+    )
+
+    newest_model = Model(
+        name="xgboost_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime(2024, 6, 1, tzinfo=UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    db_session.add_all([old_model, recent_model, newest_model])
+    db_session.commit()
+
+    # Query all models
+    results = get_all_models(db_session)
+
+    # Should return 3 models, newest first
+    assert len(results) == 3
+    assert results[0].name == "xgboost_v1"  # Newest
+    assert results[1].name == "lstm_v1"
+    assert results[2].name == "linear_v1"  # Oldest
+
+
+def test_deactivate_all_models(db_session, sample_model_artifact):
+    """Test that deactivate_all_models sets is_active=False for all models."""
+    # Create 3 models, 2 active
+    model1 = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,  # Active
+    )
+
+    model2 = Model(
+        name="lstm_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,  # Active
+    )
+
+    model3 = Model(
+        name="xgboost_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,  # Already inactive
+    )
+
+    db_session.add_all([model1, model2, model3])
+    db_session.commit()
+
+    # Deactivate all
+    count = deactivate_all_models(db_session)
+    db_session.commit()
+
+    # Should return 2 (number of models that were active)
+    assert count == 2
+
+    # Verify all models are now inactive
+    all_models = get_all_models(db_session)
+    for model in all_models:
+        assert model.is_active is False
+
+
+def test_activate_model_success(db_session, sample_model_artifact):
+    """Test that activate_model activates the target and deactivates others."""
+    # Create 3 models, one active
+    model1 = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,  # Currently active
+    )
+
+    model2 = Model(
+        name="lstm_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    model3 = Model(
+        name="xgboost_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    db_session.add_all([model1, model2, model3])
+    db_session.commit()
+    db_session.refresh(model2)  # Get the ID
+
+    # Activate model2
+    activated = activate_model(db_session, model2.id)
+    db_session.commit()
+
+    # Verify model2 is activated
+    assert activated.id == model2.id
+    assert activated.is_active is True
+
+    # Verify only model2 is active
+    active = get_active_model(db_session)
+    assert active.id == model2.id
+
+    # Verify model1 and model3 are deactivated
+    all_models = get_all_models(db_session)
+    active_count = sum(1 for m in all_models if m.is_active)
+    assert active_count == 1, "Only one model should be active"
+
+
+def test_activate_model_raises_error_for_nonexistent_id(
+    db_session, sample_model_artifact
+):
+    """Test that activate_model raises ValueError for non-existent model_id."""
+    # Create one model
+    model = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+    )
+
+    db_session.add(model)
+    db_session.commit()
+
+    # Try to activate non-existent model_id=9999
+    with pytest.raises(ValueError, match="Model with id=9999 does not exist"):
+        activate_model(db_session, model_id=9999)
+
+
+def test_activate_model_only_one_active_at_a_time(
+    db_session, sample_model_artifact
+):
+    """
+    CRITICAL TEST: Verify only ONE model is active after activation.
+
+    This is the core requirement of US-024.
+    """
+    # Create 4 models (all 4 types)
+    models = []
+    for name in ["linear", "lstm", "xgboost", "arima"]:
+        model = Model(
+            name=f"{name}_v1",
+            version="1.0.0",
+            params={},
+            artifact=sample_model_artifact,
+            trained_at=datetime.now(UTC),
+            train_from=date(2024, 1, 1),
+            train_to=date(2024, 5, 1),
+            is_active=False,
+        )
+        models.append(model)
+
+    db_session.add_all(models)
+    db_session.commit()
+
+    # Activate each model sequentially, verify only one active each time
+    for target_model in models:
+        db_session.refresh(target_model)
+        activate_model(db_session, target_model.id)
+        db_session.commit()
+
+        # Count active models
+        all_models = get_all_models(db_session)
+        active_models = [m for m in all_models if m.is_active]
+
+        assert len(active_models) == 1, "Only ONE model should be active"
+        assert active_models[0].id == target_model.id

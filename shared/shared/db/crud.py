@@ -94,3 +94,106 @@ async def get_evaluated_predictions_async(
 
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+def get_active_model(session: Session) -> Model | None:
+    """
+    Get the currently active model.
+
+    Args:
+        session: SQLAlchemy database session
+
+    Returns:
+        Active Model object or None if no active model exists
+
+    Example:
+        >>> active = get_active_model(session)
+        >>> if active:
+        ...     print(f"Active model: {active.name} v{active.version}")
+    """
+    query = select(Model).where(Model.is_active == True)
+    result = session.execute(query)
+    return result.scalar_one_or_none()
+
+
+def get_all_models(session: Session) -> list[Model]:
+    """
+    Get all models ordered by trained_at DESC (most recent first).
+
+    Args:
+        session: SQLAlchemy database session
+
+    Returns:
+        List of all Model objects ordered by training date
+
+    Example:
+        >>> models = get_all_models(session)
+        >>> for m in models:
+        ...     print(f"{m.name} v{m.version} - Active: {m.is_active}")
+    """
+    query = select(Model).order_by(Model.trained_at.desc())
+    result = session.execute(query)
+    return list(result.scalars().all())
+
+
+def deactivate_all_models(session: Session) -> int:
+    """
+    Set is_active=False for all models.
+
+    Args:
+        session: SQLAlchemy database session
+
+    Returns:
+        Number of models deactivated
+
+    Example:
+        >>> count = deactivate_all_models(session)
+        >>> session.commit()
+        >>> print(f"Deactivated {count} models")
+    """
+    query = select(Model).where(Model.is_active == True)
+    result = session.execute(query)
+    active_models = list(result.scalars().all())
+
+    for model in active_models:
+        model.is_active = False
+
+    return len(active_models)
+
+
+def activate_model(session: Session, model_id: int) -> Model:
+    """
+    Activate a specific model by ID, deactivating all others.
+
+    Ensures only ONE model is active at any time.
+
+    Args:
+        session: SQLAlchemy database session
+        model_id: ID of the model to activate
+
+    Returns:
+        The activated Model object
+
+    Raises:
+        ValueError: If model_id doesn't exist
+
+    Example:
+        >>> model = activate_model(session, model_id=42)
+        >>> session.commit()
+        >>> print(f"Activated: {model.name} v{model.version}")
+    """
+    # First, get the model to activate (raises if doesn't exist)
+    query = select(Model).where(Model.id == model_id)
+    result = session.execute(query)
+    model = result.scalar_one_or_none()
+
+    if model is None:
+        raise ValueError(f"Model with id={model_id} does not exist")
+
+    # Deactivate all models
+    deactivate_all_models(session)
+
+    # Activate the target model
+    model.is_active = True
+
+    return model

@@ -6,9 +6,13 @@ Functions:
 - calculate_pnl_long_short: Calculate PnL with long/short symmetric strategy
 - calculate_pnl_threshold: Calculate PnL with threshold filter
 - calculate_pnl_realistic: Calculate PnL with trading fees and stop-loss
+- split_train_validation: Split time series data into train/validation sets
+- calculate_mape: Calculate Mean Absolute Percentage Error
 """
 
 from decimal import Decimal
+
+import numpy as np
 
 
 def calculate_pnl(
@@ -175,3 +179,102 @@ def calculate_pnl_realistic(
     net_pnl = gross_pnl - fees
 
     return net_pnl
+
+
+def split_train_validation(
+    prices: np.ndarray,
+    train_pct: float = 0.7,
+    val_pct: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Split time series price data into training and validation sets.
+
+    Uses 70% for training, 20% for validation, and discards remaining 10%
+    (buffer for time series continuity).
+
+    Args:
+        prices: 1D array of historical prices (chronological order)
+        train_pct: Percentage of data for training (default 0.7 = 70%)
+        val_pct: Percentage of data for validation (default 0.2 = 20%)
+
+    Returns:
+        Tuple of (train_data, val_data) as numpy arrays
+
+    Raises:
+        ValueError: If train_pct + val_pct > 1.0 or if not enough data
+
+    Examples:
+        >>> prices = np.array([50000, 51000, 52000, ..., 67000])  # 100 days
+        >>> train, val = split_train_validation(prices)
+        >>> len(train)  # 70 days
+        70
+        >>> len(val)  # 20 days
+        20
+    """
+    if train_pct + val_pct > 1.0:
+        raise ValueError(
+            f"train_pct ({train_pct}) + val_pct ({val_pct}) must be <= 1.0"
+        )
+
+    n = len(prices)
+    if n < 10:
+        raise ValueError(f"Need at least 10 data points, got {n}")
+
+    # Calculate split indices
+    train_size = int(n * train_pct)
+    val_size = int(n * val_pct)
+
+    if train_size < 1 or val_size < 1:
+        raise ValueError(
+            f"Not enough data: train_size={train_size}, val_size={val_size}"
+        )
+
+    # Split chronologically
+    train_data = prices[:train_size]
+    val_data = prices[train_size : train_size + val_size]
+    # Buffer (remaining 10%) is discarded
+
+    return train_data, val_data
+
+
+def calculate_mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Mean Absolute Percentage Error (MAPE).
+
+    MAPE = mean(|y_true - y_pred| / |y_true|) * 100
+
+    Args:
+        y_true: Array of true values
+        y_pred: Array of predicted values
+
+    Returns:
+        MAPE as percentage (0-100 scale)
+
+    Raises:
+        ValueError: If arrays have different lengths or contain zeros
+
+    Examples:
+        >>> y_true = np.array([50000, 51000, 52000])
+        >>> y_pred = np.array([50500, 50800, 52100])
+        >>> calculate_mape(y_true, y_pred)
+        1.05  # ~1% average error
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"Arrays must have same length: {len(y_true)} != {len(y_pred)}"
+        )
+
+    if len(y_true) == 0:
+        raise ValueError("Cannot calculate MAPE on empty arrays")
+
+    # Avoid division by zero
+    if np.any(y_true == 0):
+        raise ValueError("y_true contains zeros, cannot calculate MAPE")
+
+    # Calculate absolute percentage errors
+    abs_errors = np.abs((y_true - y_pred) / y_true)
+
+    # Return mean as percentage
+    mape = float(np.mean(abs_errors) * 100)
+
+    return mape
