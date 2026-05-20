@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Comparison - BTC Predictor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+            color: white;
+            padding: 32px 40px;
+            border-bottom: 4px solid #f59e0b;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-top: 16px;
+            color: #fbbf24;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover {
+            color: #f59e0b;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #6b7280;
+        }
+
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 12px;
+            color: #374151;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            color: #6b7280;
+            margin-top: 8px;
+        }
+
+        .empty-state code {
+            background: #f3f4f6;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            color: #1f2937;
+        }
+
+        .filter-form {
+            background: #eff6ff;
+            border: 2px solid #bfdbfe;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 32px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e3a8a;
+            margin-bottom: 8px;
+        }
+
+        .filter-input {
+            padding: 10px 14px;
+            border: 2px solid #bfdbfe;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .filter-button {
+            padding: 10px 24px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .filter-button:hover {
+            background: #2563eb;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        thead {
+            background: #f9fafb;
+        }
+
+        th {
+            padding: 16px 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            color: #374151;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        th:first-child {
+            border-top-left-radius: 8px;
+        }
+
+        th:last-child {
+            border-top-right-radius: 8px;
+        }
+
+        td {
+            padding: 16px 12px;
+            color: #1f2937;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        tr:hover td {
+            background: #f9fafb;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .model-name {
+            font-weight: 600;
+            color: #1e3a8a;
+        }
+
+        .best-model {
+            background: #d1fae5 !important;
+        }
+
+        .best-model:hover {
+            background: #a7f3d0 !important;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #10b981;
+            color: white;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            margin-left: 8px;
+        }
+
+        .active-badge {
+            background: #3b82f6;
+        }
+
+        .metric-positive {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .metric-negative {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .metric-neutral {
+            color: #6b7280;
+        }
+
+        .chart-container {
+            margin-top: 40px;
+            padding: 24px;
+            background: #f9fafb;
+            border-radius: 12px;
+            border: 2px solid #e5e7eb;
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            max-height: 400px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                border-radius: 0;
+            }
+
+            header, .content {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 12px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Model Performance Comparison</h1>
+            <p class="subtitle">Compare accuracy, PnL, and risk metrics across all ML models</p>
+            <a href="/" class="nav-link">← Back to Dashboard</a>
+        </header>
+
+        <div class="content">
+            <!-- Date Range Filter -->
+            <form method="get" class="filter-form">
+                <div class="filter-group">
+                    <label class="filter-label" for="start_date">Start Date</label>
+                    <input
+                        type="date"
+                        id="start_date"
+                        name="start_date"
+                        value="{{ start_date }}"
+                        class="filter-input"
+                    >
+                </div>
+                <div class="filter-group">
+                    <label class="filter-label" for="end_date">End Date</label>
+                    <input
+                        type="date"
+                        id="end_date"
+                        name="end_date"
+                        value="{{ end_date }}"
+                        class="filter-input"
+                    >
+                </div>
+                <button type="submit" class="filter-button">Apply Filter</button>
+            </form>
+
+            {% if not models %}
+            <!-- Empty State -->
+            <div class="empty-state">
+                <h2>No Models Found</h2>
+                <p>No models have been trained yet.</p>
+                <p style="margin-top: 16px;">To train models, run:</p>
+                <code>docker compose exec api python scripts/train_all_models.py</code>
+            </div>
+            {% else %}
+            <!-- Model Comparison Table -->
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Predictions</th>
+                        <th>Accuracy</th>
+                        <th>Avg Error %</th>
+                        <th>Total PnL</th>
+                        <th>Win Rate</th>
+                        <th>Sharpe</th>
+                        <th>Max DD</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for model in models %}
+                    <tr class="{% if model.id == best_model_id %}best-model{% endif %}">
+                        <td>
+                            <span class="model-name">{{ model.name }}</span>
+                            {% if model.is_active %}
+                            <span class="badge active-badge">ACTIVE</span>
+                            {% endif %}
+                            {% if model.id == best_model_id %}
+                            <span class="badge">🏆 Best Return</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.predictions_count > 0 %}
+                            {{ model.predictions_count }}
+                            {% else %}
+                            <span class="metric-neutral">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.accuracy is not none %}
+                            {{ (model.accuracy * 100) | round(1) }}%
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.avg_error_pct is not none %}
+                            {{ model.avg_error_pct | round(1) }}%
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.total_pnl is not none %}
+                            <span class="{% if model.total_pnl > 0 %}metric-positive{% elif model.total_pnl < 0 %}metric-negative{% else %}metric-neutral{% endif %}">
+                                ${{ "{:,.2f}".format(model.total_pnl) }}
+                            </span>
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.win_rate is not none %}
+                            {{ (model.win_rate * 100) | round(1) }}%
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.sharpe_ratio is not none %}
+                            {{ model.sharpe_ratio | round(2) }}
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if model.max_drawdown is not none %}
+                            <span class="metric-negative">
+                                ${{ "{:,.2f}".format(model.max_drawdown) }}
+                            </span>
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <!-- Cumulative PnL Chart -->
+            <div class="chart-container">
+                <h2 class="chart-title">Cumulative PnL by Model</h2>
+                <canvas id="pnlChart"></canvas>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if models %}
+    <script>
+        // Prepare chart data from backend
+        const dailyPnl = {{ daily_pnl | tojson }};
+
+        // Extract all unique dates across all models
+        const allDates = new Set();
+        Object.values(dailyPnl).forEach(modelData => {
+            modelData.forEach(point => allDates.add(point.date));
+        });
+        const sortedDates = Array.from(allDates).sort();
+
+        // Define colors for each model
+        const modelColors = {
+            'linear_v1': '#3b82f6',    // Blue
+            'lstm_v1': '#10b981',      // Green
+            'xgboost_v1': '#f59e0b',   // Orange
+            'arima_v1': '#ef4444'      // Red
+        };
+
+        // Build datasets for Chart.js
+        const datasets = Object.entries(dailyPnl).map(([modelName, data]) => {
+            // Create a map for quick lookup
+            const dataMap = {};
+            data.forEach(point => {
+                dataMap[point.date] = point.cumulative_pnl;
+            });
+
+            // Fill data for all dates (use null for missing dates)
+            const chartData = sortedDates.map(date => dataMap[date] || null);
+
+            return {
+                label: modelName,
+                data: chartData,
+                borderColor: modelColors[modelName] || '#6b7280',
+                backgroundColor: modelColors[modelName] || '#6b7280',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1,
+                spanGaps: true  // Connect gaps for missing data
+            };
+        });
+
+        // Create chart
+        const ctx = document.getElementById('pnlChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sortedDates,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20,
+                            font: {
+                                size: 12,
+                                family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto'
+                            }
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += '$' + context.parsed.y.toLocaleString('en-US', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    });
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Date',
+                            font: {
+                                size: 13,
+                                weight: 600
+                            }
+                        },
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Cumulative PnL (USD)',
+                            font: {
+                                size: 13,
+                                weight: 600
+                            }
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toLocaleString('en-US');
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

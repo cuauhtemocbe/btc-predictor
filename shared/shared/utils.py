@@ -8,11 +8,25 @@ Functions:
 - calculate_pnl_realistic: Calculate PnL with trading fees and stop-loss
 - split_train_validation: Split time series data into train/validation sets
 - calculate_mape: Calculate Mean Absolute Percentage Error
+
+Model Metrics Functions (for dashboard):
+- calculate_accuracy: Calculate % of correct direction predictions for a model
+- calculate_model_mape: Calculate MAPE from database predictions for a model
+- calculate_total_pnl: Calculate total PnL for a model
+- calculate_win_rate: Calculate % of positive PnL predictions for a model
+- calculate_sharpe_ratio: Calculate Sharpe ratio for a model
+- calculate_max_drawdown: Calculate maximum drawdown for a model
+- get_cumulative_pnl: Get daily cumulative PnL time series for a model
+- get_all_models_metrics: Get metrics for all models in one call
 """
 
+from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import numpy as np
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 
 def calculate_pnl(
@@ -278,3 +292,521 @@ def calculate_mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     mape = float(np.mean(abs_errors) * 100)
 
     return mape
+
+
+# ============================================================================
+# Model Metrics Functions for Dashboard
+# ============================================================================
+
+
+def calculate_accuracy(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> float | None:
+    """
+    Calculate prediction accuracy for a model (% of correct direction predictions).
+
+    Accuracy = COUNT(*) WHERE direction_correct = true / COUNT(*)
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate accuracy for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+
+    Returns:
+        Accuracy as decimal (0.0-1.0), or None if no evaluated predictions
+
+    Examples:
+        >>> calculate_accuracy(db, model_id=1)
+        0.65  # 65% accuracy
+    """
+    from shared.db.models import Prediction
+
+    # Base query: only evaluated predictions (actual_price IS NOT NULL)
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters if provided
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Count total and correct predictions
+    total_count = query.count()
+    if total_count == 0:
+        return None
+
+    correct_count = query.filter(Prediction.direction_correct == True).count()
+
+    accuracy = correct_count / total_count
+    return accuracy
+
+
+def calculate_model_mape(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> float | None:
+    """
+    Calculate Mean Absolute Percentage Error (MAPE) for a model from database.
+
+    MAPE = AVG(ABS((actual_price - predicted_price) / actual_price)) * 100
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate MAPE for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+
+    Returns:
+        MAPE as percentage (0-100 scale), or None if no evaluated predictions
+
+    Examples:
+        >>> calculate_model_mape(db, model_id=1)
+        2.5  # 2.5% average error
+    """
+    from shared.db.models import Prediction
+
+    # Base query: only evaluated predictions
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Get all predictions
+    predictions = query.all()
+    if not predictions:
+        return None
+
+    # Calculate MAPE manually
+    errors = []
+    for pred in predictions:
+        if pred.actual_price and pred.actual_price != 0:
+            error = abs((pred.actual_price - pred.predicted_price) / pred.actual_price)
+            errors.append(float(error))
+
+    if not errors:
+        return None
+
+    mape = np.mean(errors) * 100
+    return float(mape)
+
+
+def calculate_total_pnl(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+) -> float | None:
+    """
+    Calculate total PnL for a model (sum of all PnL values).
+
+    Total PnL = SUM(pnl_simulated)
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate total PnL for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to sum (default: pnl_simulated)
+
+    Returns:
+        Total PnL in USDT, or None if no evaluated predictions
+
+    Examples:
+        >>> calculate_total_pnl(db, model_id=1)
+        1200.50  # Total profit of $1,200.50
+    """
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(func.sum(getattr(Prediction, pnl_column))).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Execute query
+    result = query.scalar()
+    if result is None:
+        return None
+
+    return float(result)
+
+
+def calculate_win_rate(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+) -> float | None:
+    """
+    Calculate win rate for a model (% of predictions with positive PnL).
+
+    Win Rate = COUNT(*) WHERE pnl > 0 / COUNT(*)
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate win rate for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+
+    Returns:
+        Win rate as decimal (0.0-1.0), or None if no evaluated predictions
+
+    Examples:
+        >>> calculate_win_rate(db, model_id=1)
+        0.60  # 60% win rate
+    """
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Count total and winning predictions
+    total_count = query.count()
+    if total_count == 0:
+        return None
+
+    win_count = query.filter(getattr(Prediction, pnl_column) > 0).count()
+
+    win_rate = win_count / total_count
+    return win_rate
+
+
+def calculate_sharpe_ratio(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+    risk_free_rate: float = 0.0,
+) -> float | None:
+    """
+    Calculate annualized Sharpe ratio for a model.
+
+    Sharpe Ratio = (MEAN(daily_returns) - risk_free_rate) / STDEV(daily_returns) * sqrt(365)
+
+    Daily returns = pnl / price_at_prediction
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate Sharpe ratio for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+        risk_free_rate: Annual risk-free rate (default: 0.0)
+
+    Returns:
+        Annualized Sharpe ratio, or None if insufficient data
+
+    Examples:
+        >>> calculate_sharpe_ratio(db, model_id=1)
+        1.25  # Sharpe ratio of 1.25
+    """
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Get all predictions
+    predictions = query.order_by(Prediction.predicted_for).all()
+    if len(predictions) < 2:
+        return None  # Need at least 2 data points for stdev
+
+    # Calculate daily returns
+    returns = []
+    for pred in predictions:
+        pnl = getattr(pred, pnl_column)
+        if pnl is not None and pred.price_at_prediction > 0:
+            daily_return = float(pnl) / float(pred.price_at_prediction)
+            returns.append(daily_return)
+
+    if len(returns) < 2:
+        return None
+
+    # Calculate Sharpe ratio
+    mean_return = np.mean(returns)
+    std_return = np.std(returns, ddof=1)  # Sample standard deviation
+
+    if std_return == 0:
+        return None  # Avoid division by zero
+
+    # Annualize (assuming daily predictions)
+    sharpe = (mean_return - risk_free_rate / 365) / std_return * np.sqrt(365)
+
+    return float(sharpe)
+
+
+def calculate_max_drawdown(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+) -> float | None:
+    """
+    Calculate maximum drawdown for a model (largest cumulative loss).
+
+    Max Drawdown = MIN(cumulative_pnl - running_max(cumulative_pnl))
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate max drawdown for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+
+    Returns:
+        Maximum drawdown in USDT (negative value), or None if no data
+
+    Examples:
+        >>> calculate_max_drawdown(db, model_id=1)
+        -450.0  # Max drawdown of -$450
+    """
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Get all predictions ordered by date
+    predictions = query.order_by(Prediction.predicted_for).all()
+    if not predictions:
+        return None
+
+    # Calculate cumulative PnL
+    cumulative_pnl = []
+    cumsum = 0.0
+    for pred in predictions:
+        pnl = getattr(pred, pnl_column)
+        if pnl is not None:
+            cumsum += float(pnl)
+            cumulative_pnl.append(cumsum)
+
+    if not cumulative_pnl:
+        return None
+
+    # Calculate running maximum and drawdown
+    cumulative_pnl = np.array(cumulative_pnl)
+    running_max = np.maximum.accumulate(cumulative_pnl)
+    drawdown = cumulative_pnl - running_max
+
+    max_drawdown = float(np.min(drawdown))
+
+    return max_drawdown
+
+
+def get_cumulative_pnl(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+) -> list[dict[str, Any]]:
+    """
+    Get daily cumulative PnL time series for a model (for chart visualization).
+
+    Returns list of {date, cumulative_pnl} dictionaries ordered by date.
+
+    Args:
+        db: Database session
+        model_id: Model ID to get cumulative PnL for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+
+    Returns:
+        List of {"date": "YYYY-MM-DD", "cumulative_pnl": float} dictionaries
+
+    Examples:
+        >>> get_cumulative_pnl(db, model_id=1)
+        [
+            {"date": "2024-05-01", "cumulative_pnl": 100.0},
+            {"date": "2024-05-02", "cumulative_pnl": 250.0},
+            ...
+        ]
+    """
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+
+    # Get all predictions ordered by date
+    predictions = query.order_by(Prediction.predicted_for).all()
+
+    # Calculate cumulative PnL
+    result = []
+    cumsum = 0.0
+    for pred in predictions:
+        pnl = getattr(pred, pnl_column)
+        if pnl is not None:
+            cumsum += float(pnl)
+            result.append(
+                {
+                    "date": pred.predicted_for.isoformat(),
+                    "cumulative_pnl": round(cumsum, 2),
+                }
+            )
+
+    return result
+
+
+def get_all_models_metrics(
+    db: Session,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+) -> list[dict[str, Any]]:
+    """
+    Get performance metrics for all models in one call.
+
+    Returns list of dictionaries with model metadata and calculated metrics.
+
+    Args:
+        db: Database session
+        start_date: Optional start date filter for metrics calculation
+        end_date: Optional end date filter for metrics calculation
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+
+    Returns:
+        List of dictionaries with structure:
+        {
+            "id": int,
+            "name": str,
+            "version": str,
+            "is_active": bool,
+            "trained_at": datetime,
+            "predictions_count": int,
+            "accuracy": float | None,
+            "avg_error_pct": float | None,
+            "total_pnl": float | None,
+            "win_rate": float | None,
+            "sharpe_ratio": float | None,
+            "max_drawdown": float | None,
+        }
+
+    Examples:
+        >>> get_all_models_metrics(db)
+        [
+            {
+                "id": 1,
+                "name": "linear_v1",
+                "version": "1.0.0",
+                "accuracy": 0.65,
+                "total_pnl": 1200.50,
+                ...
+            },
+            ...
+        ]
+    """
+    from shared.db.models import Model, Prediction
+
+    # Get all models
+    models = db.query(Model).all()
+
+    results = []
+    for model in models:
+        # Count evaluated predictions
+        query = db.query(Prediction).filter(
+            Prediction.model_id == model.id, Prediction.actual_price.isnot(None)
+        )
+
+        if start_date:
+            query = query.filter(Prediction.predicted_for >= start_date)
+        if end_date:
+            query = query.filter(Prediction.predicted_for <= end_date)
+
+        predictions_count = query.count()
+
+        # Calculate metrics (only if there are predictions)
+        if predictions_count > 0:
+            accuracy = calculate_accuracy(db, model.id, start_date, end_date)
+            mape = calculate_model_mape(db, model.id, start_date, end_date)
+            total_pnl = calculate_total_pnl(
+                db, model.id, start_date, end_date, pnl_column
+            )
+            win_rate = calculate_win_rate(
+                db, model.id, start_date, end_date, pnl_column
+            )
+            sharpe = calculate_sharpe_ratio(
+                db, model.id, start_date, end_date, pnl_column
+            )
+            max_dd = calculate_max_drawdown(
+                db, model.id, start_date, end_date, pnl_column
+            )
+        else:
+            accuracy = None
+            mape = None
+            total_pnl = None
+            win_rate = None
+            sharpe = None
+            max_dd = None
+
+        results.append(
+            {
+                "id": model.id,
+                "name": model.name,
+                "version": model.version,
+                "is_active": model.is_active,
+                "trained_at": model.trained_at,
+                "predictions_count": predictions_count,
+                "accuracy": round(accuracy, 4) if accuracy is not None else None,
+                "avg_error_pct": round(mape, 2) if mape is not None else None,
+                "total_pnl": round(total_pnl, 2) if total_pnl is not None else None,
+                "win_rate": round(win_rate, 4) if win_rate is not None else None,
+                "sharpe_ratio": round(sharpe, 2) if sharpe is not None else None,
+                "max_drawdown": round(max_dd, 2) if max_dd is not None else None,
+            }
+        )
+
+    return results

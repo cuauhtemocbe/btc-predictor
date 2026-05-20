@@ -5,17 +5,26 @@ Covers all Gherkin scenarios from US-013:
 - Calculate PnL for different prediction/outcome combinations
 """
 
+from datetime import date
 from decimal import Decimal
 
 import numpy as np
 import pytest
 
 from shared.utils import (
+    calculate_accuracy,
     calculate_mape,
+    calculate_max_drawdown,
+    calculate_model_mape,
     calculate_pnl,
     calculate_pnl_long_short,
     calculate_pnl_realistic,
     calculate_pnl_threshold,
+    calculate_sharpe_ratio,
+    calculate_total_pnl,
+    calculate_win_rate,
+    get_all_models_metrics,
+    get_cumulative_pnl,
     split_train_validation,
 )
 
@@ -439,8 +448,10 @@ class TestSplitTrainValidation:
 
     def test_split_train_validation_chronological_order(self):
         """Test that chronological order is preserved in splits."""
-        prices = np.array([50000, 51000, 52000, 53000, 54000,
-                          55000, 56000, 57000, 58000, 59000], dtype=float)
+        prices = np.array(
+            [50000, 51000, 52000, 53000, 54000, 55000, 56000, 57000, 58000, 59000],
+            dtype=float,
+        )
         train, val = split_train_validation(prices, train_pct=0.7, val_pct=0.2)
 
         # Train: first 70% (7 items)
@@ -547,3 +558,492 @@ class TestCalculateMAPE:
         # Mean: 2%
         assert mape == 2.0
         assert 0 <= mape <= 100  # Should be percentage
+
+
+# ============================================================================
+# Tests for Model Metrics Functions (US-026)
+# ============================================================================
+
+
+class TestCalculateAccuracy:
+    """Test calculate_accuracy function for model comparison dashboard."""
+
+    def test_accuracy_with_all_correct_predictions(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test 100% accuracy when all predictions are correct."""
+        model = sample_model(name="linear_v1")
+
+        # Create 3 correct predictions
+        for i in range(3):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 10 + i),
+                direction_correct=True,
+            )
+
+        accuracy = calculate_accuracy(db_session, model.id)
+
+        assert accuracy == 1.0  # 100%
+
+    def test_accuracy_with_mixed_predictions(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test accuracy calculation with mix of correct/incorrect predictions."""
+        model = sample_model(name="lstm_v1")
+
+        # Create 5 predictions: 3 correct, 2 incorrect
+        for i in range(3):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                direction_correct=True,
+            )
+        for i in range(2):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 4 + i),
+                direction_correct=False,
+            )
+
+        accuracy = calculate_accuracy(db_session, model.id)
+
+        assert accuracy == 0.6  # 60% (3/5)
+
+    def test_accuracy_returns_none_for_no_evaluated_predictions(
+        self, db_session, sample_model, sample_prediction
+    ):
+        """Test that None is returned when no evaluated predictions exist."""
+        model = sample_model(name="xgboost_v1")
+
+        # Create unevaluated predictions (actual_price = NULL)
+        sample_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
+        sample_prediction(model_id=model.id, predicted_for=date(2024, 5, 2))
+
+        accuracy = calculate_accuracy(db_session, model.id)
+
+        assert accuracy is None
+
+    def test_accuracy_with_date_filter(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test accuracy calculation with date range filter."""
+        model = sample_model(name="arima_v1")
+
+        # Predictions outside range
+        evaluated_prediction(
+            model_id=model.id, predicted_for=date(2024, 4, 28), direction_correct=False
+        )
+        evaluated_prediction(
+            model_id=model.id, predicted_for=date(2024, 4, 29), direction_correct=False
+        )
+
+        # Predictions inside range (May 1-10): 2 correct
+        for i in range(2):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                direction_correct=True,
+            )
+
+        # Predictions outside range
+        evaluated_prediction(
+            model_id=model.id, predicted_for=date(2024, 5, 15), direction_correct=False
+        )
+
+        accuracy = calculate_accuracy(
+            db_session,
+            model.id,
+            start_date=date(2024, 5, 1),
+            end_date=date(2024, 5, 10),
+        )
+
+        assert accuracy == 1.0  # 100% for May 1-10 only
+
+
+class TestCalculateModelMape:
+    """Test calculate_model_mape function."""
+
+    def test_mape_calculation_from_database(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test MAPE calculation from database predictions."""
+        model = sample_model(name="linear_v1")
+
+        # Create predictions with known errors
+        # Error %: 2%, 1.5%, 3%
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            predicted_price=Decimal("67000"),
+            actual_price=Decimal("68000"),  # error: 1000/68000 = 1.47%
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            predicted_price=Decimal("68000"),
+            actual_price=Decimal("67000"),  # error: 1000/67000 = 1.49%
+        )
+
+        mape = calculate_model_mape(db_session, model.id)
+
+        # Expected: (1.47 + 1.49) / 2 ≈ 1.48%
+        assert mape is not None
+        assert 1.4 < mape < 1.6
+
+    def test_mape_returns_none_for_no_predictions(self, db_session, sample_model):
+        """Test that None is returned when no predictions exist."""
+        model = sample_model(name="lstm_v1")
+
+        mape = calculate_model_mape(db_session, model.id)
+
+        assert mape is None
+
+
+class TestCalculateTotalPnl:
+    """Test calculate_total_pnl function."""
+
+    def test_total_pnl_sums_all_predictions(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test total PnL calculation sums all predictions."""
+        model = sample_model(name="xgboost_v1")
+
+        # Create predictions with different PnLs
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("-50.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 3),
+            pnl_simulated=Decimal("200.00"),
+        )
+
+        total_pnl = calculate_total_pnl(db_session, model.id)
+
+        assert total_pnl == 250.0  # 100 - 50 + 200
+
+    def test_total_pnl_returns_none_for_no_predictions(self, db_session, sample_model):
+        """Test that None is returned when no predictions exist."""
+        model = sample_model(name="arima_v1")
+
+        total_pnl = calculate_total_pnl(db_session, model.id)
+
+        assert total_pnl is None
+
+    def test_total_pnl_with_date_filter(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test total PnL with date range filter."""
+        model = sample_model(name="linear_v1")
+
+        # Outside range
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 4, 30),
+            pnl_simulated=Decimal("1000.00"),
+        )
+
+        # Inside range
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("50.00"),
+        )
+
+        # Outside range
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 10),
+            pnl_simulated=Decimal("2000.00"),
+        )
+
+        total_pnl = calculate_total_pnl(
+            db_session, model.id, start_date=date(2024, 5, 1), end_date=date(2024, 5, 5)
+        )
+
+        assert total_pnl == 150.0  # Only May 1-5
+
+
+class TestCalculateWinRate:
+    """Test calculate_win_rate function."""
+
+    def test_win_rate_calculation(self, db_session, sample_model, evaluated_prediction):
+        """Test win rate calculation: % of positive PnL predictions."""
+        model = sample_model(name="lstm_v1")
+
+        # Create 5 predictions: 3 wins, 2 losses
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("50.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 3),
+            pnl_simulated=Decimal("-30.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 4),
+            pnl_simulated=Decimal("150.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 5),
+            pnl_simulated=Decimal("-20.00"),
+        )
+
+        win_rate = calculate_win_rate(db_session, model.id)
+
+        assert win_rate == 0.6  # 60% (3/5)
+
+    def test_win_rate_with_zero_pnl(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test that zero PnL counts as a loss."""
+        model = sample_model(name="xgboost_v1")
+
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("0.00"),  # No trade
+        )
+
+        win_rate = calculate_win_rate(db_session, model.id)
+
+        assert win_rate == 0.5  # 50% (1 win, 1 zero)
+
+
+class TestCalculateSharpeRatio:
+    """Test calculate_sharpe_ratio function."""
+
+    def test_sharpe_ratio_calculation(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test Sharpe ratio calculation with multiple predictions."""
+        model = sample_model(name="arima_v1")
+
+        # Create predictions with varying returns
+        for i, pnl in enumerate([100, -50, 150, 80, -30]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("67000.00"),
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        sharpe = calculate_sharpe_ratio(db_session, model.id)
+
+        # Should return a numeric value (can be positive or negative)
+        assert sharpe is not None
+        assert isinstance(sharpe, float)
+
+    def test_sharpe_ratio_returns_none_for_insufficient_data(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test that None is returned when < 2 predictions."""
+        model = sample_model(name="linear_v1")
+
+        # Only 1 prediction
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+
+        sharpe = calculate_sharpe_ratio(db_session, model.id)
+
+        assert sharpe is None  # Need at least 2 for stdev
+
+
+class TestCalculateMaxDrawdown:
+    """Test calculate_max_drawdown function."""
+
+    def test_max_drawdown_calculation(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test max drawdown calculation."""
+        model = sample_model(name="lstm_v1")
+
+        # Create predictions with drawdown scenario
+        # Cumulative: 100, 50, 200, 100, 80
+        # Running max: 100, 100, 200, 200, 200
+        # Drawdown: 0, -50, 0, -100, -120
+        # Max drawdown: -120
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("-50.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 3),
+            pnl_simulated=Decimal("150.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 4),
+            pnl_simulated=Decimal("-100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 5),
+            pnl_simulated=Decimal("-20.00"),
+        )
+
+        max_dd = calculate_max_drawdown(db_session, model.id)
+
+        assert max_dd == -120.0
+
+    def test_max_drawdown_returns_none_for_no_predictions(
+        self, db_session, sample_model
+    ):
+        """Test that None is returned when no predictions exist."""
+        model = sample_model(name="xgboost_v1")
+
+        max_dd = calculate_max_drawdown(db_session, model.id)
+
+        assert max_dd is None
+
+
+class TestGetCumulativePnl:
+    """Test get_cumulative_pnl function."""
+
+    def test_cumulative_pnl_time_series(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test cumulative PnL time series generation."""
+        model = sample_model(name="linear_v1")
+
+        # Create predictions
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 1),
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 2),
+            pnl_simulated=Decimal("-50.00"),
+        )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 3),
+            pnl_simulated=Decimal("200.00"),
+        )
+
+        cumulative = get_cumulative_pnl(db_session, model.id)
+
+        assert len(cumulative) == 3
+        assert cumulative[0] == {"date": "2024-05-01", "cumulative_pnl": 100.0}
+        assert cumulative[1] == {"date": "2024-05-02", "cumulative_pnl": 50.0}
+        assert cumulative[2] == {"date": "2024-05-03", "cumulative_pnl": 250.0}
+
+    def test_cumulative_pnl_returns_empty_list_for_no_predictions(
+        self, db_session, sample_model
+    ):
+        """Test that empty list is returned when no predictions exist."""
+        model = sample_model(name="arima_v1")
+
+        cumulative = get_cumulative_pnl(db_session, model.id)
+
+        assert cumulative == []
+
+
+class TestGetAllModelsMetrics:
+    """Test get_all_models_metrics function."""
+
+    def test_get_metrics_for_multiple_models(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Test getting metrics for all models in one call."""
+        # Create 2 models with predictions
+        model1 = sample_model(name="linear_v1", version="1.0.0", is_active=True)
+        model2 = sample_model(name="lstm_v1", version="1.0.0", is_active=False)
+
+        # Model 1: 2 predictions
+        evaluated_prediction(
+            model_id=model1.id,
+            predicted_for=date(2024, 5, 1),
+            direction_correct=True,
+            pnl_simulated=Decimal("100.00"),
+        )
+        evaluated_prediction(
+            model_id=model1.id,
+            predicted_for=date(2024, 5, 2),
+            direction_correct=True,
+            pnl_simulated=Decimal("50.00"),
+        )
+
+        # Model 2: 1 prediction
+        evaluated_prediction(
+            model_id=model2.id,
+            predicted_for=date(2024, 5, 1),
+            direction_correct=False,
+            pnl_simulated=Decimal("-30.00"),
+        )
+
+        metrics = get_all_models_metrics(db_session)
+
+        assert len(metrics) == 2
+
+        # Check model 1 metrics
+        m1 = next(m for m in metrics if m["name"] == "linear_v1")
+        assert m1["predictions_count"] == 2
+        assert m1["accuracy"] == 1.0
+        assert m1["total_pnl"] == 150.0
+        assert m1["is_active"] is True
+
+        # Check model 2 metrics
+        m2 = next(m for m in metrics if m["name"] == "lstm_v1")
+        assert m2["predictions_count"] == 1
+        assert m2["accuracy"] == 0.0
+        assert m2["total_pnl"] == -30.0
+        assert m2["is_active"] is False
+
+    def test_get_metrics_with_no_models(self, db_session):
+        """Test that empty list is returned when no models exist."""
+        metrics = get_all_models_metrics(db_session)
+
+        assert metrics == []
+
+    def test_get_metrics_handles_models_without_predictions(
+        self, db_session, sample_model
+    ):
+        """Test that models without predictions show None for metrics."""
+        model = sample_model(name="xgboost_v1")
+
+        metrics = get_all_models_metrics(db_session)
+
+        assert len(metrics) == 1
+        assert metrics[0]["predictions_count"] == 0
+        assert metrics[0]["accuracy"] is None
+        assert metrics[0]["total_pnl"] is None

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from api.routers import router
 from api.routers.backtesting import router as backtesting_router
+from api.routers.models import router as models_router
 from api.routers.predictions import router as predictions_router
 from api.routers.prices import router as prices_router
 from shared.db.crud import get_evaluated_predictions
@@ -18,6 +19,7 @@ app.include_router(router)
 app.include_router(prices_router)
 app.include_router(predictions_router)
 app.include_router(backtesting_router)
+app.include_router(models_router)
 
 # Configure Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
