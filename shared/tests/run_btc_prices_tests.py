@@ -6,11 +6,12 @@ Run with: docker compose exec api python shared/tests/run_btc_prices_tests.py
 """
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
 from shared.db.models import BtcPrice
@@ -41,7 +42,16 @@ def test_scenario_1_table_exists():
 
     # Assert: All columns exist
     columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
-    expected_cols = ["id", "timestamp", "open", "high", "low", "close", "volume", "source"]
+    expected_cols = [
+        "id",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "source",
+    ]
 
     for col_name in expected_cols:
         assert col_name in columns, f"Column '{col_name}' should exist"
@@ -64,7 +74,7 @@ def test_scenario_2_insert_valid_record():
     session = Session()
 
     try:
-        test_time = datetime(2026, 5, 16, 20, 30, 0, tzinfo=timezone.utc)
+        test_time = datetime(2026, 5, 16, 20, 30, 0, tzinfo=UTC)
 
         price = BtcPrice(
             timestamp=test_time,
@@ -73,7 +83,7 @@ def test_scenario_2_insert_valid_record():
             low=Decimal("66900.00"),
             close=Decimal("67432.50"),
             volume=Decimal("123.45"),
-            source="binance"
+            source="binance",
         )
         session.add(price)
         session.commit()
@@ -102,7 +112,7 @@ def test_scenario_3_duplicate_timestamp():
     session = Session()
 
     try:
-        test_time = datetime(2026, 5, 16, 20, 31, 0, tzinfo=timezone.utc)
+        test_time = datetime(2026, 5, 16, 20, 31, 0, tzinfo=UTC)
 
         # Insert first record
         first = BtcPrice(
@@ -112,7 +122,7 @@ def test_scenario_3_duplicate_timestamp():
             low=Decimal("49000.00"),
             close=Decimal("50500.00"),
             volume=Decimal("100.0"),
-            source="binance"
+            source="binance",
         )
         session.add(first)
         session.commit()
@@ -125,7 +135,7 @@ def test_scenario_3_duplicate_timestamp():
             low=Decimal("50000.00"),
             close=Decimal("51500.00"),
             volume=Decimal("200.0"),
-            source="binance"
+            source="binance",
         )
         session.add(duplicate)
 
@@ -134,8 +144,9 @@ def test_scenario_3_duplicate_timestamp():
             assert False, "Should have raised IntegrityError"
         except IntegrityError as e:
             error_msg = str(e).lower()
-            assert "unique" in error_msg or "duplicate" in error_msg, \
+            assert "unique" in error_msg or "duplicate" in error_msg, (
                 "Error should mention unique constraint"
+            )
 
     finally:
         session.close()
@@ -154,13 +165,13 @@ def test_edge_case_zero_volume():
 
     try:
         price = BtcPrice(
-            timestamp=datetime(2026, 5, 16, 20, 32, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 16, 20, 32, 0, tzinfo=UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
             low=Decimal("50000.0"),
             close=Decimal("50000.0"),
             volume=Decimal("0.0"),
-            source="binance"
+            source="binance",
         )
         session.add(price)
         session.commit()
@@ -183,8 +194,14 @@ def main():
 
     tests = [
         ("Scenario 1: Table exists with correct schema", test_scenario_1_table_exists),
-        ("Scenario 2: Insert and query valid record", test_scenario_2_insert_valid_record),
-        ("Scenario 3: Duplicate timestamp rejected", test_scenario_3_duplicate_timestamp),
+        (
+            "Scenario 2: Insert and query valid record",
+            test_scenario_2_insert_valid_record,
+        ),
+        (
+            "Scenario 3: Duplicate timestamp rejected",
+            test_scenario_3_duplicate_timestamp,
+        ),
         ("Edge case: Zero volume is valid", test_edge_case_zero_volume),
     ]
 

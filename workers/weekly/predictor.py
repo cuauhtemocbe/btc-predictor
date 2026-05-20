@@ -18,11 +18,11 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from shared.db.database import SessionLocal
+from shared.db.models import BtcPrice, Model, Prediction
 from workers.weekly.models import BaseModel, LinearRegressionModel
 
 # Configure logging

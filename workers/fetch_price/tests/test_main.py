@@ -31,7 +31,7 @@ class TestFetchPrices:
                 63600.00,
                 63300.00,
                 63500.00,
-                0.0  # CoinGecko OHLC doesn't include volume
+                0.0,  # CoinGecko OHLC doesn't include volume
             ),
             (
                 datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
@@ -39,8 +39,8 @@ class TestFetchPrices:
                 63450.00,
                 63100.00,
                 63400.00,
-                0.0  # CoinGecko OHLC doesn't include volume
-            )
+                0.0,  # CoinGecko OHLC doesn't include volume
+            ),
         ]
 
         with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls:
@@ -51,9 +51,7 @@ class TestFetchPrices:
 
             # Verify CoinGeckoClient was called correctly
             mock_instance.fetch_ohlcv.assert_called_once_with(
-                coin_id="bitcoin",
-                vs_currency="usd",
-                days=1
+                coin_id="bitcoin", vs_currency="usd", days=1
             )
 
             # Verify returned data
@@ -121,7 +119,7 @@ class TestFilterExistingTimestamps:
                 low=Decimal("63100.00"),
                 close=Decimal("63400.00"),
                 volume=Decimal("950.98765432"),
-                source="coingecko"
+                source="coingecko",
             ),
             BtcPrice(
                 timestamp=datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -130,8 +128,8 @@ class TestFilterExistingTimestamps:
                 low=Decimal("62800.25"),
                 close=Decimal("63200.00"),
                 volume=Decimal("0.0"),
-                source="coingecko"
-            )
+                source="coingecko",
+            ),
         ]
         test_db_session.add_all(existing)
         test_db_session.commit()
@@ -153,7 +151,7 @@ class TestFilterExistingTimestamps:
             low=Decimal("63100.00"),
             close=Decimal("63400.00"),
             volume=Decimal("950.98765432"),
-            source="coingecko"
+            source="coingecko",
         )
         test_db_session.add(existing)
         test_db_session.commit()
@@ -167,7 +165,7 @@ class TestFilterExistingTimestamps:
                 "low": Decimal("63100.00"),
                 "close": Decimal("63400.00"),
                 "volume": Decimal("0.0"),
-                "source": "coingecko"
+                "source": "coingecko",
             }
         ]
 
@@ -245,14 +243,15 @@ class TestMain:
                 63100.0 + i * 10,
                 62900.0 + i * 10,
                 63050.0 + i * 10,
-                0.0  # CoinGecko OHLC doesn't include volume
+                0.0,  # CoinGecko OHLC doesn't include volume
             )
             for i in range(24)
         ]
 
-        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
-             patch("fetch_price.main.SessionLocal") as mock_session_cls:
-
+        with (
+            patch("fetch_price.main.CoinGeckoClient") as mock_client_cls,
+            patch("fetch_price.main.SessionLocal") as mock_session_cls,
+        ):
             # Mock CoinGecko client
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
@@ -336,9 +335,10 @@ class TestMain:
             (datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),),
         ]
 
-        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
-             patch("fetch_price.main.SessionLocal") as mock_session_cls:
-
+        with (
+            patch("fetch_price.main.CoinGeckoClient") as mock_client_cls,
+            patch("fetch_price.main.SessionLocal") as mock_session_cls,
+        ):
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
@@ -371,9 +371,10 @@ class TestMain:
         And the job exits with code 1 (error)
         And no partial data is saved to the database
         """
-        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
-             patch("fetch_price.main.SessionLocal") as mock_session_cls:
-
+        with (
+            patch("fetch_price.main.CoinGeckoClient") as mock_client_cls,
+            patch("fetch_price.main.SessionLocal") as mock_session_cls,
+        ):
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(side_effect=TimeoutError("CoinGecko API timeout"))
 
@@ -409,9 +410,10 @@ class TestMain:
             )
         ]
 
-        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
-             patch("fetch_price.main.SessionLocal") as mock_session_cls:
-
+        with (
+            patch("fetch_price.main.CoinGeckoClient") as mock_client_cls,
+            patch("fetch_price.main.SessionLocal") as mock_session_cls,
+        ):
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=mock_candles)
 
@@ -431,9 +433,10 @@ class TestMain:
         When CoinGecko returns 0 candles
         Then log "No data fetched" and exit 0
         """
-        with patch("fetch_price.main.CoinGeckoClient") as mock_client_cls, \
-             patch("fetch_price.main.SessionLocal") as mock_session_cls:
-
+        with (
+            patch("fetch_price.main.CoinGeckoClient") as mock_client_cls,
+            patch("fetch_price.main.SessionLocal") as mock_session_cls,
+        ):
             mock_instance = mock_client_cls.return_value
             mock_instance.fetch_ohlcv = AsyncMock(return_value=[])
 

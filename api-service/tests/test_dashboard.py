@@ -68,7 +68,15 @@ async def test_dashboard_with_predictions(
     thead = table.find("thead")
     assert thead is not None
     headers = [th.text.strip() for th in thead.find_all("th")]
-    expected_headers = ["Date", "Price at Prediction", "Predicted", "Actual", "Error %", "Direction", "Model"]
+    expected_headers = [
+        "Date",
+        "Price at Prediction",
+        "Predicted",
+        "Actual",
+        "Error %",
+        "Direction",
+        "Model",
+    ]
     assert headers == expected_headers
 
 
@@ -208,7 +216,12 @@ async def test_dashboard_stats_summary(
 
     # Verify stat labels
     stat_labels = [card.find(class_="stat-label").get_text() for card in stat_cards]
-    expected_labels = ["Total Predictions", "Correct Direction", "Avg Error", "Active Model"]
+    expected_labels = [
+        "Total Predictions",
+        "Correct Direction",
+        "Avg Error",
+        "Active Model",
+    ]
 
     for expected in expected_labels:
         assert expected in stat_labels, f"Missing stat card: {expected}"

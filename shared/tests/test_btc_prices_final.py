@@ -5,12 +5,13 @@ Prerequisites: Run migrations before tests:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
+import pytest
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
 from shared.db.models import BtcPrice
@@ -21,10 +22,7 @@ from shared.db.models import BtcPrice
 def engine():
     """Create engine once for all tests."""
     eng = create_engine(
-        settings.database_url,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-        echo=False
+        settings.database_url, pool_pre_ping=True, pool_recycle=3600, echo=False
     )
     yield eng
     eng.dispose()
@@ -68,14 +66,25 @@ class TestGherkinScenario1:
 
         # Assert: All columns exist
         columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
-        expected_cols = ["id", "timestamp", "open", "high", "low", "close", "volume", "source"]
+        expected_cols = [
+            "id",
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source",
+        ]
 
         for col_name in expected_cols:
             assert col_name in columns, f"Column '{col_name}' should exist"
 
         # Assert: Timestamp is TIMESTAMPTZ
         timestamp_col = columns["timestamp"]
-        assert "TIMESTAMP" in str(timestamp_col["type"]), "timestamp should be TIMESTAMP type"
+        assert "TIMESTAMP" in str(timestamp_col["type"]), (
+            "timestamp should be TIMESTAMP type"
+        )
 
         # Assert: UNIQUE index on timestamp
         indexes = inspector.get_indexes("btc_prices")
@@ -97,7 +106,7 @@ class TestGherkinScenario2:
 
     def test_insert_and_query_valid_record(self, session):
         """Test inserting a valid OHLCV record."""
-        test_time = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
+        test_time = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
 
         # Act: Insert record
         price = BtcPrice(
@@ -107,7 +116,7 @@ class TestGherkinScenario2:
             low=Decimal("66900.00"),
             close=Decimal("67432.50"),
             volume=Decimal("123.45"),
-            source="binance"
+            source="binance",
         )
         session.add(price)
         session.commit()
@@ -117,9 +126,7 @@ class TestGherkinScenario2:
         assert price.id is not None, "Saved record should have an ID"
 
         # Assert: Can query by timestamp
-        found = session.query(BtcPrice).filter(
-            BtcPrice.timestamp == test_time
-        ).first()
+        found = session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).first()
 
         assert found is not None, "Should find record by timestamp"
         assert found.close == Decimal("67432.50"), "Close price should match"
@@ -148,7 +155,7 @@ class TestGherkinScenario3:
         session = SessionLocal()
 
         try:
-            test_time = datetime(2026, 5, 16, 15, 0, 0, tzinfo=timezone.utc)
+            test_time = datetime(2026, 5, 16, 15, 0, 0, tzinfo=UTC)
 
             # Arrange: Insert first record and commit
             first = BtcPrice(
@@ -158,7 +165,7 @@ class TestGherkinScenario3:
                 low=Decimal("49000.00"),
                 close=Decimal("50500.00"),
                 volume=Decimal("100.0"),
-                source="binance"
+                source="binance",
             )
             session.add(first)
             session.commit()
@@ -171,7 +178,7 @@ class TestGherkinScenario3:
                 low=Decimal("50000.00"),
                 close=Decimal("51500.00"),
                 volume=Decimal("200.0"),
-                source="binance"
+                source="binance",
             )
             session.add(duplicate)
 
@@ -180,16 +187,17 @@ class TestGherkinScenario3:
 
             # Assert: Error mentions unique/duplicate
             error_msg = str(exc.value).lower()
-            assert "unique" in error_msg or "duplicate" in error_msg, \
+            assert "unique" in error_msg or "duplicate" in error_msg, (
                 "Error should mention unique constraint violation"
+            )
 
             # Rollback the failed transaction
             session.rollback()
 
             # Verify only one record exists (in new transaction)
-            count = session.query(BtcPrice).filter(
-                BtcPrice.timestamp == test_time
-            ).count()
+            count = (
+                session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).count()
+            )
             assert count == 1, "Should have exactly one record with this timestamp"
 
         finally:
@@ -223,13 +231,13 @@ class TestZombiesEdgeCases:
     def test_zero_volume_is_valid(self, session):
         """ZOMBIES Z: Zero volume should be accepted."""
         price = BtcPrice(
-            timestamp=datetime(2026, 5, 16, 16, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
             low=Decimal("50000.0"),
             close=Decimal("50000.0"),
             volume=Decimal("0.0"),  # Zero is valid
-            source="binance"
+            source="binance",
         )
         session.add(price)
         session.commit()
@@ -245,7 +253,7 @@ class TestZombiesEdgeCases:
             low=Decimal("50000.0"),
             close=Decimal("50000.0"),
             volume=Decimal("100.0"),
-            source="binance"
+            source="binance",
         )
         session.add(price)
 
@@ -260,13 +268,13 @@ class TestZombiesEdgeCases:
         large_price = Decimal("999999999.99999999")  # Within NUMERIC(18,8)
 
         price = BtcPrice(
-            timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),
             open=large_price,
             high=large_price,
             low=large_price,
             close=large_price,
             volume=Decimal("1000.0"),
-            source="binance"
+            source="binance",
         )
         session.add(price)
         session.commit()

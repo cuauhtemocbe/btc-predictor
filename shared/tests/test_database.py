@@ -7,11 +7,13 @@ Covers all Gherkin scenarios from US-001:
 - Session lifecycle management
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from shared.db.database import engine, SessionLocal, get_db
+
+from shared.db.database import SessionLocal, engine, get_db
 
 
 class TestDatabaseEngine:

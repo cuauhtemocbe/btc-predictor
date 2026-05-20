@@ -34,8 +34,15 @@ def test_models_table_exists(db_engine, apply_migrations):
     # Verify columns
     columns = {col["name"]: col for col in inspector.get_columns("models")}
     expected_columns = [
-        "id", "name", "version", "params", "artifact",
-        "trained_at", "train_from", "train_to", "is_active"
+        "id",
+        "name",
+        "version",
+        "params",
+        "artifact",
+        "trained_at",
+        "train_from",
+        "train_to",
+        "is_active",
     ]
 
     for col_name in expected_columns:
@@ -46,8 +53,9 @@ def test_models_table_exists(db_engine, apply_migrations):
     assert "VARCHAR" in str(columns["name"]["type"])
     assert "VARCHAR" in str(columns["version"]["type"])
     # Accept both JSON and JSONB (SQLAlchemy JSON type maps to either)
-    assert ("JSON" in str(columns["params"]["type"]) or
-            "JSONB" in str(columns["params"]["type"]))
+    assert "JSON" in str(columns["params"]["type"]) or "JSONB" in str(
+        columns["params"]["type"]
+    )
     assert "BYTEA" in str(columns["artifact"]["type"])
     assert "TIMESTAMP" in str(columns["trained_at"]["type"])
     assert "DATE" in str(columns["train_from"]["type"])
@@ -79,11 +87,13 @@ def test_models_table_constraints(db_engine, apply_migrations):
 
     # Verify CHECK constraint exists
     with db_engine.connect() as conn:
-        result = conn.execute(text("""
+        result = conn.execute(
+            text("""
             SELECT constraint_name, check_clause
             FROM information_schema.check_constraints
             WHERE constraint_name = 'valid_training_period'
-        """))
+        """)
+        )
         check_constraints = list(result)
         assert len(check_constraints) > 0, "CHECK constraint not found"
 
@@ -206,20 +216,18 @@ def test_retrieve_active_model(db_session, sample_model_artifact):
     db_session.commit()
 
     # Query for active model
-    active_model = db_session.query(Model).filter_by(
-        name="linear_v1",
-        is_active=True
-    ).first()
+    active_model = (
+        db_session.query(Model).filter_by(name="linear_v1", is_active=True).first()
+    )
 
     assert active_model is not None
     assert active_model.version == "1.1.0"
     assert active_model.is_active is True
 
     # Verify only one active model
-    active_count = db_session.query(Model).filter_by(
-        name="linear_v1",
-        is_active=True
-    ).count()
+    active_count = (
+        db_session.query(Model).filter_by(name="linear_v1", is_active=True).count()
+    )
     assert active_count == 1
 
 
@@ -309,7 +317,7 @@ def test_check_constraint_violation(db_session, sample_model_artifact):
         artifact=sample_model_artifact,
         trained_at=datetime.now(UTC),
         train_from=date(2024, 5, 1),  # Later date
-        train_to=date(2024, 1, 1),    # Earlier date (INVALID)
+        train_to=date(2024, 1, 1),  # Earlier date (INVALID)
         is_active=False,
     )
 

@@ -87,6 +87,7 @@ async def test_get_prices_empty_table(client, db_session):
     """
     # Given: Empty table - explicitly clean to ensure isolation
     from shared.db.models import BtcPrice
+
     db_session.query(BtcPrice).delete()
     db_session.commit()
 
@@ -177,8 +178,9 @@ async def test_get_prices_ordering(client, db_session, sample_prices):
 
     # Verify each timestamp is >= the next one
     for i in range(len(timestamps) - 1):
-        assert timestamps[i] >= timestamps[i + 1], \
+        assert timestamps[i] >= timestamps[i + 1], (
             f"Ordering violated: {timestamps[i]} should be >= {timestamps[i + 1]}"
+        )
 
 
 # Scenario 8: Response schema validation

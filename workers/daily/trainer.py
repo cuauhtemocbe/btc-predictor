@@ -58,11 +58,7 @@ def fetch_training_data(
     Raises:
         ValueError: If insufficient data available
     """
-    stmt = (
-        select(BtcPrice.close)
-        .order_by(BtcPrice.timestamp.desc())
-        .limit(min_days)
-    )
+    stmt = select(BtcPrice.close).order_by(BtcPrice.timestamp.desc()).limit(min_days)
     results = session.execute(stmt).scalars().all()
 
     if len(results) < min_days:
@@ -389,9 +385,7 @@ def train_all_models(
         [Decimal(str(p)) for p in val_prices], window_days
     )
 
-    logger.info(
-        f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}"
-    )
+    logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
 
     # Train all models
     successful_models: list[tuple[str, BaseModel, float]] = []

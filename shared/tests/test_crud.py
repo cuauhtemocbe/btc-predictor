@@ -117,17 +117,18 @@ def test_join_uses_exact_equality(db_session, sample_model_artifact):
     # If JOIN used <= or 'is not', this would fail
     for pred in results:
         if pred.id == prediction1.id:
-            assert pred.model_id == model1.id,                 f"Prediction 1 should have model_id={model1.id}, got {pred.model_id}"
+            assert pred.model_id == model1.id, (
+                f"Prediction 1 should have model_id={model1.id}, got {pred.model_id}"
+            )
         elif pred.id == prediction2.id:
-            assert pred.model_id == model2.id,                 f"Prediction 2 should have model_id={model2.id}, got {pred.model_id}"
+            assert pred.model_id == model2.id, (
+                f"Prediction 2 should have model_id={model2.id}, got {pred.model_id}"
+            )
         else:
             pytest.fail(f"Unexpected prediction id: {pred.id}")
 
 
-def test_to_date_filter_uses_less_than_or_equal(
-    db_session,
-    sample_model_artifact
-):
+def test_to_date_filter_uses_less_than_or_equal(db_session, sample_model_artifact):
     """
     MUTATION TEST: Verify to_date filter uses <= (range), not == (exact).
 
@@ -203,25 +204,23 @@ def test_to_date_filter_uses_less_than_or_equal(
     db_session.commit()
 
     # Query with to_date=2026-05-05
-    results = get_evaluated_predictions(
-        db_session,
-        to_date=date(2026, 5, 5)
-    )
+    results = get_evaluated_predictions(db_session, to_date=date(2026, 5, 5))
 
     # Should return 2 predictions (2026-05-01 and 2026-05-05)
     # If mutant changed <= to ==, it would only return 1 (2026-05-05)
-    assert len(results) == 2,         f"Expected 2 predictions with to_date <= 2026-05-05, got {len(results)}"
+    assert len(results) == 2, (
+        f"Expected 2 predictions with to_date <= 2026-05-05, got {len(results)}"
+    )
 
     result_dates = {pred.predicted_for for pred in results}
     assert date(2026, 5, 1) in result_dates, "Should include prediction from 2026-05-01"
     assert date(2026, 5, 5) in result_dates, "Should include prediction from 2026-05-05"
-    assert date(2026, 5, 10) not in result_dates, "Should NOT include prediction from 2026-05-10"
+    assert date(2026, 5, 10) not in result_dates, (
+        "Should NOT include prediction from 2026-05-10"
+    )
 
 
-def test_from_date_filter_uses_greater_than_or_equal(
-    db_session,
-    sample_model_artifact
-):
+def test_from_date_filter_uses_greater_than_or_equal(db_session, sample_model_artifact):
     """
     Test that from_date filter uses >= (range), not == (exact).
 
@@ -290,10 +289,7 @@ def test_from_date_filter_uses_greater_than_or_equal(
     db_session.commit()
 
     # Query with from_date=2026-05-05
-    results = get_evaluated_predictions(
-        db_session,
-        from_date=date(2026, 5, 5)
-    )
+    results = get_evaluated_predictions(db_session, from_date=date(2026, 5, 5))
 
     # Should return 2 predictions (2026-05-05 and 2026-05-10)
     assert len(results) == 2
@@ -304,10 +300,7 @@ def test_from_date_filter_uses_greater_than_or_equal(
     assert date(2026, 5, 10) in result_dates
 
 
-def test_date_range_filter_both_boundaries(
-    db_session,
-    sample_model_artifact
-):
+def test_date_range_filter_both_boundaries(db_session, sample_model_artifact):
     """
     Test that both from_date and to_date work together correctly.
 
@@ -351,9 +344,7 @@ def test_date_range_filter_both_boundaries(
 
     # Query with from_date=2026-05-03, to_date=2026-05-07
     results = get_evaluated_predictions(
-        db_session,
-        from_date=date(2026, 5, 3),
-        to_date=date(2026, 5, 7)
+        db_session, from_date=date(2026, 5, 3), to_date=date(2026, 5, 7)
     )
 
     # Should return 3 predictions (2026-05-03, 05, 07)
@@ -626,9 +617,7 @@ def test_activate_model_raises_error_for_nonexistent_id(
         activate_model(db_session, model_id=9999)
 
 
-def test_activate_model_only_one_active_at_a_time(
-    db_session, sample_model_artifact
-):
+def test_activate_model_only_one_active_at_a_time(db_session, sample_model_artifact):
     """
     CRITICAL TEST: Verify only ONE model is active after activation.
 

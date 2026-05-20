@@ -10,10 +10,10 @@ This test suite validates that all models work together consistently:
 
 import numpy as np
 import pytest
-from shared.db.models import Base
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
+from shared.db.models import Base
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -78,9 +78,7 @@ class TestAllModelsIntegration:
         assert hasattr(model, "train") and callable(model.train)
         assert hasattr(model, "predict") and callable(model.predict)
         assert hasattr(model, "serialize") and callable(model.serialize)
-        assert hasattr(model_class, "deserialize") and callable(
-            model_class.deserialize
-        )
+        assert hasattr(model_class, "deserialize") and callable(model_class.deserialize)
 
         # Check property exists
         assert hasattr(model, "is_trained")
@@ -170,9 +168,9 @@ class TestAllModelsIntegration:
         if prediction > 0:
             last_price = X_new[0, -1]
             # Allow wider bounds for models trained on minimal data
-            assert (
-                0.2 * last_price <= prediction <= 2.0 * last_price
-            ), f"{model_name}: prediction {prediction} far from last price {last_price}"
+            assert 0.2 * last_price <= prediction <= 2.0 * last_price, (
+                f"{model_name}: prediction {prediction} far from last price {last_price}"
+            )
 
     def test_all_models_can_be_imported(self):
         """
@@ -333,7 +331,7 @@ class TestModelComparison:
         assert arima_size_mb < 5.0, f"ARIMA too large: {arima_size_mb:.2f}MB"
 
         # Print sizes for info (visible in pytest -v output)
-        print(f"\nModel serialization sizes:")
+        print("\nModel serialization sizes:")
         print(f"  Linear:  {linear_size_mb:.3f} MB")
         print(f"  XGBoost: {xgb_size_mb:.3f} MB")
         print(f"  LSTM:    {lstm_size_mb:.3f} MB")

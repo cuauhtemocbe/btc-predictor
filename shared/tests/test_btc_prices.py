@@ -8,13 +8,14 @@ Covers all Gherkin scenarios from US-002:
 4. Downgrade migration removes table
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from sqlalchemy import text, inspect
-from sqlalchemy.exc import IntegrityError
+
+import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import inspect
+from sqlalchemy.exc import IntegrityError
 
 from shared.config import settings
 from shared.db.models import BtcPrice
@@ -37,21 +38,36 @@ class TestBtcPricesTableMigration:
 
         # Assert: Table exists
         inspector = inspect(db_engine)
-        assert "btc_prices" in inspector.get_table_names(), "btc_prices table should exist"
+        assert "btc_prices" in inspector.get_table_names(), (
+            "btc_prices table should exist"
+        )
 
         # Assert: Columns exist with correct types
         columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
-        expected_columns = ["id", "timestamp", "open", "high", "low", "close", "volume", "source"]
+        expected_columns = [
+            "id",
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source",
+        ]
         for col_name in expected_columns:
             assert col_name in columns, f"Column {col_name} should exist"
 
         # Assert: Timestamp column has correct type (TIMESTAMP WITH TIME ZONE)
         timestamp_col = columns["timestamp"]
-        assert timestamp_col["type"].__class__.__name__ == "TIMESTAMP", "timestamp should be TIMESTAMP type"
+        assert timestamp_col["type"].__class__.__name__ == "TIMESTAMP", (
+            "timestamp should be TIMESTAMP type"
+        )
 
         # Assert: UNIQUE constraint on timestamp exists
         indexes = inspector.get_indexes("btc_prices")
-        timestamp_unique_index = next((idx for idx in indexes if "timestamp" in idx["column_names"]), None)
+        timestamp_unique_index = next(
+            (idx for idx in indexes if "timestamp" in idx["column_names"]), None
+        )
         assert timestamp_unique_index is not None, "Should have index on timestamp"
         assert timestamp_unique_index["unique"], "timestamp index should be UNIQUE"
 
@@ -70,7 +86,7 @@ class TestInsertValidRecord:
     def test_insert_valid_ohlcv_record(self, db_session, apply_migrations):
         """Test inserting a valid OHLCV record via SQLAlchemy ORM."""
         # Arrange
-        test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
+        test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
         test_close = Decimal("67432.50")
         test_volume = Decimal("123.45")
 
@@ -92,7 +108,11 @@ class TestInsertValidRecord:
         assert price.id is not None, "Record should have an ID after commit"
 
         # Assert: Query by timestamp returns the record
-        retrieved = db_session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).first()
+        retrieved = (
+            db_session.query(BtcPrice)
+            .filter(BtcPrice.timestamp == test_timestamp)
+            .first()
+        )
         assert retrieved is not None, "Should be able to query record by timestamp"
         assert retrieved.close == test_close, "Close price should match"
         assert retrieved.volume == test_volume, "Volume should match"
@@ -100,8 +120,12 @@ class TestInsertValidRecord:
 
         # Assert: Data types are correct (Decimal for prices, datetime for timestamp)
         assert isinstance(retrieved.close, Decimal), "Price should be Decimal type"
-        assert isinstance(retrieved.timestamp, datetime), "Timestamp should be datetime type"
-        assert retrieved.timestamp.tzinfo is not None, "Timestamp should be timezone-aware"
+        assert isinstance(retrieved.timestamp, datetime), (
+            "Timestamp should be datetime type"
+        )
+        assert retrieved.timestamp.tzinfo is not None, (
+            "Timestamp should be timezone-aware"
+        )
 
 
 class TestDuplicateTimestampRejected:
@@ -114,7 +138,9 @@ class TestDuplicateTimestampRejected:
     And the second record is not saved
     """
 
-    def test_duplicate_timestamp_raises_integrity_error(self, db_engine, apply_migrations):
+    def test_duplicate_timestamp_raises_integrity_error(
+        self, db_engine, apply_migrations
+    ):
         """Test that inserting duplicate timestamp raises IntegrityError."""
         from sqlalchemy.orm import sessionmaker
 
@@ -124,7 +150,7 @@ class TestDuplicateTimestampRejected:
 
         try:
             # Arrange: Insert first record and commit it
-            test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=timezone.utc)
+            test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
             first_price = BtcPrice(
                 timestamp=test_timestamp,
                 open=Decimal("50000.00"),
@@ -153,18 +179,27 @@ class TestDuplicateTimestampRejected:
                 session.commit()
 
             # Assert: Error message mentions unique constraint
-            assert "unique constraint" in str(exc_info.value).lower() or "duplicate key" in str(exc_info.value).lower()
+            assert (
+                "unique constraint" in str(exc_info.value).lower()
+                or "duplicate key" in str(exc_info.value).lower()
+            )
 
             # Rollback the failed transaction
             session.rollback()
 
             # Verify only one record exists (in a new transaction)
-            count = session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).count()
+            count = (
+                session.query(BtcPrice)
+                .filter(BtcPrice.timestamp == test_timestamp)
+                .count()
+            )
             assert count == 1, "Should have only one record with this timestamp"
 
         finally:
             # Clean up: delete test data
-            session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).delete()
+            session.query(BtcPrice).filter(
+                BtcPrice.timestamp == test_timestamp
+            ).delete()
             session.commit()
             session.close()
 
@@ -178,7 +213,9 @@ class TestDowngradeMigrationRemovesTable:
     Then the btc_prices table no longer exists
     """
 
-    @pytest.mark.skip(reason="Downgrade test conflicts with other tests that need the table. Tested manually.")
+    @pytest.mark.skip(
+        reason="Downgrade test conflicts with other tests that need the table. Tested manually."
+    )
     def test_downgrade_removes_btc_prices_table(self, db_engine, apply_migrations):
         """Test that downgrading migration removes btc_prices table.
 
@@ -192,14 +229,18 @@ class TestDowngradeMigrationRemovesTable:
 
         # Verify table exists
         inspector = inspect(db_engine)
-        assert "btc_prices" in inspector.get_table_names(), "Table should exist before downgrade"
+        assert "btc_prices" in inspector.get_table_names(), (
+            "Table should exist before downgrade"
+        )
 
         # Act: Downgrade migration
         command.downgrade(alembic_cfg, "base")
 
         # Assert: Table no longer exists
         inspector = inspect(db_engine)
-        assert "btc_prices" not in inspector.get_table_names(), "Table should not exist after downgrade"
+        assert "btc_prices" not in inspector.get_table_names(), (
+            "Table should not exist after downgrade"
+        )
 
         # Cleanup: Upgrade back to head for other tests
         command.upgrade(alembic_cfg, "head")
@@ -211,7 +252,7 @@ class TestBtcPriceModelEdgeCases:
     def test_zero_volume_is_valid(self, db_session, apply_migrations):
         """Test that volume=0.0 is valid (ZOMBIES: Zero case)."""
         price = BtcPrice(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
             low=Decimal("50000.0"),
@@ -246,7 +287,7 @@ class TestBtcPriceModelEdgeCases:
         # Note: SQLAlchemy requires explicit default in Python, not just DB default
         # So this test verifies the model definition includes default="binance"
         price = BtcPrice(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
             low=Decimal("50000.0"),

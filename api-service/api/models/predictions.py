@@ -71,8 +71,7 @@ class PnlResponse(BaseModel):
 
     total_pnl: float = Field(
         description=(
-            "Total accumulated profit/loss in USD "
-            "across all evaluated predictions"
+            "Total accumulated profit/loss in USD across all evaluated predictions"
         )
     )
     evaluated_predictions: int = Field(

@@ -7,10 +7,10 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
-from shared.db.models import Base, BtcPrice, Model, Prediction
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from shared.db.models import Base, BtcPrice, Model, Prediction
 from workers.daily.models import LinearRegressionModel, XGBoostModel
 
 
@@ -356,7 +356,9 @@ def sample_actual_price_for_today(db_session: Session) -> BtcPrice:
         BtcPrice record with timestamp=today 7am
     """
     today = date.today()
-    timestamp_7am = datetime.combine(today, datetime.min.time().replace(hour=7), tzinfo=UTC)
+    timestamp_7am = datetime.combine(
+        today, datetime.min.time().replace(hour=7), tzinfo=UTC
+    )
 
     price_record = BtcPrice(
         timestamp=timestamp_7am,

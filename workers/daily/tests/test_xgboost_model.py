@@ -175,7 +175,9 @@ class TestXGBoostModel:
         training_time = end_time - start_time
 
         # Then: Training time < 30 seconds
-        assert training_time < 30.0, f"Training took {training_time:.2f}s, expected < 30s"
+        assert training_time < 30.0, (
+            f"Training took {training_time:.2f}s, expected < 30s"
+        )
         assert model.is_trained
 
 

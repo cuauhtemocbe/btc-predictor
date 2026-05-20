@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 
 # Add workers to path
-sys.path.insert(0, '/app/workers')
+sys.path.insert(0, "/app/workers")
 
 from fetch_price.binance_client import BinanceClient
 
@@ -69,7 +69,7 @@ async def main():
 
         # Verify ordering (newest first)
         timestamps = [candle[0] for candle in result]
-        is_descending = all(timestamps[i] >= timestamps[i+1] for i in range(len(timestamps)-1))
+        is_descending = all(timestamps[i] >= timestamps[i + 1] for i in range(len(timestamps) - 1))
 
         if is_descending:
             print("   ✅ Candles ordered correctly (newest first)")

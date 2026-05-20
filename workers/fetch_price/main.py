@@ -3,6 +3,7 @@ Fetch Price Job - Main Entry Point
 
 Fetches hourly BTC/USDT prices from Binance and saves to database.
 """
+
 import asyncio
 import logging
 import sys
@@ -16,15 +17,14 @@ from sqlalchemy.orm import Session
 
 from fetch_price.coingecko_client import CoinGeckoClient
 from fetch_price.exceptions import (
-    PriceAPIError,
     InvalidSymbolError,
+    PriceAPIError,
     RateLimitError,
 )
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 logger = logging.getLogger(__name__)
@@ -56,15 +56,17 @@ async def fetch_prices(days: int = 1) -> List[Dict]:
     # Convert tuples to dictionaries for easier handling
     prices = []
     for timestamp, open_price, high, low, close, volume in candles:
-        prices.append({
-            "timestamp": timestamp,
-            "open": Decimal(str(open_price)),
-            "high": Decimal(str(high)),
-            "low": Decimal(str(low)),
-            "close": Decimal(str(close)),
-            "volume": Decimal(str(volume)),
-            "source": "coingecko"
-        })
+        prices.append(
+            {
+                "timestamp": timestamp,
+                "open": Decimal(str(open_price)),
+                "high": Decimal(str(high)),
+                "low": Decimal(str(low)),
+                "close": Decimal(str(close)),
+                "volume": Decimal(str(volume)),
+                "source": "coingecko",
+            }
+        )
 
     logger.info(f"Fetched {len(prices)} candles from CoinGecko")
     return prices
@@ -88,15 +90,12 @@ def filter_existing_timestamps(prices: List[Dict], session: Session) -> List[Dic
     timestamps = [p["timestamp"] for p in prices]
 
     # Query database for existing timestamps
-    existing = session.query(BtcPrice.timestamp).filter(
-        BtcPrice.timestamp.in_(timestamps)
-    ).all()
+    existing = session.query(BtcPrice.timestamp).filter(BtcPrice.timestamp.in_(timestamps)).all()
 
     # Convert to set for O(1) lookup
     # Note: SQLite returns datetime without timezone, so we need to replace with UTC for comparison
     existing_set = {
-        t[0].replace(tzinfo=timezone.utc) if t[0].tzinfo is None else t[0]
-        for t in existing
+        t[0].replace(tzinfo=timezone.utc) if t[0].tzinfo is None else t[0] for t in existing
     }
 
     # Filter out existing timestamps
@@ -156,8 +155,7 @@ async def main() -> int:
                 logger.info(f"Job completed: {inserted} new records added")
             else:
                 logger.info(
-                    f"Job completed: No new prices to insert "
-                    f"(all {len(prices)} already exist)"
+                    f"Job completed: No new prices to insert (all {len(prices)} already exist)"
                 )
 
         return 0

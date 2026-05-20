@@ -31,7 +31,7 @@ __version__ = "0.1.0"
 
 # Export key components for easy importing
 from shared.config import Settings, settings
-from shared.db import engine, SessionLocal, get_db
+from shared.db import SessionLocal, engine, get_db
 
 __all__ = [
     "__version__",

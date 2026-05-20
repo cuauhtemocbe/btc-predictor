@@ -4,14 +4,14 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.orm import Session
-
-from shared.db.models import Model, Prediction
 from btc_shared.strategies import (
     calculate_cumulative_pnl,
     calculate_strategy_metrics,
     get_all_strategies_metrics,
 )
+from sqlalchemy.orm import Session
+
+from shared.db.models import Model, Prediction
 
 
 @pytest.fixture
@@ -147,7 +147,9 @@ def test_calculate_strategy_metrics_with_empty_predictions():
     assert metrics["trade_count"] == 0
 
 
-def test_calculate_strategy_metrics_with_only_unevaluated_predictions(db_session: Session, test_model: Model):
+def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
+    db_session: Session, test_model: Model
+):
     """Test metrics with predictions that haven't been evaluated yet (actual_price is NULL)."""
     predictions = [
         Prediction(
@@ -215,7 +217,9 @@ def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
     assert cumulative[4]["cumulative_pnl"] == 370.0  # 220 + 150
 
 
-def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session, test_model: Model):
+def test_calculate_cumulative_pnl_sorted_by_date(
+    db_session: Session, test_model: Model
+):
     """Test that cumulative PnL is calculated in date order."""
     # Insert predictions out of order
     predictions = [
@@ -270,7 +274,9 @@ def test_calculate_cumulative_pnl_sorted_by_date(db_session: Session, test_model
     assert cumulative[2]["cumulative_pnl"] == 250.0  # 50 + 200
 
 
-def test_get_all_strategies_metrics(db_session: Session, sample_predictions: list[Prediction]):
+def test_get_all_strategies_metrics(
+    db_session: Session, sample_predictions: list[Prediction]
+):
     """Test getting metrics for all 4 strategies at once."""
     strategies = get_all_strategies_metrics(db_session)
 

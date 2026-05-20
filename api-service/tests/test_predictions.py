@@ -56,6 +56,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
     Usage:
         sample_predictions_factory(count=10, evaluated=True)
     """
+
     def _create_predictions(count: int = 10, evaluated: bool = True):
         predictions = []
         base_date = date.today()
@@ -63,9 +64,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
         for i in range(count):
             predicted_for = base_date - timedelta(days=i)
             predicted_at = datetime.combine(
-                predicted_for - timedelta(days=1),
-                datetime.min.time(),
-                tzinfo=UTC
+                predicted_for - timedelta(days=1), datetime.min.time(), tzinfo=UTC
             ).replace(hour=19)  # 7pm day before
 
             price_at_prediction = Decimal("67000.0") + Decimal(i * 100)
@@ -84,9 +83,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
                 actual_price = Decimal("67800.0") + Decimal(i * 100)
                 prediction.actual_price = actual_price
                 prediction.evaluated_at = datetime.combine(
-                    predicted_for,
-                    datetime.min.time(),
-                    tzinfo=UTC
+                    predicted_for, datetime.min.time(), tzinfo=UTC
                 ).replace(hour=7, minute=1)  # 7:01am on prediction day
                 prediction.error_abs = abs(actual_price - predicted_price)
                 prediction.error_pct = (
@@ -416,9 +413,7 @@ async def test_get_total_pnl_with_losses(
     for i in range(5):
         predicted_for = date.today() - timedelta(days=i)
         predicted_at = datetime.combine(
-            predicted_for - timedelta(days=1),
-            datetime.min.time(),
-            tzinfo=UTC
+            predicted_for - timedelta(days=1), datetime.min.time(), tzinfo=UTC
         ).replace(hour=19)
 
         price_at_prediction = Decimal("67000.0")
@@ -600,9 +595,7 @@ async def test_strategies_metrics_calculation(
     data = response.json()
 
     # Find Long/Short strategy
-    long_short = next(
-        s for s in data["strategies"] if s["name"] == "long_short"
-    )
+    long_short = next(s for s in data["strategies"] if s["name"] == "long_short")
 
     # Assert metrics
     assert long_short["total_pnl"] == 370.0

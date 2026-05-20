@@ -5,12 +5,13 @@ These tests assume migrations have been applied:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
+import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
 from shared.db.models import BtcPrice
@@ -41,7 +42,7 @@ def session(engine):
 
 def test_insert_valid_ohlcv_record(session):
     """Gherkin Scenario 2: Insert valid OHLCV record."""
-    test_timestamp = datetime(2026, 5, 16, 15, 0, 0, tzinfo=timezone.utc)
+    test_timestamp = datetime(2026, 5, 16, 15, 0, 0, tzinfo=UTC)
 
     price = BtcPrice(
         timestamp=test_timestamp,
@@ -58,7 +59,9 @@ def test_insert_valid_ohlcv_record(session):
 
     assert price.id is not None
 
-    retrieved = session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).first()
+    retrieved = (
+        session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).first()
+    )
     assert retrieved is not None
     assert retrieved.close == Decimal("67432.50")
     assert retrieved.source == "binance"
@@ -66,7 +69,7 @@ def test_insert_valid_ohlcv_record(session):
 
 def test_duplicate_timestamp_rejected(session):
     """Gherkin Scenario 3: Duplicate timestamp is rejected."""
-    test_timestamp = datetime(2026, 5, 16, 16, 0, 0, tzinfo=timezone.utc)
+    test_timestamp = datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC)
 
     first = BtcPrice(
         timestamp=test_timestamp,
@@ -100,7 +103,7 @@ def test_duplicate_timestamp_rejected(session):
 def test_zero_volume_is_valid(session):
     """ZOMBIES edge case: Zero volume is valid."""
     price = BtcPrice(
-        timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),
         open=Decimal("50000.0"),
         high=Decimal("50000.0"),
         low=Decimal("50000.0"),

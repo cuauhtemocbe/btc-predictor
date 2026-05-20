@@ -108,9 +108,7 @@ class TestARIMAModel:
         recent_avg = np.mean(prices[-10:])
         assert 0.9 * recent_avg <= prediction <= 1.1 * recent_avg
 
-    def test_arima_predict_returns_valid_float(
-        self, sliding_window_data, last_30_days
-    ):
+    def test_arima_predict_returns_valid_float(self, sliding_window_data, last_30_days):
         """
         Gherkin Scenario: ARIMA produces valid predictions
 
@@ -179,7 +177,11 @@ class TestARIMAModel:
         restored_prediction = restored_model.predict(X_new)
 
         # Predictions should be in similar range (within 20%)
-        assert 0.8 * original_prediction <= restored_prediction <= 1.2 * original_prediction
+        assert (
+            0.8 * original_prediction
+            <= restored_prediction
+            <= 1.2 * original_prediction
+        )
 
 
 class TestARIMAModelEdgeCases:

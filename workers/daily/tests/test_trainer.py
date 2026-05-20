@@ -6,16 +6,15 @@ Covers:
 - train_all_models: Train all 4 models and select best
 """
 
-import pickle
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
 import pytest
 
 from shared.db.crud import get_active_model, get_all_models
-from shared.db.models import BtcPrice, Model
-from workers.daily.models import LinearRegressionModel, LSTMModel, XGBoostModel
+from shared.db.models import BtcPrice
+from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
     create_sliding_windows,
     train_all_models,
@@ -160,8 +159,10 @@ class TestTrainAllModels:
         for model in models:
             if model.id != active.id:
                 # Other models should have equal or higher error
-                assert model.params["validation_error_pct"] >= active_error or \
-                       abs(model.params["validation_error_pct"] - active_error) < 0.01
+                assert (
+                    model.params["validation_error_pct"] >= active_error
+                    or abs(model.params["validation_error_pct"] - active_error) < 0.01
+                )
 
     def test_train_all_models_uses_same_data(self, db_session, sample_prices):
         """Test that all models are trained on the same training data."""

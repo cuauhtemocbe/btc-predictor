@@ -276,22 +276,26 @@ class ARIMAModel(BaseModel):
             # Forecast 1 step ahead
             forecast = temp_fitted.forecast(steps=1)
             # forecast is a pandas Series, get the first value
-            if hasattr(forecast, 'iloc'):
+            if hasattr(forecast, "iloc"):
                 prediction = float(forecast.iloc[0])
             else:
                 # If it's an array, get first element
-                prediction = float(forecast[0]) if len(forecast) > 0 else float(forecast)
+                prediction = (
+                    float(forecast[0]) if len(forecast) > 0 else float(forecast)
+                )
 
             return prediction
         except Exception:
             # Fallback: use original fitted model
             forecast = self.fitted_model.forecast(steps=1)
             # forecast is a pandas Series, get the first value
-            if hasattr(forecast, 'iloc'):
+            if hasattr(forecast, "iloc"):
                 prediction = float(forecast.iloc[0])
             else:
                 # If it's an array, get first element
-                prediction = float(forecast[0]) if len(forecast) > 0 else float(forecast)
+                prediction = (
+                    float(forecast[0]) if len(forecast) > 0 else float(forecast)
+                )
             return prediction
 
     def serialize(self) -> bytes:

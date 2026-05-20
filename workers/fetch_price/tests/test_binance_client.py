@@ -110,10 +110,7 @@ class TestBinanceClientInitialization:
 
     def test_can_create_client_with_all_custom_params(self):
         """Test creating client with all custom parameters."""
-        client = BinanceClient(
-            base_url="https://custom.api",
-            timeout=15.0
-        )
+        client = BinanceClient(base_url="https://custom.api", timeout=15.0)
 
         assert client.base_url == "https://custom.api"
         assert client.timeout == 15.0
@@ -146,15 +143,14 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_binance_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call fetch_ohlcv
         result = await client.fetch_ohlcv(symbol="BTCUSDT", interval="1h", limit=1)
 
         # Verify API was called correctly
         mock_get.assert_called_once_with(
-            "/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "1h", "limit": 1}
+            "/api/v3/klines", params={"symbol": "BTCUSDT", "interval": "1h", "limit": 1}
         )
 
         # Verify result structure
@@ -186,7 +182,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_binance_multiple_candles
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call fetch_ohlcv
         result = await client.fetch_ohlcv(symbol="BTCUSDT", interval="1h", limit=3)
@@ -216,7 +212,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_binance_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_ohlcv()
 
@@ -227,6 +223,7 @@ class TestFetchOHLCV:
 
         # Verify timezone is UTC (tzinfo should be set)
         from datetime import timezone
+
         assert timestamp.tzinfo == timezone.utc
 
         # Verify the timestamp value is correct
@@ -247,7 +244,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_binance_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_ohlcv()
 
@@ -277,9 +274,7 @@ class TestErrorHandling:
 
         # Mock httpx to raise timeout
         mocker.patch.object(
-            client._client,
-            'get',
-            side_effect=httpx.TimeoutException("Request timed out")
+            client._client, "get", side_effect=httpx.TimeoutException("Request timed out")
         )
 
         with pytest.raises(TimeoutError, match="Binance API timeout"):
@@ -294,12 +289,10 @@ class TestErrorHandling:
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "60"}
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Rate limit exceeded",
-            request=mocker.Mock(),
-            response=mock_response
+            "Rate limit exceeded", request=mocker.Mock(), response=mock_response
         )
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(RateLimitError) as exc_info:
             await client.fetch_ohlcv()
@@ -317,12 +310,10 @@ class TestErrorHandling:
         mock_response.status_code = 429
         mock_response.headers = {}
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Rate limit",
-            request=mocker.Mock(),
-            response=mock_response
+            "Rate limit", request=mocker.Mock(), response=mock_response
         )
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(RateLimitError) as exc_info:
             await client.fetch_ohlcv()
@@ -338,12 +329,10 @@ class TestErrorHandling:
         mock_response.status_code = 400
         mock_response.json.return_value = {"msg": "Invalid symbol."}
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Bad request",
-            request=mocker.Mock(),
-            response=mock_response
+            "Bad request", request=mocker.Mock(), response=mock_response
         )
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(InvalidSymbolError, match="Invalid symbol"):
             await client.fetch_ohlcv(symbol="INVALID")
@@ -356,12 +345,10 @@ class TestErrorHandling:
         mock_response = mocker.Mock()
         mock_response.status_code = 500
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Internal server error",
-            request=mocker.Mock(),
-            response=mock_response
+            "Internal server error", request=mocker.Mock(), response=mock_response
         )
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(BinanceAPIError, match="Binance API error"):
             await client.fetch_ohlcv()
@@ -372,9 +359,7 @@ class TestErrorHandling:
 
         # Mock network error (connection refused, DNS failure, etc.)
         mocker.patch.object(
-            client._client,
-            'get',
-            side_effect=httpx.ConnectError("Failed to connect")
+            client._client, "get", side_effect=httpx.ConnectError("Failed to connect")
         )
 
         with pytest.raises(BinanceAPIError, match="Network error"):
@@ -388,12 +373,10 @@ class TestErrorHandling:
         mock_response = mocker.Mock()
         mock_response.status_code = 503
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Service unavailable",
-            request=mocker.Mock(),
-            response=mock_response
+            "Service unavailable", request=mocker.Mock(), response=mock_response
         )
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(BinanceAPIError):
             await client.fetch_ohlcv()
@@ -416,7 +399,7 @@ class TestErrorHandling:
         ]
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Should raise BinanceAPIError with clear error message
         with pytest.raises(BinanceAPIError, match="Malformed candle data"):
@@ -438,7 +421,7 @@ class TestErrorHandling:
         ]
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Should raise BinanceAPIError (not ValueError)
         with pytest.raises(BinanceAPIError, match="Failed to parse candle data"):

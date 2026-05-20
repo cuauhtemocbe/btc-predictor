@@ -22,11 +22,11 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from shared.db.database import SessionLocal
+from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -88,10 +88,14 @@ def deserialize_model(model_record: Model) -> BaseModel:
         else:
             raise ValueError(f"Unknown model type: {model_record.name}")
     except Exception as e:
-        raise RuntimeError(f"Failed to deserialize model {model_record.name}: {e}") from e
+        raise RuntimeError(
+            f"Failed to deserialize model {model_record.name}: {e}"
+        ) from e
 
 
-def get_active_models(session: Session, multi_model: bool = False) -> list[tuple[Model, BaseModel]]:
+def get_active_models(
+    session: Session, multi_model: bool = False
+) -> list[tuple[Model, BaseModel]]:
     """
     Load active model(s) from the database.
 
@@ -179,17 +183,11 @@ def get_recent_prices(session: Session, window_days: int) -> list[Decimal]:
     Raises:
         ValueError: If insufficient historical data available
     """
-    stmt = (
-        select(BtcPrice.close)
-        .order_by(BtcPrice.timestamp.desc())
-        .limit(window_days)
-    )
+    stmt = select(BtcPrice.close).order_by(BtcPrice.timestamp.desc()).limit(window_days)
     results = session.execute(stmt).scalars().all()
 
     if len(results) < window_days:
-        raise ValueError(
-            f"Insufficient data: need {window_days}, have {len(results)}"
-        )
+        raise ValueError(f"Insufficient data: need {window_days}, have {len(results)}")
 
     # Reverse to get oldest to newest (chronological order)
     prices = list(reversed(results))
@@ -338,7 +336,9 @@ def main(session: Session | None = None) -> int:
 
             try:
                 # Check if prediction already exists for this model (idempotency)
-                if check_existing_prediction(session, tomorrow, model_id=model_record.id):
+                if check_existing_prediction(
+                    session, tomorrow, model_id=model_record.id
+                ):
                     logger.info(
                         f"Prediction for {tomorrow} from {model_name} already exists, skipping"
                     )
@@ -347,7 +347,9 @@ def main(session: Session | None = None) -> int:
 
                 # Get window_days from model params
                 window_days = model_record.params.get("window_days", 30)
-                logger.info(f"{model_name} requires {window_days} days of historical data")
+                logger.info(
+                    f"{model_name} requires {window_days} days of historical data"
+                )
 
                 # Fetch recent prices
                 prices = get_recent_prices(session, window_days)
@@ -405,7 +407,9 @@ def main(session: Session | None = None) -> int:
             return 0
         elif predictions_skipped:
             # All predictions already existed (idempotent re-run)
-            logger.info("Predictor job completed: all predictions already existed (idempotent)")
+            logger.info(
+                "Predictor job completed: all predictions already existed (idempotent)"
+            )
             return 0
         else:
             # No predictions generated and none skipped = all failed

@@ -36,10 +36,5 @@ async def get_prices(
     Example:
         GET /api/prices?limit=24
     """
-    prices = (
-        db.query(BtcPrice)
-        .order_by(BtcPrice.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
+    prices = db.query(BtcPrice).order_by(BtcPrice.timestamp.desc()).limit(limit).all()
     return [BtcPriceResponse.model_validate(price) for price in prices]

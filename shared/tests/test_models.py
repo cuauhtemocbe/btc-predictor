@@ -42,10 +42,7 @@ def test_model_jsonb_params():
         "window_days": 30,
         "features": ["close", "volume", "high", "low"],
         "learning_rate": 0.001,
-        "nested": {
-            "optimizer": "adam",
-            "epochs": 100
-        }
+        "nested": {"optimizer": "adam", "epochs": 100},
     }
 
     model = Model(

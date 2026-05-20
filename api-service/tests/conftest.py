@@ -3,7 +3,7 @@ Pytest configuration and fixtures for API service tests.
 """
 
 import pickle
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -22,7 +22,9 @@ async def client():
     """
     Async HTTP client for testing FastAPI endpoints.
     """
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
 
 
@@ -99,6 +101,7 @@ def sample_prices(db_session):
         sample_prices(10)  # Creates 10 records with default values
         sample_prices(5, base_price=40000)  # Creates 5 records with custom base price
     """
+
     def _create_prices(
         count: int = 10,
         base_price: float = 42000.0,
@@ -106,7 +109,7 @@ def sample_prices(db_session):
         source: str = "test",
     ) -> list[BtcPrice]:
         if base_time is None:
-            base_time = datetime.now(timezone.utc)
+            base_time = datetime.now(UTC)
 
         prices = []
         for i in range(count):
@@ -138,8 +141,8 @@ def sample_model(db_session: Session) -> Model:
     Automatically cleaned up via db_session rollback.
     """
     # Create a dummy model artifact (minimal sklearn LinearRegression)
-    from sklearn.linear_model import LinearRegression
     import numpy as np
+    from sklearn.linear_model import LinearRegression
 
     dummy_model = LinearRegression()
     dummy_model.fit(np.array([[1], [2], [3]]), np.array([1, 2, 3]))
@@ -150,7 +153,7 @@ def sample_model(db_session: Session) -> Model:
         version="1.0.0",
         params={"window_days": 30},
         artifact=artifact,
-        trained_at=datetime.now(timezone.utc),
+        trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=30),
         train_to=date.today() - timedelta(days=1),
         is_active=True,
@@ -179,7 +182,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
             predicted_at = datetime.combine(
                 predicted_for - timedelta(days=1),
                 datetime.min.time(),
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             ).replace(hour=19)  # 7pm day before
 
             price_at_prediction = Decimal("67000.0") + Decimal(i * 100)
@@ -198,7 +201,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
                 actual_price = Decimal("67800.0") + Decimal(i * 100)
                 prediction.actual_price = actual_price
                 prediction.evaluated_at = datetime.combine(
-                    predicted_for, datetime.min.time(), tzinfo=timezone.utc
+                    predicted_for, datetime.min.time(), tzinfo=UTC
                 ).replace(hour=7, minute=1)  # 7:01am on prediction day
                 prediction.error_abs = abs(actual_price - predicted_price)
                 prediction.error_pct = (

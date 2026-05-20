@@ -2,18 +2,18 @@
 
 from datetime import date
 
+from btc_shared.strategies import get_all_strategies_metrics
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.models.predictions import (
+    CumulativePnlPoint,
     PnlResponse,
     PredictionHistoryResponse,
     StrategiesResponse,
     StrategyMetrics,
-    CumulativePnlPoint,
 )
-from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 from shared.db.models import Prediction
@@ -114,12 +114,14 @@ async def get_total_pnl(
           Response: {"total_pnl": 12345.67, "evaluated_predictions": 30}
     """
     # Query for SUM(pnl_simulated) and COUNT(*) where pnl_simulated IS NOT NULL
-    result = db.query(
-        func.sum(Prediction.pnl_simulated),
-        func.count(Prediction.id),
-    ).filter(
-        Prediction.pnl_simulated.isnot(None)
-    ).first()
+    result = (
+        db.query(
+            func.sum(Prediction.pnl_simulated),
+            func.count(Prediction.id),
+        )
+        .filter(Prediction.pnl_simulated.isnot(None))
+        .first()
+    )
 
     # Handle case where no evaluated predictions exist (result[0] will be None)
     total_pnl = float(result[0]) if result[0] is not None else 0.0
@@ -187,7 +189,9 @@ async def get_strategies_comparison(
             sharpe_ratio=s["sharpe_ratio"],
             trade_count=s["trade_count"],
             cumulative_pnl=[
-                CumulativePnlPoint(date=point["date"], cumulative_pnl=point["cumulative_pnl"])
+                CumulativePnlPoint(
+                    date=point["date"], cumulative_pnl=point["cumulative_pnl"]
+                )
                 for point in s["cumulative_pnl"]
             ],
         )

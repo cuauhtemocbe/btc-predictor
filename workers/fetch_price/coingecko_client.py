@@ -8,8 +8,8 @@ from typing import List, Tuple
 import httpx
 
 from fetch_price.exceptions import (
-    PriceAPIError,
     InvalidSymbolError,
+    PriceAPIError,
     RateLimitError,
 )
 
@@ -31,11 +31,7 @@ class CoinGeckoClient:
         >>> # Returns ~24 hourly candles for the last day
     """
 
-    def __init__(
-        self,
-        base_url: str = "https://api.coingecko.com/api/v3",
-        timeout: float = 10.0
-    ):
+    def __init__(self, base_url: str = "https://api.coingecko.com/api/v3", timeout: float = 10.0):
         """Initialize CoinGecko API client.
 
         Args:
@@ -45,10 +41,7 @@ class CoinGeckoClient:
         """
         self.base_url = base_url
         self.timeout = timeout
-        self._client = httpx.AsyncClient(
-            base_url=base_url,
-            timeout=httpx.Timeout(timeout)
-        )
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(timeout))
 
     def _validate_params(self, coin_id: str, vs_currency: str, days: int) -> None:
         """Validate parameters for fetch_ohlcv.
@@ -72,14 +65,9 @@ class CoinGeckoClient:
         # Validate days (CoinGecko supports: 1, 7, 14, 30, 90, 180, 365, max)
         valid_days = {1, 7, 14, 30, 90, 180, 365}
         if days not in valid_days:
-            raise ValueError(
-                f"days must be one of {sorted(valid_days)}, got {days}"
-            )
+            raise ValueError(f"days must be one of {sorted(valid_days)}, got {days}")
 
-    def _parse_candle(
-        self,
-        raw_candle: List
-    ) -> Tuple[datetime, float, float, float, float, float]:
+    def _parse_candle(self, raw_candle: List) -> Tuple[datetime, float, float, float, float, float]:
         """Parse a raw CoinGecko candle into structured OHLCV tuple.
 
         CoinGecko returns candles as arrays with 5 elements:
@@ -103,9 +91,7 @@ class CoinGeckoClient:
         """
         # Validate candle has required fields
         if len(raw_candle) < 5:
-            raise PriceAPIError(
-                f"Malformed candle data: expected 5 fields, got {len(raw_candle)}"
-            )
+            raise PriceAPIError(f"Malformed candle data: expected 5 fields, got {len(raw_candle)}")
 
         try:
             # Extract and convert timestamp (Unix ms → datetime UTC)
@@ -124,16 +110,14 @@ class CoinGeckoClient:
             return (timestamp, open_price, high, low, close, volume)
 
         except (ValueError, TypeError) as e:
-            raise PriceAPIError(
-                f"Failed to parse candle data: {str(e)}"
-            ) from e
+            raise PriceAPIError(f"Failed to parse candle data: {str(e)}") from e
 
     async def fetch_historical_prices(
         self,
         coin_id: str = "bitcoin",
         vs_currency: str = "usd",
         days: int = 90,
-        max_retries: int = 5
+        max_retries: int = 5,
     ) -> List[Tuple[datetime, float]]:
         """Fetch historical price data from CoinGecko market_chart endpoint.
 
@@ -170,17 +154,14 @@ class CoinGeckoClient:
         params = {
             "vs_currency": vs_currency,
             "days": days,
-            "interval": "hourly"  # Request hourly granularity
+            "interval": "hourly",  # Request hourly granularity
         }
 
         # Retry loop with exponential backoff
         for attempt in range(max_retries + 1):
             try:
                 # Make API request to market_chart endpoint
-                response = await self._client.get(
-                    f"/coins/{coin_id}/market_chart",
-                    params=params
-                )
+                response = await self._client.get(f"/coins/{coin_id}/market_chart", params=params)
                 response.raise_for_status()
 
                 # Parse response
@@ -226,7 +207,7 @@ class CoinGeckoClient:
                         raise RateLimitError(
                             f"Rate limit exceeded after {max_retries} retries. "
                             "Please wait before retrying.",
-                            retry_after=retry_after_int
+                            retry_after=retry_after_int,
                         ) from e
 
                     # Calculate backoff delay
@@ -234,7 +215,7 @@ class CoinGeckoClient:
                         delay = int(retry_after)
                     else:
                         # Exponential backoff: 5s, 10s, 20s, 40s, 80s
-                        delay = 5 * (2 ** attempt)
+                        delay = 5 * (2**attempt)
 
                     logger.warning(
                         f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}). "
@@ -272,7 +253,7 @@ class CoinGeckoClient:
         coin_id: str = "bitcoin",
         vs_currency: str = "usd",
         days: int = 1,
-        max_retries: int = 3
+        max_retries: int = 3,
     ) -> List[Tuple[datetime, float, float, float, float, float]]:
         """Fetch OHLCV data from CoinGecko with exponential backoff retry.
 
@@ -299,20 +280,14 @@ class CoinGeckoClient:
         self._validate_params(coin_id, vs_currency, days)
 
         # Build request parameters
-        params = {
-            "vs_currency": vs_currency,
-            "days": days
-        }
+        params = {"vs_currency": vs_currency, "days": days}
 
         # Retry loop with exponential backoff
         for attempt in range(max_retries + 1):
             try:
                 # Make API request
                 # Endpoint: /coins/{id}/ohlc
-                response = await self._client.get(
-                    f"/coins/{coin_id}/ohlc",
-                    params=params
-                )
+                response = await self._client.get(f"/coins/{coin_id}/ohlc", params=params)
                 response.raise_for_status()
 
                 # Parse response
@@ -340,7 +315,7 @@ class CoinGeckoClient:
                         raise RateLimitError(
                             f"Rate limit exceeded after {max_retries} retries. "
                             "Please wait before retrying.",
-                            retry_after=retry_after_int
+                            retry_after=retry_after_int,
                         ) from e
 
                     # Calculate backoff delay
@@ -349,7 +324,7 @@ class CoinGeckoClient:
                         delay = int(retry_after)
                     else:
                         # Exponential backoff: 5s, 10s, 20s, 40s, ...
-                        delay = 5 * (2 ** attempt)
+                        delay = 5 * (2**attempt)
 
                     logger.warning(
                         f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}). "

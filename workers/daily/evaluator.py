@@ -112,8 +112,7 @@ def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
         logger.info(f"Fetched actual price for {target_date} 7am: ${price}")
     else:
         logger.warning(
-            f"No price data available for {target_date} 7am "
-            "(will retry tomorrow)"
+            f"No price data available for {target_date} 7am (will retry tomorrow)"
         )
 
     return price
@@ -333,7 +332,9 @@ def main() -> int:
 
         for prediction in predictions:
             try:
-                logger.info(f"Evaluating prediction #{prediction.id} (model_id={prediction.model_id})")
+                logger.info(
+                    f"Evaluating prediction #{prediction.id} (model_id={prediction.model_id})"
+                )
 
                 # Calculate metrics
                 metrics = calculate_metrics(prediction, actual_price)
@@ -344,12 +345,14 @@ def main() -> int:
             except Exception as e:
                 logger.error(
                     f"Failed to evaluate prediction #{prediction.id}: {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
                 # Continue with other predictions
                 continue
 
-        logger.info(f"Evaluator job completed successfully: {len(predictions)} prediction(s) evaluated")
+        logger.info(
+            f"Evaluator job completed successfully: {len(predictions)} prediction(s) evaluated"
+        )
         return 0
 
     except ValueError as e:

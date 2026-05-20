@@ -2,15 +2,13 @@
 Pytest configuration and fixtures for shared package tests.
 """
 
-import pytest
-import os
-from datetime import datetime, date, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from alembic import command
-from alembic.config import Config
+
+import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
 from shared.db.models import Base, BtcPrice, Model, Prediction
@@ -100,9 +98,7 @@ async def async_db_session(db_engine, apply_migrations):
     async with async_engine.begin() as connection:
         # Create async session bound to transaction
         AsyncSessionLocal = async_sessionmaker(
-            bind=connection,
-            class_=AsyncSession,
-            expire_on_commit=False
+            bind=connection, class_=AsyncSession, expire_on_commit=False
         )
 
         session = AsyncSessionLocal()
@@ -153,6 +149,7 @@ def sample_btc_price(db_session):
     Factory fixture for creating sample BtcPrice records.
     Automatically cleans up after test (via db_session rollback).
     """
+
     def _create_price(
         timestamp: datetime = None,
         open: Decimal = Decimal("50000.0"),
@@ -163,7 +160,7 @@ def sample_btc_price(db_session):
         source: str = "binance",
     ) -> BtcPrice:
         if timestamp is None:
-            timestamp = datetime.now(timezone.utc)
+            timestamp = datetime.now(UTC)
 
         price = BtcPrice(
             timestamp=timestamp,
@@ -188,6 +185,7 @@ def sample_model(db_session):
     Factory fixture for creating sample Model records.
     Automatically cleans up after test (via db_session rollback).
     """
+
     def _create_model(
         name: str = "test_model",
         version: str = "1.0.0",
@@ -201,7 +199,7 @@ def sample_model(db_session):
         if params is None:
             params = {"window_days": 30}
         if trained_at is None:
-            trained_at = datetime.now(timezone.utc)
+            trained_at = datetime.now(UTC)
         if train_from is None:
             train_from = date.today() - timedelta(days=30)
         if train_to is None:
@@ -232,6 +230,7 @@ def sample_prediction(db_session, sample_model):
     Evaluation fields (actual_price, errors, pnl) are NULL.
     Automatically cleans up after test (via db_session rollback).
     """
+
     def _create_prediction(
         model_id: int = None,
         predicted_for: date = None,
@@ -246,7 +245,7 @@ def sample_prediction(db_session, sample_model):
         if predicted_for is None:
             predicted_for = date.today() + timedelta(days=1)
         if predicted_at is None:
-            predicted_at = datetime.now(timezone.utc)
+            predicted_at = datetime.now(UTC)
 
         prediction = Prediction(
             model_id=model_id,
@@ -277,6 +276,7 @@ def evaluated_prediction(db_session, sample_model):
     All evaluation fields are filled.
     Automatically cleans up after test (via db_session rollback).
     """
+
     def _create_evaluated_prediction(
         model_id: int = None,
         predicted_for: date = None,
@@ -297,9 +297,9 @@ def evaluated_prediction(db_session, sample_model):
         if predicted_for is None:
             predicted_for = date.today()
         if predicted_at is None:
-            predicted_at = datetime.now(timezone.utc) - timedelta(days=1)
+            predicted_at = datetime.now(UTC) - timedelta(days=1)
         if evaluated_at is None:
-            evaluated_at = datetime.now(timezone.utc)
+            evaluated_at = datetime.now(UTC)
 
         prediction = Prediction(
             model_id=model_id,

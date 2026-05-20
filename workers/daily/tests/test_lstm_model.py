@@ -70,7 +70,10 @@ class TestLSTMModel:
 
         # When: Create model with default hyperparameters and train
         model = LSTMModel(
-            window_days=30, lstm_units=50, dropout=0.2, epochs=10  # Reduced for speed
+            window_days=30,
+            lstm_units=50,
+            dropout=0.2,
+            epochs=10,  # Reduced for speed
         )
         assert not model.is_trained  # Not trained yet
 
@@ -181,9 +184,9 @@ class TestLSTMModel:
         training_time = end_time - start_time
 
         # Then: Training time < 5 minutes (300 seconds)
-        assert (
-            training_time < 300.0
-        ), f"Training took {training_time:.2f}s, expected < 300s"
+        assert training_time < 300.0, (
+            f"Training took {training_time:.2f}s, expected < 300s"
+        )
         assert model.is_trained
 
 

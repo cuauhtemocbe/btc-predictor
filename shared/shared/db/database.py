@@ -4,12 +4,12 @@ Database connection and session management.
 Provides SQLAlchemy engine, session factory, and FastAPI dependency.
 """
 
-from typing import Generator
+from collections.abc import Generator
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from shared.config import settings
-
 
 # Create SQLAlchemy engine with connection pooling
 engine = create_engine(
@@ -26,7 +26,7 @@ SessionLocal = sessionmaker(
 )
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """
     FastAPI dependency that provides a database session.
 

@@ -7,8 +7,8 @@ import pytest
 
 from fetch_price.coingecko_client import CoinGeckoClient
 from fetch_price.exceptions import (
-    PriceAPIError,
     InvalidSymbolError,
+    PriceAPIError,
     RateLimitError,
 )
 
@@ -19,9 +19,7 @@ def sample_coingecko_response():
 
     Format: [[timestamp_ms, open, high, low, close], ...]
     """
-    return [
-        [1714521600000, 63000.50, 63500.75, 62800.25, 63200.00]
-    ]
+    return [[1714521600000, 63000.50, 63500.75, 62800.25, 63200.00]]
 
 
 @pytest.fixture
@@ -30,7 +28,7 @@ def sample_coingecko_multiple_candles():
     return [
         [1714521600000, 63000.50, 63500.75, 62800.25, 63200.00],
         [1714525200000, 63200.00, 63800.00, 63100.00, 63400.00],
-        [1714528800000, 63400.00, 64000.00, 63300.00, 63500.00]
+        [1714528800000, 63400.00, 64000.00, 63300.00, 63500.00],
     ]
 
 
@@ -145,10 +143,7 @@ class TestCoinGeckoClientInitialization:
 
     def test_can_create_client_with_all_custom_params(self):
         """Test creating client with all custom parameters."""
-        client = CoinGeckoClient(
-            base_url="https://custom.api",
-            timeout=15.0
-        )
+        client = CoinGeckoClient(base_url="https://custom.api", timeout=15.0)
 
         assert client.base_url == "https://custom.api"
         assert client.timeout == 15.0
@@ -181,15 +176,14 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call fetch_ohlcv
         result = await client.fetch_ohlcv(coin_id="bitcoin", vs_currency="usd", days=1)
 
         # Verify API was called correctly
         mock_get.assert_called_once_with(
-            "/coins/bitcoin/ohlc",
-            params={"vs_currency": "usd", "days": 1}
+            "/coins/bitcoin/ohlc", params={"vs_currency": "usd", "days": 1}
         )
 
         # Verify result structure
@@ -223,7 +217,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_coingecko_multiple_candles
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call fetch_ohlcv
         result = await client.fetch_ohlcv(coin_id="bitcoin", vs_currency="usd", days=1)
@@ -257,7 +251,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_ohlcv()
 
@@ -287,7 +281,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_ohlcv()
 
@@ -310,7 +304,7 @@ class TestFetchOHLCV:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_ohlcv()
 
@@ -328,9 +322,7 @@ class TestErrorHandling:
 
         # Mock timeout exception
         mocker.patch.object(
-            client._client,
-            'get',
-            side_effect=httpx.TimeoutException("Request timeout")
+            client._client, "get", side_effect=httpx.TimeoutException("Request timeout")
         )
 
         with pytest.raises(TimeoutError, match="CoinGecko API timeout after 5.0s"):
@@ -347,12 +339,10 @@ class TestErrorHandling:
 
         mock_get = mocker.patch.object(
             client._client,
-            'get',
+            "get",
             side_effect=httpx.HTTPStatusError(
-                "Rate limit exceeded",
-                request=mocker.Mock(),
-                response=mock_response
-            )
+                "Rate limit exceeded", request=mocker.Mock(), response=mock_response
+            ),
         )
 
         with pytest.raises(RateLimitError, match="Rate limit exceeded"):
@@ -368,12 +358,10 @@ class TestErrorHandling:
 
         mocker.patch.object(
             client._client,
-            'get',
+            "get",
             side_effect=httpx.HTTPStatusError(
-                "Not found",
-                request=mocker.Mock(),
-                response=mock_response
-            )
+                "Not found", request=mocker.Mock(), response=mock_response
+            ),
         )
 
         with pytest.raises(InvalidSymbolError, match="Invalid coin_id"):
@@ -389,12 +377,10 @@ class TestErrorHandling:
 
         mocker.patch.object(
             client._client,
-            'get',
+            "get",
             side_effect=httpx.HTTPStatusError(
-                "Internal server error",
-                request=mocker.Mock(),
-                response=mock_response
-            )
+                "Internal server error", request=mocker.Mock(), response=mock_response
+            ),
         )
 
         with pytest.raises(PriceAPIError, match="CoinGecko API error \\(HTTP 500\\)"):
@@ -406,9 +392,7 @@ class TestErrorHandling:
 
         # Mock connection error
         mocker.patch.object(
-            client._client,
-            'get',
-            side_effect=httpx.ConnectError("Could not connect")
+            client._client, "get", side_effect=httpx.ConnectError("Could not connect")
         )
 
         with pytest.raises(PriceAPIError, match="Network error"):
@@ -426,7 +410,7 @@ class TestErrorHandling:
         ]
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(PriceAPIError, match="Malformed candle data: expected 5 fields"):
             await client.fetch_ohlcv()
@@ -443,7 +427,7 @@ class TestErrorHandling:
         ]
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         with pytest.raises(PriceAPIError, match="Failed to parse candle data"):
             await client.fetch_ohlcv()
@@ -462,15 +446,14 @@ class TestDefaultParameters:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call with defaults (bitcoin, usd, 1 day)
         result = await client.fetch_ohlcv()
 
         # Verify defaults were used
         mock_get.assert_called_once_with(
-            "/coins/bitcoin/ohlc",
-            params={"vs_currency": "usd", "days": 1}
+            "/coins/bitcoin/ohlc", params={"vs_currency": "usd", "days": 1}
         )
 
         assert len(result) == 1
@@ -485,15 +468,14 @@ class TestDefaultParameters:
         mock_response.json.return_value = sample_coingecko_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call with custom coin_id
         await client.fetch_ohlcv(coin_id="ethereum")
 
         # Verify custom coin_id was used in URL
         mock_get.assert_called_once_with(
-            "/coins/ethereum/ohlc",
-            params={"vs_currency": "usd", "days": 1}
+            "/coins/ethereum/ohlc", params={"vs_currency": "usd", "days": 1}
         )
 
 
@@ -513,7 +495,7 @@ class TestFetchHistoricalPrices:
                 [1714528800000, 63400.00],
             ],
             "market_caps": [[1714521600000, 1234567890]],
-            "total_volumes": [[1714521600000, 9876543210]]
+            "total_volumes": [[1714521600000, 9876543210]],
         }
 
     async def test_fetch_90_days_default(self, mocker, sample_market_chart_response):
@@ -526,7 +508,7 @@ class TestFetchHistoricalPrices:
         mock_response.json.return_value = sample_market_chart_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call fetch_historical_prices with default (90 days)
         result = await client.fetch_historical_prices()
@@ -534,7 +516,7 @@ class TestFetchHistoricalPrices:
         # Verify API was called correctly
         mock_get.assert_called_once_with(
             "/coins/bitcoin/market_chart",
-            params={"vs_currency": "usd", "days": 90, "interval": "hourly"}
+            params={"vs_currency": "usd", "days": 90, "interval": "hourly"},
         )
 
         # Verify result structure
@@ -558,7 +540,7 @@ class TestFetchHistoricalPrices:
         mock_response.json.return_value = sample_market_chart_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mock_get = mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mock_get = mocker.patch.object(client._client, "get", return_value=mock_response)
 
         # Call with custom days (7 days)
         await client.fetch_historical_prices(days=7)
@@ -566,7 +548,7 @@ class TestFetchHistoricalPrices:
         # Verify API was called with correct days parameter
         mock_get.assert_called_once_with(
             "/coins/bitcoin/market_chart",
-            params={"vs_currency": "usd", "days": 7, "interval": "hourly"}
+            params={"vs_currency": "usd", "days": 7, "interval": "hourly"},
         )
 
     async def test_prices_sorted_ascending(self, mocker):
@@ -585,7 +567,7 @@ class TestFetchHistoricalPrices:
         }
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_historical_prices()
 
@@ -608,7 +590,7 @@ class TestFetchHistoricalPrices:
         mock_response.json.return_value = {"prices": []}
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_historical_prices()
 
@@ -625,16 +607,14 @@ class TestFetchHistoricalPrices:
 
         mocker.patch.object(
             client._client,
-            'get',
+            "get",
             side_effect=httpx.HTTPStatusError(
-                "Rate limit exceeded",
-                request=mocker.Mock(),
-                response=mock_response
-            )
+                "Rate limit exceeded", request=mocker.Mock(), response=mock_response
+            ),
         )
 
         # Mock asyncio.sleep to verify backoff
-        mock_sleep = mocker.patch('fetch_price.coingecko_client.asyncio.sleep')
+        mock_sleep = mocker.patch("fetch_price.coingecko_client.asyncio.sleep")
 
         with pytest.raises(RateLimitError):
             await client.fetch_historical_prices(max_retries=3)
@@ -652,12 +632,10 @@ class TestFetchHistoricalPrices:
 
         mocker.patch.object(
             client._client,
-            'get',
+            "get",
             side_effect=httpx.HTTPStatusError(
-                "Not found",
-                request=mocker.Mock(),
-                response=mock_response
-            )
+                "Not found", request=mocker.Mock(), response=mock_response
+            ),
         )
 
         with pytest.raises(InvalidSymbolError):
@@ -668,9 +646,7 @@ class TestFetchHistoricalPrices:
         client = CoinGeckoClient(timeout=5.0)
 
         mocker.patch.object(
-            client._client,
-            'get',
-            side_effect=httpx.TimeoutException("Request timeout")
+            client._client, "get", side_effect=httpx.TimeoutException("Request timeout")
         )
 
         with pytest.raises(TimeoutError):
@@ -685,14 +661,14 @@ class TestFetchHistoricalPrices:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "prices": [
-                [1714521600000, 63000.50],   # Valid
-                [1714525200000],              # Malformed (missing price)
-                [1714528800000, 63400.00],   # Valid
+                [1714521600000, 63000.50],  # Valid
+                [1714525200000],  # Malformed (missing price)
+                [1714528800000, 63400.00],  # Valid
             ]
         }
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_historical_prices()
 
@@ -731,7 +707,7 @@ class TestFetchHistoricalPrices:
         mock_response.json.return_value = sample_market_chart_response
         mock_response.raise_for_status = mocker.Mock()
 
-        mocker.patch.object(client._client, 'get', return_value=mock_response)
+        mocker.patch.object(client._client, "get", return_value=mock_response)
 
         result = await client.fetch_historical_prices()
 

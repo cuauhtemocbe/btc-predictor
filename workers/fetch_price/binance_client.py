@@ -24,11 +24,7 @@ class BinanceClient:
         >>> # Returns 24 hourly candles
     """
 
-    def __init__(
-        self,
-        base_url: str = "https://api.binance.com",
-        timeout: float = 10.0
-    ):
+    def __init__(self, base_url: str = "https://api.binance.com", timeout: float = 10.0):
         """Initialize Binance API client.
 
         Args:
@@ -38,10 +34,7 @@ class BinanceClient:
         """
         self.base_url = base_url
         self.timeout = timeout
-        self._client = httpx.AsyncClient(
-            base_url=base_url,
-            timeout=httpx.Timeout(timeout)
-        )
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=httpx.Timeout(timeout))
 
     def _validate_params(self, symbol: str, interval: str, limit: int) -> None:
         """Validate parameters for fetch_ohlcv.
@@ -66,10 +59,7 @@ class BinanceClient:
         if limit < 1 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
 
-    def _parse_candle(
-        self,
-        raw_candle: List
-    ) -> Tuple[datetime, float, float, float, float, float]:
+    def _parse_candle(self, raw_candle: List) -> Tuple[datetime, float, float, float, float, float]:
         """Parse a raw Binance candle into structured OHLCV tuple.
 
         Binance returns candles as arrays with 12 elements. We extract:
@@ -110,15 +100,10 @@ class BinanceClient:
             return (timestamp, open_price, high, low, close, volume)
 
         except (ValueError, TypeError) as e:
-            raise BinanceAPIError(
-                f"Failed to parse candle data: {str(e)}"
-            ) from e
+            raise BinanceAPIError(f"Failed to parse candle data: {str(e)}") from e
 
     async def fetch_ohlcv(
-        self,
-        symbol: str = "BTCUSDT",
-        interval: str = "1h",
-        limit: int = 1
+        self, symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 1
     ) -> List[Tuple[datetime, float, float, float, float, float]]:
         """Fetch OHLCV data from Binance.
 
@@ -142,11 +127,7 @@ class BinanceClient:
         self._validate_params(symbol, interval, limit)
 
         # Build request parameters
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        }
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
 
         try:
             # Make API request
@@ -173,8 +154,7 @@ class BinanceClient:
                 retry_after = e.response.headers.get("Retry-After")
                 retry_after_int = int(retry_after) if retry_after else None
                 raise RateLimitError(
-                    "Rate limit exceeded. Please wait before retrying.",
-                    retry_after=retry_after_int
+                    "Rate limit exceeded. Please wait before retrying.", retry_after=retry_after_int
                 ) from e
 
             # Handle invalid symbol (400)
@@ -185,9 +165,7 @@ class BinanceClient:
 
             # Handle other HTTP errors (500, 503, etc.)
             else:
-                raise BinanceAPIError(
-                    f"Binance API error (HTTP {status_code}): {str(e)}"
-                ) from e
+                raise BinanceAPIError(f"Binance API error (HTTP {status_code}): {str(e)}") from e
 
         except httpx.ConnectError as e:
             raise BinanceAPIError(
@@ -196,6 +174,4 @@ class BinanceClient:
 
         except httpx.HTTPError as e:
             # Catch-all for other httpx errors
-            raise BinanceAPIError(
-                f"HTTP error while fetching data from Binance: {str(e)}"
-            ) from e
+            raise BinanceAPIError(f"HTTP error while fetching data from Binance: {str(e)}") from e

@@ -364,6 +364,7 @@ class TestEvaluatorMain:
         Then the job logs "No predictions to evaluate"
         And exit code is 0
         """
+
         # Mock SessionLocal to return our test session, but don't close it
         def mock_session():
             session = db_session

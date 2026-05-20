@@ -60,9 +60,7 @@ def test_migration_creates_predictions_table(db_engine):
     fks = inspector.get_foreign_keys("predictions")
     assert len(fks) > 0, "No foreign keys found"
 
-    model_fk = next(
-        (fk for fk in fks if "model_id" in fk["constrained_columns"]), None
-    )
+    model_fk = next((fk for fk in fks if "model_id" in fk["constrained_columns"]), None)
     assert model_fk is not None, "Foreign key on model_id not found"
     assert model_fk["referred_table"] == "models"
     assert model_fk["referred_columns"] == ["id"]
@@ -185,8 +183,8 @@ def test_query_unevaluated_predictions(db_session, sample_model):
     for i in range(7):
         pred = Prediction(
             model_id=model_evaluated.id,
-            predicted_for=date.today() - timedelta(days=i+1),
-            predicted_at=datetime.now(UTC) - timedelta(days=i+1),
+            predicted_for=date.today() - timedelta(days=i + 1),
+            predicted_at=datetime.now(UTC) - timedelta(days=i + 1),
             price_at_prediction=Decimal("67000.00"),
             predicted_price=Decimal("68000.00"),
             actual_price=Decimal("67500.00"),
@@ -202,7 +200,7 @@ def test_query_unevaluated_predictions(db_session, sample_model):
     for i in range(3):
         pred = Prediction(
             model_id=model_unevaluated.id,
-            predicted_for=date.today() + timedelta(days=i+1),
+            predicted_for=date.today() + timedelta(days=i + 1),
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("67000.00"),
             predicted_price=Decimal("68000.00"),
@@ -218,9 +216,9 @@ def test_query_unevaluated_predictions(db_session, sample_model):
     db_session.commit()
 
     # When: query unevaluated predictions
-    unevaluated = db_session.query(Prediction).filter(
-        Prediction.actual_price.is_(None)
-    ).all()
+    unevaluated = (
+        db_session.query(Prediction).filter(Prediction.actual_price.is_(None)).all()
+    )
 
     # Then: receive 3 records
     assert len(unevaluated) == 3
@@ -236,6 +234,7 @@ def test_foreign_key_cascade_delete(db_session):
     """
     # Given: model with predictions
     from shared.db.models import Model
+
     model = Model(
         name="cascade_delete_test",
         version="1.0.0",
@@ -270,9 +269,10 @@ def test_foreign_key_cascade_delete(db_session):
     db_session.commit()
 
     # Verify predictions exist
-    assert db_session.query(Prediction).filter(
-        Prediction.model_id == model_id
-    ).count() == 2
+    assert (
+        db_session.query(Prediction).filter(Prediction.model_id == model_id).count()
+        == 2
+    )
 
     # When: delete model (expunge predictions first to avoid ORM interference)
     db_session.expunge(pred1)
@@ -281,9 +281,10 @@ def test_foreign_key_cascade_delete(db_session):
     db_session.commit()
 
     # Then: predictions are also deleted (CASCADE)
-    assert db_session.query(Prediction).filter(
-        Prediction.model_id == model_id
-    ).count() == 0
+    assert (
+        db_session.query(Prediction).filter(Prediction.model_id == model_id).count()
+        == 0
+    )
 
 
 def test_not_null_constraints(db_session):
@@ -312,6 +313,7 @@ def test_not_null_constraints(db_session):
     # Test 2: missing predicted_for
     # Create fresh model with unique name using timestamp
     from shared.db.models import Model
+
     timestamp = str(int(time.time() * 1000000))  # microsecond precision
     model2 = Model(
         name=f"constraint_test_{timestamp}_2",

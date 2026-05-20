@@ -13,9 +13,9 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
+from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -27,9 +27,7 @@ from workers.daily.models import LinearRegressionModel
 class TestGetActiveModel:
     """Test the get_active_model() function."""
 
-    def test_success(
-        self, db_session: Session, sample_trained_model: Model
-    ) -> None:
+    def test_success(self, db_session: Session, sample_trained_model: Model) -> None:
         """Should load and deserialize the active model."""
         model_record, model_instance = predictor.get_active_model(db_session)
 
