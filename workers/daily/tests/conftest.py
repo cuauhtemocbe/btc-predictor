@@ -11,7 +11,7 @@ from shared.db.models import Base, BtcPrice, Model, Prediction
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from workers.daily.models import LinearRegressionModel
+from workers.daily.models import LinearRegressionModel, XGBoostModel
 
 
 @pytest.fixture
@@ -165,6 +165,41 @@ def sample_trained_model(
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
         is_active=True,
+    )
+
+    db_session.add(model_record)
+    db_session.commit()
+    db_session.refresh(model_record)
+
+    return model_record
+
+
+@pytest.fixture
+def sample_xgboost_model(
+    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
+) -> Model:
+    """
+    Create a trained XGBoostModel and save it to the database.
+
+    Returns:
+        Model record with is_active=False (by default, for testing multi-model scenarios)
+    """
+    X, y = sliding_window_data
+
+    # Train model
+    xgb_model = XGBoostModel(window_days=30)
+    xgb_model.train(X, y)
+
+    # Serialize and save to database
+    model_record = Model(
+        name="xgboost_v1",
+        version="1.0.0",
+        params={"window_days": 30, "n_estimators": 100, "learning_rate": 0.1},
+        artifact=xgb_model.serialize(),
+        trained_at=datetime.now(UTC),
+        train_from=date.today() - timedelta(days=60),
+        train_to=date.today() - timedelta(days=1),
+        is_active=False,  # Inactive by default (tests will activate as needed)
     )
 
     db_session.add(model_record)

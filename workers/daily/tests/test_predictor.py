@@ -40,7 +40,7 @@ class TestGetActiveModel:
 
     def test_no_active_model(self, db_session: Session) -> None:
         """Should raise ValueError when no active model exists."""
-        with pytest.raises(ValueError, match="No active model found"):
+        with pytest.raises(ValueError, match="No active models found"):
             predictor.get_active_model(db_session)
 
     def test_inactive_model_not_loaded(
@@ -51,7 +51,7 @@ class TestGetActiveModel:
         sample_trained_model.is_active = False
         db_session.commit()
 
-        with pytest.raises(ValueError, match="No active model found"):
+        with pytest.raises(ValueError, match="No active models found"):
             predictor.get_active_model(db_session)
 
 
@@ -289,7 +289,7 @@ class TestPredictorGherkinScenarios:
 
         Given the models table has no record with is_active=True
         When I run the predictor main()
-        Then a ValueError is logged: "No active model found"
+        Then a ValueError is logged: "No active models found"
         And the job exits with code 1
         """
         # Setup: No active model (don't use sample_trained_model fixture)

@@ -1,12 +1,14 @@
 """
-Daily evaluator job - evaluates yesterday's BTC price prediction.
+Daily evaluator job - evaluates yesterday's BTC price predictions.
 
 This job:
-1. Finds predictions for today that haven't been evaluated yet
+1. Finds ALL predictions for today that haven't been evaluated yet
 2. Fetches today's 7am BTC close price from the database
 3. Calculates error metrics (absolute, percentage, direction correctness)
 4. Calculates simulated PnL based on prediction strategy
-5. Updates the prediction record with evaluation results
+5. Updates all prediction records with evaluation results
+
+Supports multi-model predictions (evaluates predictions from all models).
 
 Entry point: python -m workers.daily.evaluator
 """
@@ -36,11 +38,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def find_unevaluated_predictions(
+    session: Session, predicted_for: date
+) -> list[Prediction]:
+    """
+    Find ALL predictions for the given date that haven't been evaluated yet.
+
+    Supports multi-model predictions (returns predictions from all models).
+
+    Args:
+        session: Database session
+        predicted_for: Date to find predictions for (usually today)
+
+    Returns:
+        List of unevaluated Prediction records (may be empty)
+    """
+    stmt = (
+        select(Prediction)
+        .where(Prediction.predicted_for == predicted_for)
+        .where(Prediction.actual_price.is_(None))
+        .order_by(Prediction.model_id.asc())  # Order by model_id for consistent logging
+    )
+    predictions = session.execute(stmt).scalars().all()
+
+    if predictions:
+        logger.info(
+            f"Found {len(predictions)} unevaluated prediction(s) for {predicted_for}"
+        )
+    else:
+        logger.info(f"No unevaluated predictions for {predicted_for}")
+
+    return list(predictions)
+
+
 def find_unevaluated_prediction(
     session: Session, predicted_for: date
 ) -> Prediction | None:
     """
     Find a prediction for the given date that hasn't been evaluated yet.
+
+    DEPRECATED: Use find_unevaluated_predictions() for multi-model support.
+    This function returns only the first unevaluated prediction.
 
     Args:
         session: Database session
@@ -49,22 +87,8 @@ def find_unevaluated_prediction(
     Returns:
         Prediction record if found, None otherwise
     """
-    stmt = (
-        select(Prediction)
-        .where(Prediction.predicted_for == predicted_for)
-        .where(Prediction.actual_price.is_(None))
-        .order_by(Prediction.predicted_at.desc())  # Most recent if multiple
-    )
-    prediction = session.execute(stmt).scalars().first()
-
-    if prediction:
-        logger.info(
-            f"Found unevaluated prediction #{prediction.id} for {predicted_for}"
-        )
-    else:
-        logger.info(f"No unevaluated predictions for {predicted_for}")
-
-    return prediction
+    predictions = find_unevaluated_predictions(session, predicted_for)
+    return predictions[0] if predictions else None
 
 
 def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
@@ -273,6 +297,8 @@ def main() -> int:
     """
     Main entry point for the evaluator job.
 
+    Evaluates ALL unevaluated predictions for today (supports multi-model).
+
     Returns:
         Exit code (0 = success, 1 = failure)
     """
@@ -281,18 +307,18 @@ def main() -> int:
     session = SessionLocal()
 
     try:
-        # Evaluate prediction for today
+        # Evaluate predictions for today
         today = date.today()
-        logger.info(f"Evaluating prediction for date: {today}")
+        logger.info(f"Evaluating predictions for date: {today}")
 
-        # Find unevaluated prediction
-        prediction = find_unevaluated_prediction(session, today)
+        # Find ALL unevaluated predictions (supports multi-model)
+        predictions = find_unevaluated_predictions(session, today)
 
-        if prediction is None:
+        if not predictions:
             logger.info("No predictions to evaluate, exiting successfully")
             return 0
 
-        # Fetch actual price (7am close)
+        # Fetch actual price once (7am close, same for all models)
         actual_price = fetch_actual_price(session, today)
 
         if actual_price is None:
@@ -302,13 +328,28 @@ def main() -> int:
             )
             return 0
 
-        # Calculate metrics
-        metrics = calculate_metrics(prediction, actual_price)
+        # Evaluate each prediction
+        logger.info(f"Evaluating {len(predictions)} prediction(s)...")
 
-        # Update prediction record
-        update_prediction(session, prediction, actual_price, metrics)
+        for prediction in predictions:
+            try:
+                logger.info(f"Evaluating prediction #{prediction.id} (model_id={prediction.model_id})")
 
-        logger.info("Evaluator job completed successfully")
+                # Calculate metrics
+                metrics = calculate_metrics(prediction, actual_price)
+
+                # Update prediction record
+                update_prediction(session, prediction, actual_price, metrics)
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to evaluate prediction #{prediction.id}: {e}",
+                    exc_info=True
+                )
+                # Continue with other predictions
+                continue
+
+        logger.info(f"Evaluator job completed successfully: {len(predictions)} prediction(s) evaluated")
         return 0
 
     except ValueError as e:

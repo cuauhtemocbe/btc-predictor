@@ -157,7 +157,10 @@ class Prediction(Base):
     __tablename__ = "predictions"
     __table_args__ = (
         UniqueConstraint(
-            "predicted_for", "timeframe", name="unique_prediction_per_timeframe"
+            "predicted_for",
+            "timeframe",
+            "model_id",
+            name="unique_prediction_per_model_timeframe",
         ),
         CheckConstraint(
             "timeframe IN ('1h', '1d', '1w')", name="valid_timeframe_values"
