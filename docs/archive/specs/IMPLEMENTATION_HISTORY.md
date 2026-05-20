@@ -359,10 +359,154 @@ btc-predictor/
 
 ### Future Improvements
 - Add LSTM or XGBoost models (abstract BaseModel makes this easy)
-- Implement backtesting framework for strategy evaluation
+- ~~Implement backtesting framework for strategy evaluation~~ ✅ Completed in Iteration 9
 - Add alerting for model performance degradation
 - Implement A/B testing for multiple active models
 - Add authentication for API endpoints
+
+---
+
+## Iteration 9: Advanced Trading Analysis (US-017 to US-021)
+
+### US-017: Multiple PnL Trading Strategies
+**Goal**: Calculate 4 different PnL strategies for comparative analysis  
+**Key Decisions**:
+- Keep `pnl_simulated` for backward compatibility
+- Add 3 new strategies: `pnl_long_short`, `pnl_threshold`, `pnl_realistic`
+- `pnl_long_short`: Symmetric long/short (profit from both UP and DOWN predictions)
+- `pnl_threshold`: Only trade if predicted change > 1% (avoid noise)
+- `pnl_realistic`: Include trading fees (0.1%) and stop-loss (2%)
+
+**Implementation**: 
+- Migration: `alembic/versions/00X_add_pnl_strategies.py` (3 new NUMERIC columns)
+- Functions: `shared/btc_shared/utils.py::calculate_pnl_*()` (4 functions)
+- Integration: `workers/daily/evaluator.py` (calculate all 4 on evaluation)
+
+**Testing**: 100% coverage on all 4 PnL functions with edge cases (fees, stop-loss, zero trades)
+
+### US-018: PnL Strategies Comparison Dashboard
+**Goal**: Visual comparison of trading strategies performance  
+**Key Decisions**:
+- Aggregate metrics per strategy: Total PnL, Win Rate, Max Drawdown, Avg Win/Loss
+- Cumulative PnL chart with 4 color-coded lines (one per strategy)
+- Highlight best performer with badge
+- Calculate Sharpe Ratio for risk-adjusted returns
+
+**Implementation**:
+- API endpoint: `api-service/btc_api/routers/predictions.py::get_strategy_comparison()`
+- Dashboard section: Extended `api-service/btc_api/templates/index.html`
+- Visualization: Chart.js line chart for cumulative PnL
+
+**Metrics**:
+- Win Rate: `(wins / total_trades) * 100`
+- Max Drawdown: `min(daily_pnl)`
+- Sharpe Ratio: `(mean_return - 0) / std_dev_returns`
+
+**Testing**: Integration tests for metrics calculation with edge cases (N/A for zero trades)
+
+### US-019: Backfill Historical BTC Prices
+**Goal**: Load 90+ days of historical prices for backtesting  
+**Key Decisions**:
+- CoinGecko API: `/coins/bitcoin/market_chart` endpoint
+- Configurable days parameter (default: 90)
+- Batch insert for performance (~2,160 records for 90 days)
+- Rate limit handling: exponential backoff on HTTP 429
+- Idempotent: UNIQUE constraint prevents duplicates
+
+**Implementation**:
+- Script: `scripts/backfill_prices.py` (standalone, can run in container)
+- Reuse: `workers/fetch_price/coingecko_client.py` (same API client)
+- Logging: Progress indicators (X of Y prices inserted, Z duplicates skipped)
+
+**Usage**: `docker compose exec api python scripts/backfill_prices.py --days=90`
+
+**Testing**: Mock CoinGecko responses for success, rate limit, empty response, timeout scenarios
+
+### US-020: Walk-Forward Backtesting System
+**Goal**: Validate model on historical data without lookahead bias  
+**Key Decisions**:
+- Walk-forward methodology: train on past 30 days, predict next day, evaluate, roll window
+- New table: `backtest_results` (separate from `predictions` for production isolation)
+- UUID-based `backtest_run_id` (allows multiple backtest experiments)
+- Each backtest day: train → predict → fetch actual → calculate PnL (all 4 strategies)
+- Reuse production model code (`workers/daily/models/`) for consistency
+
+**Implementation**:
+- Migration: `alembic/versions/00X_create_backtest_results.py`
+- Model: `shared/btc_shared/db/models.py::BacktestResult`
+- Script: `scripts/backtest.py --start-date=YYYY-MM-DD --end-date=YYYY-MM-DD`
+- Edge cases: Skip days with insufficient training data, log warnings on training failures
+
+**Schema**:
+```sql
+backtest_results (
+  id, backtest_run_id (UUID), predicted_for (DATE), 
+  predicted_at, price_at_prediction, predicted_price, actual_price,
+  pnl_simple, pnl_long_short, pnl_threshold, pnl_realistic,
+  model_params (JSONB), created_at
+)
+```
+
+**Testing**: 
+- Test walk-forward logic with synthetic 60-day dataset
+- Verify no lookahead bias (train data < prediction date)
+- Test edge cases: 1 day backtest, insufficient data, training failure
+
+### US-021: Backtesting Results Dashboard
+**Goal**: Visualize historical backtesting results  
+**Key Decisions**:
+- New route: `GET /backtesting` (separate from main dashboard)
+- Cumulative PnL chart for historical performance
+- Strategy comparison table with backtest metrics
+- Date range filter
+- Metrics: Win Rate, Max Drawdown, Sharpe Ratio, Best/Worst Day
+
+**Implementation**:
+- Router: `api-service/btc_api/routers/backtesting.py`
+- Template: `api-service/btc_api/templates/backtesting.html`
+- Query: Aggregate backtest_results by strategy, calculate cumulative PnL
+- Chart: Chart.js with same color scheme as main dashboard
+
+**Metrics Calculated**:
+- Win Rate: `(count(pnl > 0) / count(pnl != 0)) * 100`
+- Max Drawdown: `min(daily_pnl)`
+- Best Day: `max(daily_pnl)`
+- Worst Day: `min(daily_pnl)`
+- Sharpe Ratio: `mean(returns) / std(returns)`
+
+**Testing**: 
+- Integration tests with mock backtest data
+- Test empty state (no backtest results)
+- Test date range filtering
+- Test metrics calculation accuracy
+
+---
+
+## Iteration 9 Key Outcomes
+
+**New Features**:
+✅ 4 PnL trading strategies for comprehensive analysis  
+✅ Visual strategy comparison dashboard  
+✅ Historical data backfill (90+ days from CoinGecko)  
+✅ Walk-forward backtesting framework  
+✅ Backtesting results visualization
+
+**Technical Achievements**:
+- No lookahead bias in backtesting (walk-forward methodology)
+- Idempotent backfill (safe retries)
+- Production model code reused for backtesting (consistency)
+- Separate `backtest_results` table (production isolation)
+- Realistic trading simulation (fees, stop-loss, thresholds)
+
+**Testing**:
+- All 5 user stories have comprehensive test coverage
+- Edge cases covered: rate limits, empty data, zero trades, training failures
+- Mutation testing validates test quality
+
+**Impact**:
+- Traders can now validate model effectiveness on 90 days of historical data
+- Risk-adjusted returns visible via Sharpe Ratio
+- Multiple strategies allow approach comparison (aggressive vs. conservative)
 
 ---
 
@@ -401,11 +545,11 @@ All original spec and plan files have been archived in this directory. Key specs
 
 ## Project Completion
 
-**Total User Stories**: 16 (US-001 to US-016)  
-**Total Iterations**: 8  
+**Total User Stories**: 21 (US-001 to US-021)  
+**Total Iterations**: 9  
 **Development Period**: May 2026  
 **Final Status**: ✅ All stories complete, deployed to Railway  
-**GitHub Issues**: All closed (#2 to #17)  
+**GitHub Issues**: All closed (#2 to #23)  
 **Test Coverage**: 90%+ across all packages  
 
 **Project Owner**: Cuauhtémoc (cuauhtemocbe@gmail.com)  
