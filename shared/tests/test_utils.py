@@ -10,7 +10,6 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
-
 from shared.utils import (
     calculate_accuracy,
     calculate_mape,
@@ -1039,7 +1038,7 @@ class TestGetAllModelsMetrics:
         self, db_session, sample_model
     ):
         """Test that models without predictions show None for metrics."""
-        model = sample_model(name="xgboost_v1")
+        sample_model(name="xgboost_v1")
 
         metrics = get_all_models_metrics(db_session)
 

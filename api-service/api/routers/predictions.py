@@ -4,6 +4,9 @@ from datetime import date
 
 from btc_shared.strategies import get_all_strategies_metrics
 from fastapi import APIRouter, Depends, Query
+from shared.db.crud import get_evaluated_predictions
+from shared.db.database import get_db
+from shared.db.models import Prediction
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -14,9 +17,6 @@ from api.models.predictions import (
     StrategiesResponse,
     StrategyMetrics,
 )
-from shared.db.crud import get_evaluated_predictions
-from shared.db.database import get_db
-from shared.db.models import Prediction
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 

@@ -337,7 +337,7 @@ class TestErrorHandling:
         mock_response.status_code = 429
         mock_response.headers = {"Retry-After": "60"}
 
-        mock_get = mocker.patch.object(
+        mocker.patch.object(
             client._client,
             "get",
             side_effect=httpx.HTTPStatusError(

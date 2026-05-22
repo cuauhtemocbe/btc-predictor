@@ -15,9 +15,8 @@ from decimal import Decimal
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
-from sqlalchemy.orm import Session
-
 from shared.db.models import Model, Prediction
+from sqlalchemy.orm import Session
 
 # ============================================================================
 # Fixtures
@@ -228,7 +227,8 @@ async def test_models_dashboard_shows_all_metrics(
 
     Given there are 3 models with different performance
     When I view the model comparison table
-    Then I see columns: Model, Predictions, Accuracy, Avg Error %, Total PnL, Win Rate, Sharpe, Max DD
+    Then I see columns: Model, Predictions, Accuracy, Avg Error %,
+         Total PnL, Win Rate, Sharpe, Max DD
     And I see metrics for all 3 models
     """
     # Act

@@ -341,7 +341,7 @@ def calculate_accuracy(
     if total_count == 0:
         return None
 
-    correct_count = query.filter(Prediction.direction_correct == True).count()
+    correct_count = query.filter(Prediction.direction_correct.is_(True)).count()
 
     accuracy = correct_count / total_count
     return accuracy
@@ -511,7 +511,8 @@ def calculate_sharpe_ratio(
     """
     Calculate annualized Sharpe ratio for a model.
 
-    Sharpe Ratio = (MEAN(daily_returns) - risk_free_rate) / STDEV(daily_returns) * sqrt(365)
+    Sharpe Ratio = (MEAN(daily_returns) - risk_free_rate)
+                   / STDEV(daily_returns) * sqrt(365)
 
     Daily returns = pnl / price_at_prediction
 

@@ -1,11 +1,11 @@
 """Router for BTC price endpoints."""
 
 from fastapi import APIRouter, Depends, Query
+from shared.db.database import get_db
+from shared.db.models import BtcPrice
 from sqlalchemy.orm import Session
 
 from api.models.responses import BtcPriceResponse
-from shared.db.database import get_db
-from shared.db.models import BtcPrice
 
 router = APIRouter(prefix="/api")
 

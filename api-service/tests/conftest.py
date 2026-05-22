@@ -7,14 +7,13 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
-
 from api.main import app
+from httpx import ASGITransport, AsyncClient
 from shared.config import settings
 from shared.db.database import get_db
 from shared.db.models import BtcPrice, Model, Prediction
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 
 @pytest.fixture

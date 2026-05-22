@@ -13,9 +13,8 @@ from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.orm import Session
-
 from shared.db.models import Model, Prediction
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture

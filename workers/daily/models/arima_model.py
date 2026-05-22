@@ -24,7 +24,7 @@ except ImportError as e:
         "Install it with: pip install statsmodels>=0.14.0"
     ) from e
 
-from workers.daily.models.base import BaseModel
+from workers.daily.models.base import BaseModel  # noqa: E402
 
 
 class ARIMAModel(BaseModel):

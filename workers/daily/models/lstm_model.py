@@ -29,7 +29,7 @@ except ImportError as e:
         "Install it with: pip install tensorflow-cpu>=2.13.0"
     ) from e
 
-from workers.daily.models.base import BaseModel
+from workers.daily.models.base import BaseModel  # noqa: E402
 
 
 class LSTMModel(BaseModel):

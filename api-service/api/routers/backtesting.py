@@ -7,6 +7,8 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from shared.db.database import get_db
+from shared.db.models import BacktestResult
 from sqlalchemy.orm import Session
 
 from api.models.backtesting import (
@@ -15,8 +17,6 @@ from api.models.backtesting import (
     BacktestStrategyMetrics,
     DailyPnlPoint,
 )
-from shared.db.database import get_db
-from shared.db.models import BacktestResult
 
 router = APIRouter(tags=["backtesting"])
 

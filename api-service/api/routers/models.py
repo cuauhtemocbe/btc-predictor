@@ -21,10 +21,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-
 from shared.db.database import get_db
 from shared.utils import get_all_models_metrics, get_cumulative_pnl
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/models", tags=["models"])
 
