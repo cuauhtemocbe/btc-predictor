@@ -27,15 +27,28 @@ templates = Jinja2Templates(directory=str(templates_dir))
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, db: Session = Depends(get_db)):
+async def dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    timeframe: str | None = None,
+):
     """
     Render the main dashboard showing prediction history.
 
     Fetches all evaluated predictions from the database and displays them
     in a formatted HTML table with model performance metrics.
+
+    Args:
+        request: FastAPI request object
+        db: Database session
+        timeframe: Optional filter for timeframe ('1d', '1w'). Defaults to '1d' if None.
     """
-    # Fetch all evaluated predictions
-    predictions_data = get_evaluated_predictions(session=db)
+    # Default to daily predictions if no timeframe specified
+    if timeframe is None:
+        timeframe = "1d"
+
+    # Fetch evaluated predictions filtered by timeframe
+    predictions_data = get_evaluated_predictions(session=db, timeframe=timeframe)
 
     # Convert to template-friendly format
     predictions = [

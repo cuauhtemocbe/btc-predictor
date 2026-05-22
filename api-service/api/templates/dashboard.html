@@ -52,6 +52,43 @@
             padding: 40px;
         }
 
+        /* Tabs styling */
+        .tabs-container {
+            background: #f9fafb;
+            border-bottom: 2px solid #e5e7eb;
+            padding: 0 40px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tab {
+            padding: 16px 24px;
+            background: transparent;
+            border: none;
+            color: #6b7280;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            position: relative;
+            top: 2px;
+        }
+
+        .tab:hover {
+            color: #374151;
+            background: #f3f4f6;
+        }
+
+        .tab.active {
+            color: #1e3a8a;
+            border-bottom-color: #f59e0b;
+            background: white;
+        }
+
         .empty-state {
             text-align: center;
             padding: 80px 20px;
@@ -297,12 +334,23 @@
     <div class="container">
         <header>
             <h1>🪙 Bitcoin Price Predictions</h1>
-            <p class="subtitle">Daily model performance tracking and evaluation</p>
+            <p class="subtitle" id="subtitle">
+                {% set timeframe = request.query_params.get('timeframe', '1d') %}
+                {{ 'Weekly' if timeframe == '1w' else 'Daily' }} model performance tracking and evaluation
+            </p>
             <div style="margin-top: 12px;">
                 <a href="/models" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-right: 20px;">📊 Compare Models →</a>
                 <a href="/backtesting" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">📈 View Backtesting Results →</a>
             </div>
         </header>
+
+        <!-- Timeframe Tabs (US-022) -->
+        <div class="tabs-container">
+            <div class="tabs">
+                <button class="tab active" data-timeframe="1d">Daily Predictions</button>
+                <button class="tab" data-timeframe="1w">Weekly Predictions</button>
+            </div>
+        </div>
 
         <div class="content">
             {% if predictions %}
@@ -487,5 +535,33 @@
             {% endif %}
         </div>
     </div>
+
+    <!-- Timeframe Tab Switching Script (US-022) -->
+    <script>
+        // Get current timeframe from URL or default to '1d'
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentTimeframe = urlParams.get('timeframe') || '1d';
+
+        // Set active tab on page load
+        document.querySelectorAll('.tab').forEach(tab => {
+            if (tab.dataset.timeframe === currentTimeframe) {
+                tab.classList.add('active');
+            } else {
+                tab.classList.remove('active');
+            }
+        });
+
+        // Handle tab clicks
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const timeframe = this.dataset.timeframe;
+
+                // Update URL and reload page with new timeframe
+                const url = new URL(window.location);
+                url.searchParams.set('timeframe', timeframe);
+                window.location.href = url.toString();
+            });
+        });
+    </script>
 </body>
 </html>
