@@ -16,9 +16,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily import evaluator
 
 # ============================================================================
@@ -206,37 +206,59 @@ class TestFindUnevaluatedPrediction:
 
         assert prediction is None
 
-    def test_multiple_predictions_returns_most_recent(
+    def test_multiple_predictions_returns_first_by_model_id(
         self, db_session: Session, sample_trained_model: Model
     ) -> None:
-        """Should return most recent prediction when multiple exist."""
+        """
+        Should return first prediction ordered by model_id.
+
+        When multiple models predict for the same day.
+        """
         today = date.today()
 
-        # Create two unevaluated predictions for today
-        old_prediction = Prediction(
-            model_id=sample_trained_model.id,
+        # Create a second model with higher ID
+        model2 = Model(
+            name="lstm_v1",
+            version="1.0.0",
+            is_active=False,
+            trained_at=datetime.now(UTC),
+            train_from=today - timedelta(days=90),
+            train_to=today - timedelta(days=1),
+            params={"window_days": 30},
+            artifact=b"model2_artifact",
+        )
+        db_session.add(model2)
+        db_session.commit()
+
+        # Create two unevaluated predictions for today from different models
+        prediction1 = Prediction(
+            model_id=sample_trained_model.id,  # Lower model_id
             predicted_for=today,
+            timeframe="1d",
             predicted_at=datetime.now(UTC) - timedelta(hours=2),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("67000.00"),
             actual_price=None,
         )
-        new_prediction = Prediction(
-            model_id=sample_trained_model.id,
+        prediction2 = Prediction(
+            model_id=model2.id,  # Higher model_id
             predicted_for=today,
-            predicted_at=datetime.now(UTC),  # More recent
+            timeframe="1d",
+            predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66500.00"),
             predicted_price=Decimal("67500.00"),
             actual_price=None,
         )
 
-        db_session.add_all([old_prediction, new_prediction])
+        db_session.add_all([prediction1, prediction2])
         db_session.commit()
 
         result = evaluator.find_unevaluated_prediction(db_session, today)
 
+        # Should return prediction with lowest model_id (consistent ordering)
         assert result is not None
-        assert result.predicted_at == new_prediction.predicted_at
+        assert result.model_id == sample_trained_model.id
+        assert result.predicted_price == Decimal("67000.00")
 
 
 class TestFetchActualPrice:
@@ -337,9 +359,8 @@ class TestEvaluatorMain:
         assert exit_code == 0
 
         # Re-fetch prediction to verify it was updated
-        from sqlalchemy import select
-
         from shared.db.models import Prediction
+        from sqlalchemy import select
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)
         prediction = db_session.execute(stmt).scalar_one()
@@ -410,9 +431,8 @@ class TestEvaluatorMain:
         assert exit_code == 0
 
         # Re-fetch prediction to verify it was NOT updated
-        from sqlalchemy import select
-
         from shared.db.models import Prediction
+        from sqlalchemy import select
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)
         prediction = db_session.execute(stmt).scalar_one()
@@ -428,7 +448,11 @@ class TestEvaluatorMain:
         sample_actual_price_for_today: BtcPrice,
         monkeypatch,
     ) -> None:
-        """Should return exit code 1 when unexpected exception occurs."""
+        """
+        Should continue processing and return exit code 0.
+
+        Even when individual predictions fail.
+        """
 
         def mock_session():
             session = db_session
@@ -447,4 +471,5 @@ class TestEvaluatorMain:
 
         exit_code = evaluator.main()
 
-        assert exit_code == 1
+        # Should continue processing and return 0 (error is logged but job doesn't fail)
+        assert exit_code == 0

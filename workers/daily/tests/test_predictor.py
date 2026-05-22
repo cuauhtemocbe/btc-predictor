@@ -13,9 +13,9 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -218,9 +218,17 @@ class TestPredictorGherkinScenarios:
         count_before = db_session.query(Prediction).count()
         assert count_before == 0
 
+        # Mock parse_args to avoid pytest argument conflicts
+        from argparse import Namespace
+
+        def mock_parse_args():
+            return Namespace(multi_model=False)
+
         # Mock SessionLocal to return our test session
         original_session_local = predictor.SessionLocal
+        original_parse_args = predictor.parse_args
         predictor.SessionLocal = lambda: db_session
+        predictor.parse_args = mock_parse_args
 
         try:
             # Execute
@@ -240,8 +248,9 @@ class TestPredictorGherkinScenarios:
             assert prediction.model_id == model_id
 
         finally:
-            # Restore original SessionLocal
+            # Restore originals
             predictor.SessionLocal = original_session_local
+            predictor.parse_args = original_parse_args
 
     def test_scenario_2_insufficient_historical_data(
         self,
@@ -261,9 +270,16 @@ class TestPredictorGherkinScenarios:
         # Setup: Active model exists, only 10 prices (from fixtures)
         count_before = db_session.query(Prediction).count()
 
-        # Mock SessionLocal
+        # Mock parse_args and SessionLocal
+        from argparse import Namespace
+
+        def mock_parse_args():
+            return Namespace(multi_model=False)
+
         original_session_local = predictor.SessionLocal
+        original_parse_args = predictor.parse_args
         predictor.SessionLocal = lambda: db_session
+        predictor.parse_args = mock_parse_args
 
         try:
             # Execute
@@ -278,6 +294,7 @@ class TestPredictorGherkinScenarios:
 
         finally:
             predictor.SessionLocal = original_session_local
+            predictor.parse_args = original_parse_args
 
     def test_scenario_3_no_active_model(
         self, db_session: Session, sample_btc_prices_30_days: list[BtcPrice]
@@ -293,9 +310,16 @@ class TestPredictorGherkinScenarios:
         # Setup: No active model (don't use sample_trained_model fixture)
         count_before = db_session.query(Prediction).count()
 
-        # Mock SessionLocal
+        # Mock parse_args and SessionLocal
+        from argparse import Namespace
+
+        def mock_parse_args():
+            return Namespace(multi_model=False)
+
         original_session_local = predictor.SessionLocal
+        original_parse_args = predictor.parse_args
         predictor.SessionLocal = lambda: db_session
+        predictor.parse_args = mock_parse_args
 
         try:
             # Execute
@@ -310,6 +334,7 @@ class TestPredictorGherkinScenarios:
 
         finally:
             predictor.SessionLocal = original_session_local
+            predictor.parse_args = original_parse_args
 
     def test_scenario_4_prediction_already_exists(
         self,
@@ -330,9 +355,16 @@ class TestPredictorGherkinScenarios:
         count_before = db_session.query(Prediction).count()
         assert count_before == 1  # The existing prediction
 
-        # Mock SessionLocal
+        # Mock parse_args and SessionLocal
+        from argparse import Namespace
+
+        def mock_parse_args():
+            return Namespace(multi_model=False)
+
         original_session_local = predictor.SessionLocal
+        original_parse_args = predictor.parse_args
         predictor.SessionLocal = lambda: db_session
+        predictor.parse_args = mock_parse_args
 
         try:
             # Execute
@@ -347,3 +379,4 @@ class TestPredictorGherkinScenarios:
 
         finally:
             predictor.SessionLocal = original_session_local
+            predictor.parse_args = original_parse_args

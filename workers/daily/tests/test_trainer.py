@@ -11,9 +11,9 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
-
 from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import BtcPrice
+
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
     create_sliding_windows,
@@ -24,13 +24,18 @@ from workers.daily.trainer import (
 
 @pytest.fixture
 def sample_prices(db_session):
-    """Create 100 days of sample BTC prices for testing."""
+    """Create 200 days of sample BTC prices for testing.
+
+    Note: 200 days ensures enough data after train/val split (70%/20%):
+    - Train: 140 days -> 110 samples with window_days=30
+    - Validation: 40 days -> 10 samples with window_days=30
+    """
     base_price = 50000
     prices = []
 
-    for i in range(100):
+    for i in range(200):
         price_record = BtcPrice(
-            timestamp=datetime.now(UTC) - timedelta(days=100 - i),
+            timestamp=datetime.now(UTC) - timedelta(days=200 - i),
             open=Decimal(base_price + i * 100),
             high=Decimal(base_price + i * 100 + 500),
             low=Decimal(base_price + i * 100 - 500),
@@ -98,6 +103,11 @@ class TestTrainSingleModel:
 
     def test_train_single_model_logs_metrics(self, caplog):
         """Test that train_single_model logs duration and validation error."""
+        import logging
+
+        # Set log level to capture INFO messages
+        caplog.set_level(logging.INFO)
+
         X_train = np.random.rand(20, 30) * 10000 + 50000
         y_train = np.random.rand(20) * 10000 + 50000
         X_val = np.random.rand(5, 30) * 10000 + 50000
@@ -124,8 +134,8 @@ class TestTrainAllModels:
 
     def test_train_all_models_success(self, db_session, sample_prices):
         """Test successful training of all 4 models."""
-        # Train all models
-        models = train_all_models(db_session, window_days=30, min_days=90)
+        # Train all models (need 160+ days for 70/20 split with window_days=30)
+        models = train_all_models(db_session, window_days=30, min_days=160)
 
         # Verify we got models back
         assert len(models) > 0  # At least some models should succeed
@@ -146,8 +156,12 @@ class TestTrainAllModels:
             assert "validation_samples" in model.params
 
     def test_train_all_models_activates_best(self, db_session, sample_prices):
-        """Test that train_all_models activates the model with lowest validation error."""
-        models = train_all_models(db_session, window_days=30, min_days=90)
+        """
+        Test that train_all_models activates the model with lowest error.
+
+        Lowest validation error.
+        """
+        models = train_all_models(db_session, window_days=30, min_days=160)
 
         # Get active model
         active = get_active_model(db_session)
@@ -166,7 +180,7 @@ class TestTrainAllModels:
 
     def test_train_all_models_uses_same_data(self, db_session, sample_prices):
         """Test that all models are trained on the same training data."""
-        models = train_all_models(db_session, window_days=30, min_days=90)
+        models = train_all_models(db_session, window_days=30, min_days=160)
 
         # All models should have same number of training samples
         training_samples = models[0].params["training_samples"]
@@ -184,7 +198,7 @@ class TestTrainAllModels:
         with valid data. Actual failure testing would require mocking.
         """
         # Train with valid data - all should succeed
-        models = train_all_models(db_session, window_days=30, min_days=90)
+        models = train_all_models(db_session, window_days=30, min_days=160)
 
         # At minimum, Linear Regression should always work
         model_names = [m.name for m in models]
@@ -209,7 +223,7 @@ class TestTrainAllModels:
 
         # Should raise ValueError
         with pytest.raises(ValueError, match="Insufficient training data"):
-            train_all_models(db_session, window_days=30, min_days=90)
+            train_all_models(db_session, window_days=30, min_days=160)
 
 
 class TestCreateSlidingWindows:

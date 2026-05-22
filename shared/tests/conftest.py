@@ -6,12 +6,11 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from shared.config import settings
+from shared.db.models import Base, BtcPrice, Model, Prediction
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
-
-from shared.config import settings
-from shared.db.models import Base, BtcPrice, Model, Prediction
 
 
 @pytest.fixture
@@ -67,6 +66,12 @@ def db_session(db_engine, apply_migrations):
     transaction = connection.begin()
     SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
     session = SessionLocal()
+
+    # Clean all tables before test to ensure isolation
+    session.execute(Prediction.__table__.delete())
+    session.execute(Model.__table__.delete())
+    session.execute(BtcPrice.__table__.delete())
+    session.commit()
 
     # Start a savepoint (nested transaction)
     session.begin_nested()
@@ -226,7 +231,9 @@ def sample_model(db_session):
 @pytest.fixture
 def sample_prediction(db_session, sample_model):
     """
-    Factory fixture for creating sample Prediction records (phase 1 - before evaluation).
+    Factory fixture for creating sample Prediction records.
+
+    Phase 1 - before evaluation.
     Evaluation fields (actual_price, errors, pnl) are NULL.
     Automatically cleans up after test (via db_session rollback).
     """
@@ -272,7 +279,9 @@ def sample_prediction(db_session, sample_model):
 @pytest.fixture
 def evaluated_prediction(db_session, sample_model):
     """
-    Factory fixture for creating evaluated Prediction records (phase 2 - after evaluation).
+    Factory fixture for creating evaluated Prediction records.
+
+    Phase 2 - after evaluation.
     All evaluation fields are filled.
     Automatically cleans up after test (via db_session rollback).
     """
