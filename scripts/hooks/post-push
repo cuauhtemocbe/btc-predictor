@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# Git post-push hook for Railway deployment monitoring
+#
+# This hook runs automatically after 'git push' to monitor Railway deployment.
+# It detects if you pushed to the main branch and triggers Railway monitoring.
+#
+# Installation:
+#   ./scripts/hooks/install.sh
+#
+# Manual execution:
+#   ./scripts/hooks/monitor-railway.sh
+
+# Only monitor if pushing to main branch
+while read local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" == "refs/heads/main" ]]; then
+        echo ""
+        echo "🚂 Railway deployment monitoring started..."
+        echo ""
+
+        # Run monitor script
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+        if [[ -f "$SCRIPT_DIR/scripts/hooks/monitor-railway.sh" ]]; then
+            "$SCRIPT_DIR/scripts/hooks/monitor-railway.sh"
+        else
+            echo "⚠️  Monitor script not found. Run from repo root:"
+            echo "  ./scripts/hooks/monitor-railway.sh"
+        fi
+
+        break
+    fi
+done
