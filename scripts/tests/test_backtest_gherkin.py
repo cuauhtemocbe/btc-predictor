@@ -4,7 +4,7 @@ Gherkin scenario tests for US-020 Walk-Forward Backtesting System.
 Tests all 12 acceptance criteria scenarios from the spec.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -258,25 +258,23 @@ class TestInsufficientData:
         Then: It exits with error code 1
               And logs "Insufficient data: need 30 days for training, have 20"
         """
-        # Given: Only 20 days of data
+        # Given: Only 20 days of daily data
         start_date = date(2024, 5, 1)
         prices = []
         for day in range(20):
             current_date = start_date + timedelta(days=day)
-            for hour in range(24):
-                timestamp = datetime.combine(
-                    current_date, datetime.min.time()
-                ) + timedelta(hours=hour)
-                price = BtcPrice(
-                    timestamp=timestamp,
-                    open=Decimal("66000.00"),
-                    high=Decimal("66100.00"),
-                    low=Decimal("65900.00"),
-                    close=Decimal("66050.00"),
-                    volume=Decimal("1000.50"),
-                    source="test",
-                )
-                prices.append(price)
+            # Create 1 record per day at 12:00 PM (daily frequency)
+            timestamp = datetime.combine(current_date, time(12, 0))
+            price = BtcPrice(
+                timestamp=timestamp,
+                open=Decimal("66000.00"),
+                high=Decimal("66100.00"),
+                low=Decimal("65900.00"),
+                close=Decimal("66050.00"),
+                volume=Decimal("1000.50"),
+                source="test",
+            )
+            prices.append(price)
 
         db_session.add_all(prices)
         db_session.commit()

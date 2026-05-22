@@ -72,12 +72,14 @@ class TestGetRecentPrices:
         self, db_session: Session, sample_btc_prices_10_days: list[BtcPrice]
     ) -> None:
         """Should raise ValueError when insufficient data."""
-        with pytest.raises(ValueError, match="Insufficient data: need 30, have 10"):
+        with pytest.raises(
+            ValueError, match="Insufficient data: need 30 days, have 10"
+        ):
             predictor.get_recent_prices(db_session, window_days=30)
 
     def test_no_data(self, db_session: Session) -> None:
         """Should raise ValueError when no price data exists."""
-        with pytest.raises(ValueError, match="Insufficient data: need 30, have 0"):
+        with pytest.raises(ValueError, match="Insufficient data: need 30 days, have 0"):
             predictor.get_recent_prices(db_session, window_days=30)
 
 

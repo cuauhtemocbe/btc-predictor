@@ -18,13 +18,13 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
-
 from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Model
 from shared.utils import calculate_mape, split_train_validation
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
+
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -45,20 +45,44 @@ def fetch_training_data(
     session: Session, window_days: int = 30, min_days: int = 60
 ) -> list[Decimal]:
     """
-    Fetch historical BTC prices for training.
+    Fetch historical DAILY BTC close prices for training.
+
+    Uses date aggregation to get exactly one price per day (not per hour/4h).
+    Takes the latest close price for each day.
 
     Args:
         session: Database session
         window_days: Size of sliding window for features
-        min_days: Minimum number of days needed (window_days * 2)
+        min_days: Minimum number of DAYS needed (window_days * 2)
 
     Returns:
-        List of close prices (oldest to newest)
+        List of daily close prices (oldest to newest)
 
     Raises:
         ValueError: If insufficient data available
     """
-    stmt = select(BtcPrice.close).order_by(BtcPrice.timestamp.desc()).limit(min_days)
+    # Subquery: Get the latest timestamp for each day
+    latest_per_day = (
+        select(
+            func.date_trunc("day", BtcPrice.timestamp).label("day"),
+            func.max(BtcPrice.timestamp).label("latest_timestamp"),
+        )
+        .group_by("day")
+        .order_by(func.date_trunc("day", BtcPrice.timestamp).desc())
+        .limit(min_days)
+        .subquery()
+    )
+
+    # Main query: Join to get the close price for the latest timestamp each day
+    stmt = (
+        select(BtcPrice.close)
+        .join(
+            latest_per_day,
+            BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+        )
+        .order_by(latest_per_day.c.day.desc())
+    )
+
     results = session.execute(stmt).scalars().all()
 
     if len(results) < min_days:
@@ -69,7 +93,10 @@ def fetch_training_data(
     # Reverse to get oldest to newest (chronological order)
     prices = list(reversed(results))
 
-    logger.info(f"Fetched {len(prices)} days of historical prices for training")
+    logger.info(
+        f"Fetched {len(prices)} DAYS of historical prices for training "
+        f"(aggregated from multiple records/day)"
+    )
 
     return prices
 

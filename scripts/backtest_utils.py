@@ -37,7 +37,7 @@ def fetch_training_data(
 
     Example:
         >>> df = fetch_training_data(date(2024, 5, 15), window_days=30)
-        >>> print(len(df))  # Should be ~720 rows (30 days * 24 hours)
+        >>> print(len(df))  # Should be ~30 rows (30 days, daily frequency)
     """
     close_db = False
     if db is None:
@@ -78,8 +78,8 @@ def fetch_training_data(
         df = pd.DataFrame(data)
 
         # Validate we have enough data
-        # Expect at least window_days * 20 hours (accounting for some gaps)
-        min_expected_rows = window_days * 20
+        # Expect at least window_days * 1 (daily frequency with some tolerance)
+        min_expected_rows = window_days * 1
         if len(df) < min_expected_rows:
             return None
 
@@ -100,7 +100,7 @@ def generate_prediction(
     Train model and generate next-day price prediction.
 
     Args:
-        training_data: DataFrame from fetch_training_data with hourly OHLCV data
+        training_data: DataFrame from fetch_training_data with daily OHLCV data
         prediction_date: Date to predict for
         price_at_prediction: Current BTC price at prediction time
         db: Database session (optional)
@@ -118,15 +118,13 @@ def generate_prediction(
     window_days = 30
     model = LinearRegressionModel(window_days=window_days)
 
-    # Prepare training data: convert hourly data to daily close prices
-    # Group by date and take last close of each day
+    # Prepare training data: data already comes in daily frequency
+    # Sort by timestamp and extract close prices
+    training_data = training_data.sort_values("timestamp")
     training_data["date"] = pd.to_datetime(training_data["timestamp"]).dt.date
-    daily_data = (
-        training_data.groupby("date")["close"].last().reset_index().sort_values("date")
-    )
 
     # Convert close prices to numpy array
-    close_prices = daily_data["close"].values
+    close_prices = training_data["close"].values
 
     # Check if we have enough data
     if len(close_prices) < window_days + 1:
@@ -166,8 +164,8 @@ def generate_prediction(
     model_params = {
         "model_name": "linear_v1",
         "window_days": window_days,
-        "train_from": daily_data["date"].min().strftime("%Y-%m-%d"),
-        "train_to": daily_data["date"].max().strftime("%Y-%m-%d"),
+        "train_from": training_data["date"].min().strftime("%Y-%m-%d"),
+        "train_to": training_data["date"].max().strftime("%Y-%m-%d"),
         "training_samples": len(X),
         "training_days": len(close_prices),
     }

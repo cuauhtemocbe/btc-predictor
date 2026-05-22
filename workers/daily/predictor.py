@@ -22,11 +22,11 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Model, Prediction
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -56,7 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--multi-model",
         action="store_true",
-        help="Generate predictions from ALL active models (default: single primary model)",
+        help="Generate predictions from ALL active models "
+        "(default: single primary model)",
     )
     return parser.parse_args()
 
@@ -171,28 +172,57 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
 
 def get_recent_prices(session: Session, window_days: int) -> list[Decimal]:
     """
-    Fetch the last N close prices from the database.
+    Fetch the most recent N DAYS of BTC close prices.
+
+    Uses date aggregation to get exactly one price per day (not per hour/4h).
+    Takes the latest close price for each day.
 
     Args:
         session: Database session
-        window_days: Number of recent prices to fetch
+        window_days: Number of DAYS to fetch
 
     Returns:
-        List of close prices (oldest to newest)
+        List of daily close prices (oldest to newest)
 
     Raises:
         ValueError: If insufficient historical data available
     """
-    stmt = select(BtcPrice.close).order_by(BtcPrice.timestamp.desc()).limit(window_days)
+    # Subquery: Get the latest timestamp for each day
+    latest_per_day = (
+        select(
+            func.date_trunc("day", BtcPrice.timestamp).label("day"),
+            func.max(BtcPrice.timestamp).label("latest_timestamp"),
+        )
+        .group_by("day")
+        .order_by(func.date_trunc("day", BtcPrice.timestamp).desc())
+        .limit(window_days)
+        .subquery()
+    )
+
+    # Main query: Join to get the close price for the latest timestamp each day
+    stmt = (
+        select(BtcPrice.close)
+        .join(
+            latest_per_day,
+            BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+        )
+        .order_by(latest_per_day.c.day.desc())
+    )
+
     results = session.execute(stmt).scalars().all()
 
     if len(results) < window_days:
-        raise ValueError(f"Insufficient data: need {window_days}, have {len(results)}")
+        raise ValueError(
+            f"Insufficient data: need {window_days} days, have {len(results)}"
+        )
 
     # Reverse to get oldest to newest (chronological order)
     prices = list(reversed(results))
 
-    logger.info(f"Fetched {len(prices)} recent prices for feature preparation")
+    logger.info(
+        f"Fetched {len(prices)} DAYS of recent prices for feature preparation "
+        f"(aggregated from multiple records/day)"
+    )
 
     return prices
 
@@ -340,7 +370,8 @@ def main(session: Session | None = None) -> int:
                     session, tomorrow, model_id=model_record.id
                 ):
                     logger.info(
-                        f"Prediction for {tomorrow} from {model_name} already exists, skipping"
+                        f"Prediction for {tomorrow} from {model_name} "
+                        f"already exists, skipping"
                     )
                     predictions_skipped.append(model_name)
                     continue
@@ -374,7 +405,7 @@ def main(session: Session | None = None) -> int:
 
             except Exception as e:
                 # In multi-model mode, log error and continue with other models
-                # In single-model mode, this exception will propagate to outer try/except
+                # In single-model mode, exception propagates to outer try/except
                 logger.error(f"Failed to generate prediction for {model_name}: {e}")
                 predictions_failed.append((model_name, str(e)))
 

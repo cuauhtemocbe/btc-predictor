@@ -4,7 +4,7 @@
 
 **BTC Predictor** is a data science web application that predicts Bitcoin's price for the next day using machine learning models. It tracks predictions, calculates historical errors, and simulates profit/loss (PnL) based on predicted direction.
 
-**Status:** ✅ **All User Stories Complete** (US-001 to US-016 implemented and deployed to Railway)
+**Status:** ✅ **All User Stories Complete** (US-001 to US-024 implemented and deployed to Railway)
 
 ---
 
@@ -65,6 +65,16 @@ btc-predictor/
 ### 5. CoinGecko Over Binance
 - Migrated from Binance API due to HTTP 451 geo-blocking in Railway
 - CoinGecko free API with rate limit handling
+
+### 6. Daily Data Frequency with 4-Hour Aggregation
+- **Data Storage:** CoinGecko API returns ~4-hour granularity (6 candles/day)
+- **Model Training:** Daily worker aggregates 4-hour data to daily using `DATE_TRUNC('day')`
+- **Rationale:**
+  - Provides flexibility to test models with different frequencies (daily, 12h, 8h, 6h, 4h)
+  - Daily frequency yields 65-66% ML accuracy vs 51-55% for hourly (research-backed)
+  - Lower transaction costs: ~20-30 trades/month vs 180+ for hourly
+  - Target users: part-time investors, not day traders
+- **Implementation:** Workers use SQL subqueries to aggregate multiple records/day to single daily values
 
 ---
 
@@ -291,11 +301,19 @@ docker compose exec postgres psql -U btcpredictor -d btcpredictor
 # Deploy api service (automatic on push to main)
 git push origin main
 
+# IMPORTANT: After pushing to main, ALWAYS run Railway deployment monitoring
+./scripts/hooks/monitor-railway.sh
+
 # View logs
 railway logs --service api
 railway logs --service fetch-price
 railway logs --service daily
 ```
+
+**Claude Code Automation:**
+- After successfully pushing to `main` branch, ALWAYS execute `./scripts/hooks/monitor-railway.sh`
+- This monitors Railway deployment status and reports any issues
+- Git does not support post-push hooks natively, so this must be done explicitly
 
 ---
 

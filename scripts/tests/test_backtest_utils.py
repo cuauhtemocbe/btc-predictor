@@ -8,7 +8,7 @@ Tests:
 - get_actual_price_for_date: Get actual BTC price for specific date
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -29,19 +29,17 @@ class TestFetchTrainingData:
 
     def test_fetch_30_day_window(self, db_session, sample_btc_prices):
         """Scenario: Fetch 30-day training window successfully."""
-        # Given: 60 days of hourly data
+        # Given: 60 days of daily data
         end_date = date(2024, 5, 31)
 
         # When: Fetch 30-day window
         result = fetch_training_data(end_date, window_days=30, db=db_session)
 
-        # Then: Should return DataFrame with ~720-744 rows (30-31 days * 24 hours)
+        # Then: Should return DataFrame with ~30-31 rows (daily frequency)
         assert result is not None
         assert isinstance(result, pd.DataFrame)
-        assert len(result) >= 30 * 20  # At least 20 hours/day
-        assert (
-            len(result) <= 31 * 24
-        )  # At most 31 days * 24 hours (includes partial days)
+        assert len(result) >= 30  # At least 30 days
+        assert len(result) <= 31  # At most 31 days (includes partial days)
 
         # Check columns
         expected_columns = ["timestamp", "open", "high", "low", "close", "volume"]
@@ -73,15 +71,15 @@ class TestFetchTrainingData:
 
     def test_fetch_custom_window(self, db_session, sample_btc_prices):
         """Scenario: Fetch custom window size (60 days)."""
-        # Given: 60 days of data
+        # Given: 60 days of daily data
         end_date = date(2024, 6, 30)
 
         # When: Fetch 60-day window
         result = fetch_training_data(end_date, window_days=60, db=db_session)
 
-        # Then: Should return DataFrame with ~1440 rows (60 * 24)
+        # Then: Should return DataFrame with ~60 rows (daily frequency)
         assert result is not None
-        assert len(result) >= 60 * 20  # At least 20 hours/day
+        assert len(result) >= 60  # At least 60 days
 
 
 class TestGeneratePrediction:
@@ -116,25 +114,23 @@ class TestGeneratePrediction:
 
     def test_generate_prediction_insufficient_data(self, db_session):
         """Scenario: Raise ValueError when insufficient training data."""
-        # Given: Only 10 days of hourly data (not enough for 30-day window)
+        # Given: Only 10 days of daily data (not enough for 30-day window)
         start_date = date(2024, 5, 1)
         prices = []
         for day in range(10):
             current_date = start_date + timedelta(days=day)
-            for hour in range(24):
-                timestamp = datetime.combine(
-                    current_date, datetime.min.time()
-                ) + timedelta(hours=hour)
-                price = BtcPrice(
-                    timestamp=timestamp,
-                    open=Decimal("66000.00"),
-                    high=Decimal("66100.00"),
-                    low=Decimal("65900.00"),
-                    close=Decimal("66050.00"),
-                    volume=Decimal("1000.50"),
-                    source="test",
-                )
-                prices.append(price)
+            # Create 1 record per day at 12:00 PM (daily frequency)
+            timestamp = datetime.combine(current_date, time(12, 0))
+            price = BtcPrice(
+                timestamp=timestamp,
+                open=Decimal("66000.00"),
+                high=Decimal("66100.00"),
+                low=Decimal("65900.00"),
+                close=Decimal("66050.00"),
+                volume=Decimal("1000.50"),
+                source="test",
+            )
+            prices.append(price)
         db_session.add_all(prices)
         db_session.commit()
 

@@ -1,7 +1,9 @@
 """
 Fetch Price Job - Main Entry Point
 
-Fetches hourly BTC/USDT prices from Binance and saves to database.
+Fetches BTC/USD prices from CoinGecko and saves to database.
+Granularity: ~4 hours per candle (CoinGecko behavior for 1-day window).
+Data is aggregated to daily frequency by daily worker using DATE_TRUNC.
 """
 
 import asyncio
