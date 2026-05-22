@@ -73,6 +73,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
             prediction = Prediction(
                 model_id=sample_model.id,
                 predicted_for=predicted_for,
+                timeframe="1d",  # US-022: All predictions need timeframe
                 predicted_at=predicted_at,
                 price_at_prediction=price_at_prediction,
                 predicted_price=predicted_price,
@@ -423,6 +424,7 @@ async def test_get_total_pnl_with_losses(
         prediction = Prediction(
             model_id=sample_model.id,
             predicted_for=predicted_for,
+            timeframe="1d",
             predicted_at=predicted_at,
             price_at_prediction=price_at_prediction,
             predicted_price=predicted_price,
@@ -465,6 +467,7 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 1),
+            timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("50000"),
             predicted_price=Decimal("50000"),
@@ -477,6 +480,7 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 2),
+            timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("51000"),
             predicted_price=Decimal("51000"),
@@ -489,6 +493,7 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 3),
+            timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("50500"),
             predicted_price=Decimal("50500"),
@@ -501,6 +506,7 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 4),
+            timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("52000"),
             predicted_price=Decimal("52000"),
@@ -513,6 +519,7 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
         Prediction(
             model_id=sample_model.id,
             predicted_for=date(2026, 5, 5),
+            timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("51700"),
             predicted_price=Decimal("51700"),
@@ -704,3 +711,207 @@ async def test_all_four_strategies_returned(
     assert strategies["long_short"]["display_name"] == "Long Short"
     assert strategies["threshold"]["display_name"] == "Threshold"
     assert strategies["realistic"]["display_name"] == "Realistic"
+
+
+# ============================================================================
+# US-022: Timeframe Filtering Tests
+# ============================================================================
+
+
+@pytest.fixture
+def sample_predictions_with_timeframes(db_session: Session, sample_model: Model):
+    """
+    Create predictions with different timeframes (daily and weekly).
+
+    Returns:
+        Tuple of (daily_predictions, weekly_predictions)
+    """
+    daily_predictions = []
+    weekly_predictions = []
+
+    # Create 5 daily predictions
+    for i in range(5):
+        predicted_for = date.today() - timedelta(days=i)
+        prediction = Prediction(
+            model_id=sample_model.id,
+            predicted_for=predicted_for,
+            timeframe="1d",  # Daily
+            predicted_at=datetime.now(UTC) - timedelta(days=i + 1),
+            price_at_prediction=Decimal("67000") + Decimal(i * 100),
+            predicted_price=Decimal("67500") + Decimal(i * 100),
+            actual_price=Decimal("67800") + Decimal(i * 100),
+            evaluated_at=datetime.now(UTC) - timedelta(days=i),
+            error_abs=Decimal("300"),
+            error_pct=Decimal("0.44"),
+            direction_correct=True,
+            pnl_simulated=Decimal("1200"),
+            pnl_long_short=Decimal("1200"),
+            pnl_threshold=Decimal("1200"),
+            pnl_realistic=Decimal("1140"),
+        )
+        db_session.add(prediction)
+        daily_predictions.append(prediction)
+
+    # Create 3 weekly predictions
+    for i in range(3):
+        predicted_for = date.today() - timedelta(days=i * 7)
+        prediction = Prediction(
+            model_id=sample_model.id,
+            predicted_for=predicted_for,
+            timeframe="1w",  # Weekly
+            predicted_at=datetime.now(UTC) - timedelta(days=i * 7 + 7),
+            price_at_prediction=Decimal("65000") + Decimal(i * 200),
+            predicted_price=Decimal("66000") + Decimal(i * 200),
+            actual_price=Decimal("66500") + Decimal(i * 200),
+            evaluated_at=datetime.now(UTC) - timedelta(days=i * 7),
+            error_abs=Decimal("500"),
+            error_pct=Decimal("0.75"),
+            direction_correct=True,
+            pnl_simulated=Decimal("2000"),
+            pnl_long_short=Decimal("2000"),
+            pnl_threshold=Decimal("2000"),
+            pnl_realistic=Decimal("1900"),
+        )
+        db_session.add(prediction)
+        weekly_predictions.append(prediction)
+
+    db_session.commit()
+    for pred in daily_predictions + weekly_predictions:
+        db_session.refresh(pred)
+
+    return daily_predictions, weekly_predictions
+
+
+# Gherkin Scenario: API endpoint filters predictions by timeframe
+@pytest.mark.asyncio
+async def test_filter_predictions_by_timeframe_1w(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Gherkin: Filter predictions by timeframe=1w.
+
+    Given the predictions table has 5 daily and 3 weekly predictions
+    When I send GET /api/predictions/history?timeframe=1w
+    Then I receive only weekly predictions (3 records)
+    And all returned predictions have timeframe = '1w'
+    """
+    daily_preds, weekly_preds = sample_predictions_with_timeframes
+
+    # Act
+    response = await client.get("/api/predictions/history?timeframe=1w")
+
+    # Assert
+    assert response.status_code == 200
+    predictions = response.json()
+    assert isinstance(predictions, list)
+    assert len(predictions) == 3  # Only weekly predictions
+
+    # Verify all are weekly
+    for pred in predictions:
+        assert pred["timeframe"] == "1w"
+
+
+# Gherkin Scenario: API endpoint filters predictions by timeframe
+@pytest.mark.asyncio
+async def test_filter_predictions_by_timeframe_1d(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Gherkin: Filter predictions by timeframe=1d.
+
+    Given the predictions table has 5 daily and 3 weekly predictions
+    When I send GET /api/predictions/history?timeframe=1d
+    Then I receive only daily predictions (5 records)
+    And all returned predictions have timeframe = '1d'
+    """
+    daily_preds, weekly_preds = sample_predictions_with_timeframes
+
+    # Act
+    response = await client.get("/api/predictions/history?timeframe=1d")
+
+    # Assert
+    assert response.status_code == 200
+    predictions = response.json()
+    assert isinstance(predictions, list)
+    assert len(predictions) == 5  # Only daily predictions
+
+    # Verify all are daily
+    for pred in predictions:
+        assert pred["timeframe"] == "1d"
+
+
+# Gherkin Scenario: API endpoint returns all predictions when no timeframe filter
+@pytest.mark.asyncio
+async def test_no_timeframe_filter_returns_all(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Gherkin: No timeframe filter returns all predictions.
+
+    Given the predictions table has 5 daily and 3 weekly predictions
+    When I send GET /api/predictions/history (no timeframe param)
+    Then I receive all 8 predictions
+    And they include both daily and weekly timeframes
+    """
+    daily_preds, weekly_preds = sample_predictions_with_timeframes
+
+    # Act
+    response = await client.get("/api/predictions/history")
+
+    # Assert
+    assert response.status_code == 200
+    predictions = response.json()
+    assert isinstance(predictions, list)
+    assert len(predictions) == 8  # All predictions (5 + 3)
+
+    # Verify both timeframes present
+    timeframes = {pred["timeframe"] for pred in predictions}
+    assert "1d" in timeframes
+    assert "1w" in timeframes
+
+
+# Gherkin Scenario: Combine timeframe filter with date range
+@pytest.mark.asyncio
+async def test_timeframe_filter_with_date_range(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Gherkin: Combine timeframe filter with date range.
+
+    Given the predictions table has multiple daily and weekly predictions
+    When I send GET /api/predictions/history?timeframe=1w&from=<date>&to=<date>
+    Then I receive only weekly predictions within the date range
+    """
+    daily_preds, weekly_preds = sample_predictions_with_timeframes
+
+    # Get the middle weekly prediction's date
+    middle_pred = weekly_preds[1]
+    from_date = (middle_pred.predicted_for - timedelta(days=1)).isoformat()
+    to_date = (middle_pred.predicted_for + timedelta(days=1)).isoformat()
+
+    # Act
+    response = await client.get(
+        f"/api/predictions/history?timeframe=1w&from={from_date}&to={to_date}"
+    )
+
+    # Assert
+    assert response.status_code == 200
+    predictions = response.json()
+    assert isinstance(predictions, list)
+
+    # Should return at least the middle prediction
+    assert len(predictions) >= 1
+
+    # Verify all are weekly and within date range
+    for pred in predictions:
+        assert pred["timeframe"] == "1w"
+        pred_date = date.fromisoformat(pred["predicted_for"])
+        assert date.fromisoformat(from_date) <= pred_date <= date.fromisoformat(to_date)
