@@ -1,0 +1,24 @@
+repos:
+  # Ruff linter and formatter (runs on pre-commit)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff
+        name: Lint with ruff
+        args: [--fix, --no-cache]
+        files: ^(shared|api-service|workers)/
+      - id: ruff-format
+        name: Format with ruff
+        args: [--no-cache]
+        files: ^(shared|api-service|workers)/
+
+  # Pytest with Docker (runs on pre-push)
+  - repo: local
+    hooks:
+      - id: pytest-docker
+        name: Run tests in Docker
+        entry: scripts/hooks/run-tests.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

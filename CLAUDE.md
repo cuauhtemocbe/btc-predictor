@@ -163,6 +163,48 @@ Mutation testing evaluates test **quality**, not just coverage. It introduces bu
 
 ---
 
+## Git Hooks (Pre-commit Framework)
+
+**IMPORTANT:** This project uses [pre-commit](https://pre-commit.com/) framework for git hooks.
+
+### First-time Setup (per developer)
+
+```bash
+# Install pre-commit (only once per machine)
+pip install pre-commit
+
+# Install git hooks (only once per repo clone)
+pre-commit install --install-hooks
+pre-commit install --hook-type pre-push
+```
+
+### What Gets Checked Automatically
+
+**Pre-commit** (runs on `git commit`):
+- ✅ Ruff lint (auto-fixes when possible)
+- ✅ Ruff format (code style)
+
+**Pre-push** (runs on `git push`):
+- ✅ Pytest with 90% coverage requirement
+- ✅ Auto-starts Docker Compose if needed
+
+### Manual Hook Execution
+
+```bash
+# Run all pre-commit hooks manually
+pre-commit run --all-files
+
+# Run only pre-push hooks (tests)
+pre-commit run --hook-stage push --all-files
+
+# Update hook versions
+pre-commit autoupdate
+```
+
+See `scripts/hooks/README.md` for full documentation.
+
+---
+
 ## Common Commands
 
 ### Development (local) — ALL commands run in containers
