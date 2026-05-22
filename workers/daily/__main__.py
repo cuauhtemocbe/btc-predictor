@@ -7,6 +7,7 @@ This job runs daily and orchestrates the following workflow:
 3. Predictor: Generate tomorrow's prediction using active model
 
 Entry point: python -m workers.daily
+Version: 1.0.1 (migrations fix 2026-05-22)
 """
 
 import logging
