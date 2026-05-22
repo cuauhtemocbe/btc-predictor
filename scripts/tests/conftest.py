@@ -2,9 +2,10 @@
 Pytest configuration and fixtures for backtest script tests.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import date, datetime, timedelta
+from decimal import Decimal
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 

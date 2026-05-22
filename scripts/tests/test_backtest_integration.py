@@ -12,7 +12,6 @@ import pytest
 
 from scripts.backtest import (
     check_data_availability,
-    parse_arguments,
     run_backtest,
     validate_arguments,
 )
@@ -133,12 +132,8 @@ class TestBacktestIntegration:
         cumulative_long_short = sum(
             r.pnl_long_short for r in results if r.pnl_long_short
         )
-        cumulative_threshold = sum(
-            r.pnl_threshold for r in results if r.pnl_threshold
-        )
-        cumulative_realistic = sum(
-            r.pnl_realistic for r in results if r.pnl_realistic
-        )
+        cumulative_threshold = sum(r.pnl_threshold for r in results if r.pnl_threshold)
+        cumulative_realistic = sum(r.pnl_realistic for r in results if r.pnl_realistic)
 
         # All should be calculable (non-zero since we have price movements)
         assert cumulative_simple is not None
@@ -152,6 +147,7 @@ class TestBacktestArguments:
 
     def test_validate_arguments_success(self):
         """Scenario: Valid arguments pass validation."""
+
         # Given: Valid arguments
         class Args:
             start_date = "2024-05-01"
@@ -168,6 +164,7 @@ class TestBacktestArguments:
 
     def test_validate_arguments_invalid_date_format(self):
         """Scenario: Invalid date format raises ValueError."""
+
         # Given: Invalid date format
         class Args:
             start_date = "05/01/2024"  # Wrong format
@@ -180,6 +177,7 @@ class TestBacktestArguments:
 
     def test_validate_arguments_end_before_start(self):
         """Scenario: End date before start date raises ValueError."""
+
         # Given: End before start
         class Args:
             start_date = "2024-05-30"
@@ -192,6 +190,7 @@ class TestBacktestArguments:
 
     def test_validate_arguments_negative_window(self):
         """Scenario: Negative training window raises ValueError."""
+
         # Given: Negative training window
         class Args:
             start_date = "2024-05-01"

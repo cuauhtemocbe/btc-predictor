@@ -45,9 +45,7 @@ def main() -> int:
         Exit code (0 = success, 1 = failure)
     """
     # Parse arguments
-    parser = argparse.ArgumentParser(
-        description="Activate a specific ML model by ID"
-    )
+    parser = argparse.ArgumentParser(description="Activate a specific ML model by ID")
     parser.add_argument(
         "--model-id",
         type=int,

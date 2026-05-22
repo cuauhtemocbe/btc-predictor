@@ -39,7 +39,9 @@ class TestFetchTrainingData:
         assert result is not None
         assert isinstance(result, pd.DataFrame)
         assert len(result) >= 30 * 20  # At least 20 hours/day
-        assert len(result) <= 31 * 24  # At most 31 days * 24 hours (includes partial days)
+        assert (
+            len(result) <= 31 * 24
+        )  # At most 31 days * 24 hours (includes partial days)
 
         # Check columns
         expected_columns = ["timestamp", "open", "high", "low", "close", "volume"]

@@ -8,14 +8,9 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
-import pytest
-
 from scripts.backtest import run_backtest
 from scripts.backtest_utils import (
     fetch_training_data,
-    generate_prediction,
-    get_actual_price_for_date,
-    save_backtest_result,
 )
 from shared.db.models import BacktestResult, BtcPrice
 
@@ -43,7 +38,9 @@ class TestBacktestResultsTableSchema:
         assert "backtest_results" in inspector.get_table_names()
 
         # Check columns exist
-        columns = {col["name"]: col for col in inspector.get_columns("backtest_results")}
+        columns = {
+            col["name"]: col for col in inspector.get_columns("backtest_results")
+        }
 
         expected_columns = [
             "id",
@@ -182,9 +179,7 @@ class TestPnLCalculation:
         actual_price = Decimal("67500.00")
 
         # When: Calculate PnL
-        pnl_simple = calculate_pnl(
-            predicted_price, price_at_prediction, actual_price
-        )
+        pnl_simple = calculate_pnl(predicted_price, price_at_prediction, actual_price)
         pnl_long_short = calculate_pnl_long_short(
             predicted_price, price_at_prediction, actual_price
         )
