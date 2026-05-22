@@ -1,6 +1,7 @@
 """Router for backtesting results endpoints."""
 
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,7 +22,8 @@ from api.models.backtesting import (
 router = APIRouter(tags=["backtesting"])
 
 # Templates for HTML rendering
-templates = Jinja2Templates(directory="api/templates")
+templates_dir = Path(__file__).parent.parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 
 
 def calculate_backtest_strategy_metrics(

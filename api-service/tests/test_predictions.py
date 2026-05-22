@@ -54,11 +54,14 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
 
     Usage:
         sample_predictions_factory(count=10, evaluated=True)
+        sample_predictions_factory(count=5, evaluated=False, start_days_ago=30)
     """
 
-    def _create_predictions(count: int = 10, evaluated: bool = True):
+    def _create_predictions(
+        count: int = 10, evaluated: bool = True, start_days_ago: int = 0
+    ):
         predictions = []
-        base_date = date.today()
+        base_date = date.today() - timedelta(days=start_days_ago)
 
         for i in range(count):
             predicted_for = base_date - timedelta(days=i)
@@ -138,8 +141,10 @@ async def test_fetch_all_evaluated_predictions(
     And items are ordered by predicted_for DESC
     """
     # Arrange: Create 30 evaluated + 5 unevaluated predictions
+    # Use different date ranges to avoid unique constraint violations
     sample_predictions_factory(count=30, evaluated=True)
-    sample_predictions_factory(count=5, evaluated=False)
+    # Start unevaluated predictions 30 days earlier to avoid date collision
+    sample_predictions_factory(count=5, evaluated=False, start_days_ago=30)
 
     # Act: Fetch predictions history
     response = await client.get("/api/predictions/history")
@@ -380,8 +385,9 @@ async def test_get_total_pnl_mixed_predictions(
     Test that PnL endpoint only counts evaluated predictions and ignores unevaluated.
     """
     # Arrange: Create 20 evaluated + 10 unevaluated predictions
+    # Use different date ranges to avoid unique constraint violations
     evaluated = sample_predictions_factory(count=20, evaluated=True)
-    sample_predictions_factory(count=10, evaluated=False)
+    sample_predictions_factory(count=10, evaluated=False, start_days_ago=20)
 
     # Calculate expected PnL (only from evaluated predictions)
     expected_pnl = sum(float(p.pnl_simulated) for p in evaluated)
