@@ -7,10 +7,10 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+from shared.db.models import Base, BtcPrice, Model, Prediction
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from shared.db.models import Base, BtcPrice, Model, Prediction
 from workers.daily.models import LinearRegressionModel, XGBoostModel
 
 
@@ -182,7 +182,7 @@ def sample_xgboost_model(
     Create a trained XGBoostModel and save it to the database.
 
     Returns:
-        Model record with is_active=False (by default, for testing multi-model scenarios)
+        Model record with is_active=False (default for multi-model tests)
     """
     X, y = sliding_window_data
 
@@ -212,31 +212,40 @@ def sample_xgboost_model(
 @pytest.fixture
 def sample_btc_prices_30_days(db_session: Session) -> list[BtcPrice]:
     """
-    Create 30 days of BTC price records in the database.
+    Create 30 days of BTC price records in the database (4-hour granularity).
 
     Returns:
-        List of 30 BtcPrice records
+        List of 180 BtcPrice records (6 per day at 4-hour intervals)
     """
     prices = []
-    base_time = datetime.now(UTC) - timedelta(days=30)
+    # Use midnight as base to ensure all 6 intervals stay within same calendar day
+    today = datetime.now(UTC).date()
+    base_date = today - timedelta(days=30)
 
     for i in range(30):
-        timestamp = base_time + timedelta(days=i)
+        current_date = base_date + timedelta(days=i)
         # Prices range from $50,000 to $51,500
-        close_price = Decimal("50000") + Decimal(str(i * 50))
+        base_close = Decimal("50000") + Decimal(str(i * 50))
 
-        price_record = BtcPrice(
-            timestamp=timestamp,
-            open=close_price - Decimal("100"),
-            high=close_price + Decimal("200"),
-            low=close_price - Decimal("150"),
-            close=close_price,
-            volume=Decimal("1000.5"),
-            source="test",
-        )
+        # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
+        for interval in range(6):
+            timestamp = datetime.combine(current_date, datetime.min.time()).replace(
+                tzinfo=UTC
+            ) + timedelta(hours=interval * 4)
+            close_price = base_close + Decimal(str(interval * 10))
 
-        db_session.add(price_record)
-        prices.append(price_record)
+            price_record = BtcPrice(
+                timestamp=timestamp,
+                open=close_price - Decimal("100"),
+                high=close_price + Decimal("200"),
+                low=close_price - Decimal("150"),
+                close=close_price,
+                volume=Decimal("1000.5"),
+                source="test",
+            )
+
+            db_session.add(price_record)
+            prices.append(price_record)
 
     db_session.commit()
 
@@ -246,30 +255,40 @@ def sample_btc_prices_30_days(db_session: Session) -> list[BtcPrice]:
 @pytest.fixture
 def sample_btc_prices_10_days(db_session: Session) -> list[BtcPrice]:
     """
-    Create only 10 days of BTC price records (insufficient for 30-day window).
+    Create 10 days of BTC price records (4-hour granularity).
+    Insufficient for 30-day window.
 
     Returns:
-        List of 10 BtcPrice records
+        List of 60 BtcPrice records (6 per day at 4-hour intervals)
     """
     prices = []
-    base_time = datetime.now(UTC) - timedelta(days=10)
+    # Use midnight as base to ensure all 6 intervals stay within same calendar day
+    today = datetime.now(UTC).date()
+    base_date = today - timedelta(days=10)
 
     for i in range(10):
-        timestamp = base_time + timedelta(days=i)
-        close_price = Decimal("50000") + Decimal(str(i * 50))
+        current_date = base_date + timedelta(days=i)
+        base_close = Decimal("50000") + Decimal(str(i * 50))
 
-        price_record = BtcPrice(
-            timestamp=timestamp,
-            open=close_price - Decimal("100"),
-            high=close_price + Decimal("200"),
-            low=close_price - Decimal("150"),
-            close=close_price,
-            volume=Decimal("1000.5"),
-            source="test",
-        )
+        # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
+        for interval in range(6):
+            timestamp = datetime.combine(current_date, datetime.min.time()).replace(
+                tzinfo=UTC
+            ) + timedelta(hours=interval * 4)
+            close_price = base_close + Decimal(str(interval * 10))
 
-        db_session.add(price_record)
-        prices.append(price_record)
+            price_record = BtcPrice(
+                timestamp=timestamp,
+                open=close_price - Decimal("100"),
+                high=close_price + Decimal("200"),
+                low=close_price - Decimal("150"),
+                close=close_price,
+                volume=Decimal("1000.5"),
+                source="test",
+            )
+
+            db_session.add(price_record)
+            prices.append(price_record)
 
     db_session.commit()
 

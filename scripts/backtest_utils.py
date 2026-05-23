@@ -24,7 +24,10 @@ def fetch_training_data(
     end_date: date, window_days: int = 30, db: Session | None = None
 ) -> pd.DataFrame | None:
     """
-    Fetch rolling training window from btc_prices table.
+    Fetch rolling training window from btc_prices table with daily aggregation.
+
+    Uses DATE_TRUNC to aggregate 4-hour data (6 records/day) to daily (1 record/day).
+    Takes the latest close price for each day.
 
     Args:
         end_date: Last date to include in training data
@@ -32,12 +35,12 @@ def fetch_training_data(
         db: Database session (optional, will create if None)
 
     Returns:
-        DataFrame with columns: timestamp, open, high, low, close, volume
+        DataFrame with columns: timestamp, close (aggregated daily)
         None if insufficient data
 
     Example:
         >>> df = fetch_training_data(date(2024, 5, 15), window_days=30)
-        >>> print(len(df))  # Should be ~30 rows (30 days, daily frequency)
+        >>> print(len(df))  # Should be ~30 rows (30 days, daily aggregated)
     """
     close_db = False
     if db is None:
@@ -48,12 +51,29 @@ def fetch_training_data(
         # Calculate start date for training window
         start_date = end_date - timedelta(days=window_days)
 
-        # Query btc_prices for date range
+        # Subquery: Get the latest timestamp for each day
+        from sqlalchemy import func
+
+        latest_per_day = (
+            select(
+                func.date_trunc("day", BtcPrice.timestamp).label("day"),
+                func.max(BtcPrice.timestamp).label("latest_timestamp"),
+            )
+            .where(func.date_trunc("day", BtcPrice.timestamp) >= start_date)
+            .where(func.date_trunc("day", BtcPrice.timestamp) <= end_date)
+            .group_by("day")
+            .order_by(func.date_trunc("day", BtcPrice.timestamp))
+            .subquery()
+        )
+
+        # Main query: Join to get all OHLCV data for the latest timestamp each day
         stmt = (
             select(BtcPrice)
-            .where(BtcPrice.timestamp >= start_date)
-            .where(BtcPrice.timestamp < end_date + timedelta(days=1))
-            .order_by(BtcPrice.timestamp)
+            .join(
+                latest_per_day,
+                BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+            )
+            .order_by(latest_per_day.c.day)
         )
 
         results = db.execute(stmt).scalars().all()
@@ -77,9 +97,9 @@ def fetch_training_data(
 
         df = pd.DataFrame(data)
 
-        # Validate we have enough data
-        # Expect at least window_days * 1 (daily frequency with some tolerance)
-        min_expected_rows = window_days * 1
+        # Validate we have enough data (daily aggregated)
+        # Expect at least window_days of daily data
+        min_expected_rows = window_days
         if len(df) < min_expected_rows:
             return None
 

@@ -32,12 +32,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def fetch_prices(days: int = 1) -> List[Dict]:
+async def fetch_prices(days: int = 30) -> List[Dict]:
     """
     Fetch BTC/USD prices from CoinGecko.
 
     Args:
-        days: Number of days of data to fetch (default: 1 = last ~24 hours)
+        days: Number of days of data to fetch (default: 30 = 4-hour granularity, ~180 candles)
 
     Returns:
         List of price dictionaries with keys: timestamp, open, high, low, close, volume
@@ -145,8 +145,8 @@ async def main() -> int:
     try:
         logger.info("Fetch price job starting")
 
-        # Fetch prices from CoinGecko
-        prices = await fetch_prices(days=1)
+        # Fetch prices from CoinGecko (30 days = 4-hour granularity, ~180 candles)
+        prices = await fetch_prices(days=30)
 
         # Filter and save
         with SessionLocal() as session:
