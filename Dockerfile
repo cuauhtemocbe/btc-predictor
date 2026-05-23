@@ -19,6 +19,7 @@ COPY pyproject.toml poetry.lock* ./
 COPY shared/ ./shared/
 COPY api-service/ ./api-service/
 COPY workers/ ./workers/
+COPY scripts/ ./scripts/
 COPY entrypoint.sh ./
 
 # Install all dependencies from root (ensures consistent versions via poetry.lock)
