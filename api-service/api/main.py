@@ -9,7 +9,6 @@ from shared.db.database import get_db
 from sqlalchemy.orm import Session
 
 from api.routers import router
-from api.routers.admin import router as admin_router
 from api.routers.backtesting import router as backtesting_router
 from api.routers.models import router as models_router
 from api.routers.predictions import router as predictions_router
@@ -21,7 +20,6 @@ app.include_router(prices_router)
 app.include_router(predictions_router)
 app.include_router(backtesting_router)
 app.include_router(models_router)
-app.include_router(admin_router)  # Temporary admin endpoints
 
 # Configure Jinja2 templates
 templates_dir = Path(__file__).parent / "templates"
