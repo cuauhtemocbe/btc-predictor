@@ -43,10 +43,10 @@ async def run_backfill(days: int = 30):
     client = CoinGeckoClient()
 
     try:
-        # Fetch prices
+        # Fetch prices (returns list of tuples: (timestamp, o, h, l, c, v))
         logger.info(f"Fetching {days} days of data from CoinGecko...")
-        prices = await client.get_ohlc_data(days=days)
-        logger.info(f"Fetched {len(prices)} candles")
+        raw_prices = await client.fetch_ohlcv(days=days)
+        logger.info(f"Fetched {len(raw_prices)} candles")
 
         # Save to database
         db = SessionLocal()
@@ -54,12 +54,10 @@ async def run_backfill(days: int = 30):
         skipped = 0
 
         try:
-            for price_data in prices:
+            for timestamp, open_p, high, low, close, volume in raw_prices:
                 # Check if timestamp already exists
                 existing = (
-                    db.query(BtcPrice)
-                    .filter(BtcPrice.timestamp == price_data["timestamp"])
-                    .first()
+                    db.query(BtcPrice).filter(BtcPrice.timestamp == timestamp).first()
                 )
 
                 if existing:
@@ -68,12 +66,12 @@ async def run_backfill(days: int = 30):
 
                 # Insert new record
                 price_record = BtcPrice(
-                    timestamp=price_data["timestamp"],
-                    open=Decimal(str(price_data["open"])),
-                    high=Decimal(str(price_data["high"])),
-                    low=Decimal(str(price_data["low"])),
-                    close=Decimal(str(price_data["close"])),
-                    volume=Decimal(str(price_data["volume"])),
+                    timestamp=timestamp,
+                    open=Decimal(str(open_p)),
+                    high=Decimal(str(high)),
+                    low=Decimal(str(low)),
+                    close=Decimal(str(close)),
+                    volume=Decimal(str(volume)),
                     source="coingecko_backfill",
                 )
 
@@ -92,7 +90,7 @@ async def run_backfill(days: int = 30):
             return {
                 "status": "success",
                 "days": days,
-                "total_fetched": len(prices),
+                "total_fetched": len(raw_prices),
                 "inserted": inserted,
                 "skipped": skipped,
             }
