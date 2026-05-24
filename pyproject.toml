@@ -47,8 +47,19 @@ testpaths = [
     "workers/weekly/tests",
     "scripts/tests"
 ]
+
+# Registrar markers para evitar warnings y habilitar ejecución selectiva
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests that require full DB setup",
+    "unit: marks tests that use mocks/stubs only",
+    "db: marks tests that use database fixtures",
+    "asyncio: marks async tests (automatically detected)"
+]
+
 # Parallel execution with pytest-xdist (auto-detect CPU cores)
-# addopts = "-n auto"  # Disabled while fixing Fase 1
+# Temporarily disabled due to test isolation issues - will re-enable after fixture optimization
+# addopts = "-n auto"
 
 [tool.ruff]
 line-length = 88
