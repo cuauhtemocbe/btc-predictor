@@ -57,10 +57,6 @@ markers = [
     "asyncio: marks async tests (automatically detected)"
 ]
 
-# Parallel execution with pytest-xdist (auto-detect CPU cores)
-# Temporarily disabled due to test isolation issues - will re-enable after fixture optimization
-# addopts = "-n auto"
-
 [tool.ruff]
 line-length = 88
 target-version = "py313"

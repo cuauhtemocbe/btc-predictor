@@ -121,7 +121,6 @@ docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
 - ✅ **Cached model artifacts** (module-scoped): Linear, XGBoost, LSTM models train ONCE per test module instead of per test
 - ✅ **Cached price data** (module-scoped): Pre-calculated price datasets (180-720 records) generated once per module
 - ✅ **Pytest markers**: Registered `slow`, `integration`, `unit`, `db` for selective test execution
-- ⏸️ **Parallelization (pytest-xdist)**: Disabled due to test isolation issues; will re-enable after further optimization
 
 **Performance History:**
 - Baseline (May 23, 2026): 127.74s (2 min 7 seg)
@@ -135,9 +134,6 @@ docker compose exec api pytest
 
 # Run without slow tests (faster feedback)
 docker compose exec api pytest -m "not slow"
-
-# Run with parallelization (experimental - may cause issues)
-docker compose exec api pytest -n auto
 ```
 
 ### Mutation Testing (Advanced Quality Check)
