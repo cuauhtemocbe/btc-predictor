@@ -30,7 +30,8 @@ COPY scripts/ ./scripts/
 COPY entrypoint.sh ./
 
 # Install dependencies (base + api group)
-RUN poetry install --no-interaction --no-ansi --only main --with api --no-root && \
+# Install main deps + api group, exclude dev deps
+RUN poetry install --no-interaction --no-ansi --with api --without dev --no-root && \
     chmod +x /app/entrypoint.sh && \
     chown -R appuser:appgroup /app
 
