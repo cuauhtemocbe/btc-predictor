@@ -20,13 +20,11 @@ from argparse import Namespace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-import numpy as np
 import pytest
 from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
 from workers.daily import evaluator, predictor
-from workers.daily.models import LinearRegressionModel, LSTMModel, XGBoostModel
 
 # ============================================================================
 # Additional fixtures for multi-model scenarios
@@ -35,25 +33,28 @@ from workers.daily.models import LinearRegressionModel, LSTMModel, XGBoostModel
 
 @pytest.fixture
 def three_active_models(
-    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    db_session: Session,
+    cached_linear_artifact: bytes,
+    cached_xgboost_artifact: bytes,
+    cached_lstm_artifact: bytes,
 ) -> list[Model]:
     """
     Create 3 trained models (linear, xgboost, lstm) all active.
 
+    Uses cached artifacts from module-scoped fixtures to avoid
+    redundant training (3-5s speedup per test).
+
     Returns:
         List of 3 Model records with is_active=True
     """
-    X, y = sliding_window_data
     models = []
 
-    # Model 1: LinearRegression
-    lr_model = LinearRegressionModel(window_days=30)
-    lr_model.train(X, y)
+    # Model 1: LinearRegression (using cached artifact)
     model1 = Model(
         name="linear_v1",
         version="1.0.0",
         params={"window_days": 30},
-        artifact=lr_model.serialize(),
+        artifact=cached_linear_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
@@ -62,14 +63,12 @@ def three_active_models(
     db_session.add(model1)
     models.append(model1)
 
-    # Model 2: XGBoost
-    xgb_model = XGBoostModel(window_days=30)
-    xgb_model.train(X, y)
+    # Model 2: XGBoost (using cached artifact)
     model2 = Model(
         name="xgboost_v1",
         version="1.0.0",
         params={"window_days": 30, "n_estimators": 100},
-        artifact=xgb_model.serialize(),
+        artifact=cached_xgboost_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
@@ -78,14 +77,12 @@ def three_active_models(
     db_session.add(model2)
     models.append(model2)
 
-    # Model 3: LSTM
-    lstm_model = LSTMModel(window_days=30)
-    lstm_model.train(X, y)
+    # Model 3: LSTM (using cached artifact)
     model3 = Model(
         name="lstm_v1",
         version="1.0.0",
         params={"window_days": 30, "epochs": 10},
-        artifact=lstm_model.serialize(),
+        artifact=cached_lstm_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),

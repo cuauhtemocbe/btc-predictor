@@ -104,79 +104,115 @@ def sample_trained_model(
     return model_record
 
 
-@pytest.fixture
-def sample_daily_close_prices_30_days(db_session: Session) -> list[BtcPrice]:
-    """
-    Create 30 days of DAILY close prices (1 price per day at 7am UTC).
-
-    This fixture creates hourly prices for 30 days, ensuring that
-    the weekly predictor can fetch daily close prices correctly.
-
-    Returns:
-        List of 720 BtcPrice records (30 days * 24 hours)
-    """
-    prices = []
+@pytest.fixture(scope="module")
+def cached_daily_price_data_30_days():
+    """Module-scoped cached hourly price data (30 days, 720 records)."""
+    data = []
     base_time = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=30)
 
     for day in range(30):
+        close_price = 50000 + (day * 50)
         for hour in range(24):
             timestamp = base_time + timedelta(days=day, hours=hour)
-            # Prices range from $50,000 to $51,500 (upward trend)
-            close_price = Decimal("50000") + Decimal(str(day * 50))
 
-            price_record = BtcPrice(
-                timestamp=timestamp,
-                open=close_price - Decimal("100"),
-                high=close_price + Decimal("200"),
-                low=close_price - Decimal("150"),
-                close=close_price,
-                volume=Decimal("1000.5"),
-                source="test",
+            data.append(
+                (
+                    timestamp,
+                    Decimal(str(close_price - 100)),  # open
+                    Decimal(str(close_price + 200)),  # high
+                    Decimal(str(close_price - 150)),  # low
+                    Decimal(str(close_price)),  # close
+                    Decimal("1000.5"),  # volume
+                )
             )
 
-            db_session.add(price_record)
-            prices.append(price_record)
-
-    db_session.commit()
-
-    return prices
+    return data
 
 
 @pytest.fixture
-def sample_daily_close_prices_10_days(db_session: Session) -> list[BtcPrice]:
+def sample_daily_close_prices_30_days(
+    db_session: Session, cached_daily_price_data_30_days
+) -> list[BtcPrice]:
     """
-    Create only 10 days of daily close prices (insufficient for 30-day window).
+    Create 30 days of hourly prices using cached data.
 
     Returns:
-        List of 240 BtcPrice records (10 days * 24 hours)
+        List of 720 BtcPrice records (30 days * 24 hours)
     """
     prices = []
+
+    for timestamp, open_p, high, low, close, volume in cached_daily_price_data_30_days:
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=open_p,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            source="test",
+        )
+        db_session.add(price_record)
+        prices.append(price_record)
+
+    db_session.commit()
+    return prices
+
+
+@pytest.fixture(scope="module")
+def cached_daily_price_data_10_days():
+    """Module-scoped cached hourly price data (10 days, 240 records)."""
+    data = []
     base_time = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=10)
 
     for day in range(10):
+        close_price = 50000 + (day * 50)
         for hour in range(24):
             timestamp = base_time + timedelta(days=day, hours=hour)
-            close_price = Decimal("50000") + Decimal(str(day * 50))
 
-            price_record = BtcPrice(
-                timestamp=timestamp,
-                open=close_price - Decimal("100"),
-                high=close_price + Decimal("200"),
-                low=close_price - Decimal("150"),
-                close=close_price,
-                volume=Decimal("1000.5"),
-                source="test",
+            data.append(
+                (
+                    timestamp,
+                    Decimal(str(close_price - 100)),
+                    Decimal(str(close_price + 200)),
+                    Decimal(str(close_price - 150)),
+                    Decimal(str(close_price)),
+                    Decimal("1000.5"),
+                )
             )
 
-            db_session.add(price_record)
-            prices.append(price_record)
+    return data
+
+
+@pytest.fixture
+def sample_daily_close_prices_10_days(
+    db_session: Session, cached_daily_price_data_10_days
+) -> list[BtcPrice]:
+    """
+    Create 10 days of hourly prices using cached data (insufficient for 30-day window).
+
+    Returns:
+        List of 240 BtcPrice records (10 days * 24 hours)
+    """
+    prices = []
+
+    for timestamp, open_p, high, low, close, volume in cached_daily_price_data_10_days:
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=open_p,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            source="test",
+        )
+        db_session.add(price_record)
+        prices.append(price_record)
 
     db_session.commit()
-
     return prices
 
 

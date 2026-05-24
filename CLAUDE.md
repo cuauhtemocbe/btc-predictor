@@ -111,34 +111,67 @@ docker compose exec api pytest workers/daily/tests/
 docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
 ```
 
-**Current Coverage:** 90%+ across all packages
+**Current Coverage:** 95% across all packages
+
+### Test Performance
+
+**Execution Time:** ~94 seconds (1 min 34 seg) for 515 tests
+
+**Optimizations Applied** (May 2026):
+- ✅ **Cached model artifacts** (module-scoped): Linear, XGBoost, LSTM models train ONCE per test module instead of per test
+- ✅ **Cached price data** (module-scoped): Pre-calculated price datasets (180-720 records) generated once per module
+- ✅ **Pytest markers**: Registered `slow`, `integration`, `unit`, `db` for selective test execution
+- ⏸️ **Parallelization (pytest-xdist)**: Disabled due to test isolation issues; will re-enable after further optimization
+
+**Performance History:**
+- Baseline (May 23, 2026): 127.74s (2 min 7 seg)
+- After optimization (May 24, 2026): 93.67s (1 min 33 seg)
+- **Improvement**: 26.7% faster ⚡
+
+**Commands:**
+```bash
+# Run all tests (optimized)
+docker compose exec api pytest
+
+# Run without slow tests (faster feedback)
+docker compose exec api pytest -m "not slow"
+
+# Run with parallelization (experimental - may cause issues)
+docker compose exec api pytest -n auto
+```
 
 ### Mutation Testing (Advanced Quality Check)
 
 Mutation testing evaluates test **quality**, not just coverage. It introduces bugs (mutations) in code and checks if tests detect them.
 
+**Framework:** Cosmic Ray 8.3 (configured in `cosmic-ray.toml` and `pyproject.toml`)
+
 ```bash
-# Run mutation testing on entire project
-./scripts/mutation-test.sh all
+# IMPORTANT: All commands run inside api container
+docker compose exec api <command>
 
-# Run on specific package (recommended - faster)
-./scripts/mutation-test.sh shared
-./scripts/mutation-test.sh api
-./scripts/mutation-test.sh workers
+# Initialize mutation testing session
+cosmic-ray init cosmic-ray.toml session.sqlite
 
-# View results
-./scripts/mutation-test.sh results
+# Execute mutation testing (run mutants against tests)
+cosmic-ray exec cosmic-ray.toml session.sqlite
 
-# View mutants that survived (tests didn't catch)
-./scripts/mutation-test.sh survived
+# Generate report
+cr-report session.sqlite
 
-# View specific mutant details
-./scripts/mutation-test.sh show 42
+# View detailed results
+cr-html session.sqlite > mutation-report.html
+
+# Continue interrupted session
+cosmic-ray exec cosmic-ray.toml session.sqlite --no-local-import
+
+# Baseline test (verify tests pass before mutating)
+cosmic-ray --verbosity=INFO baseline cosmic-ray.toml
 ```
 
 **How it works:**
-1. Mutmut changes code (e.g., `>` → `>=`, `True` → `False`)
-2. Runs tests against mutated code
+1. Cosmic Ray changes code (e.g., `>` → `>=`, `True` → `False`, remove lines)
+2. Runs tests against each mutated version
 3. ✅ **Mutant killed** = Tests detected the bug (good)
 4. ❌ **Mutant survived** = Tests didn't detect the bug (bad - need more tests)
 
@@ -146,7 +179,7 @@ Mutation testing evaluates test **quality**, not just coverage. It introduces bu
 - Coverage: >90% ✅
 - Mutation Score: >85% (target)
 
-**See:** `docs/MUTATION_TESTING.md` for complete guide
+**Latest Results:** 100% mutation score on `shared/db/crud.py` (274/274 mutants killed - see `mutation_testing_report.md`)
 
 ---
 

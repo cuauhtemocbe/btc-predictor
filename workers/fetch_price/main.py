@@ -32,12 +32,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def fetch_prices(days: int = 30) -> List[Dict]:
+async def fetch_prices(days: int = 1) -> List[Dict]:
     """
     Fetch BTC/USD prices from CoinGecko.
 
     Args:
-        days: Number of days of data to fetch (default: 30 = 4-hour granularity, ~180 candles)
+        days: Number of days of data to fetch (default: 1 = 4-hour granularity, ~6 candles)
 
     Returns:
         List of price dictionaries with keys: timestamp, open, high, low, close, volume
