@@ -214,10 +214,10 @@ class TestTrainAllModels:
 
     def test_train_all_models_insufficient_data_raises_error(self, db_session):
         """Test that train_all_models raises ValueError with insufficient data."""
-        # Create only 39 days of data (< 40 min for Phase 1)
-        for i in range(39):
+        # Create only 29 days of data (< 30 min for Phase 1)
+        for i in range(29):
             price_record = BtcPrice(
-                timestamp=datetime.now(UTC) - timedelta(days=39 - i),
+                timestamp=datetime.now(UTC) - timedelta(days=29 - i),
                 open=Decimal(50000 + i * 100),
                 high=Decimal(50000 + i * 100 + 500),
                 low=Decimal(50000 + i * 100 - 500),
@@ -229,7 +229,7 @@ class TestTrainAllModels:
 
         db_session.commit()
 
-        # Should raise ValueError (39 days < 40 minimum)
+        # Should raise ValueError (29 days < 30 minimum)
         with pytest.raises(ValueError, match="Insufficient data for training"):
             train_all_models(db_session)
 
