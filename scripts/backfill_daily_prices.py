@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
-Backfill Historical BTC Daily Price Data
+Backfill Historical BTC Price Data from CoinGecko
 
-Downloads historical daily OHLCV data from CoinGecko and saves to database.
-CoinGecko free tier allows up to 365 days of historical data.
+Downloads historical OHLCV data from CoinGecko with the following granularity:
+- 1-30 days: 4-hour candles (~6 candles/day) ✅ RECOMMENDED
+- 31-90 days: Daily candles (~1 candle/day)
+- 91+ days: 4-day candles (too sparse for ML training) ❌
+
+IMPORTANT: For ML model training, use maximum 30 days per backfill to maintain
+4-hour granularity. If you need more historical data, run incremental backfills.
+
+Example (incremental backfill):
+    # Get last 30 days with 4-hour granularity
+    railway run -s api python scripts/backfill_daily_prices.py --days=30
+
+    # For more data, consider using daily worker's DATE_TRUNC aggregation
+    # which works with any granularity (4h, daily, 4-day)
 
 Features:
-- Daily granularity (CoinGecko returns daily when days >= 7)
 - Idempotent (skips duplicates via UNIQUE timestamp constraint)
 - Progress logging with batch counts
 - Railway-safe (timeout aware)
@@ -16,13 +27,8 @@ Usage:
     # Local (testing)
     docker compose exec api python scripts/backfill_daily_prices.py --days=7
 
-    # Production (Railway)
-    railway run -s api python scripts/backfill_daily_prices.py --days=365
-
-    # Incremental (if timeout)
-    railway run -s api python scripts/backfill_daily_prices.py --days=90
-    railway run -s api python scripts/backfill_daily_prices.py --days=180
-    railway run -s api python scripts/backfill_daily_prices.py --days=365
+    # Production (Railway) - RECOMMENDED
+    railway run -s api python scripts/backfill_daily_prices.py --days=30
 """
 
 import argparse
@@ -64,18 +70,20 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download last 7 days (for testing)
+  # Download last 7 days (testing - 4-hour granularity)
   python scripts/backfill_daily_prices.py --days=7
 
-  # Download last 90 days (recommended for backtesting)
+  # Download last 30 days (RECOMMENDED - 4-hour granularity, ~180 candles)
+  python scripts/backfill_daily_prices.py --days=30
+
+  # Download 90 days (daily granularity - less precise)
   python scripts/backfill_daily_prices.py --days=90
 
-  # Download last 365 days (max for CoinGecko free tier)
-  python scripts/backfill_daily_prices.py --days=365
-
 Notes:
-  - CoinGecko returns DAILY granularity when days >= 7
-  - Free tier maximum: 365 days
+  - CoinGecko Granularity:
+    * 1-30 days: 4-hour candles (~6/day) ✅ Best for ML
+    * 31-90 days: Daily candles (~1/day)
+    * 91+ days: 4-day candles (too sparse) ❌
   - Idempotent: safe to run multiple times (skips duplicates)
   - Progress logged every 100 records
         """,
@@ -84,8 +92,8 @@ Notes:
     parser.add_argument(
         "--days",
         type=int,
-        default=365,
-        help="Number of days of historical data to download (default: 365, max: 365)",
+        default=30,
+        help="Number of days of historical data to download (default: 30, max recommended: 30 for 4h granularity)",
     )
 
     parser.add_argument(
@@ -129,7 +137,7 @@ async def fetch_historical_data(days: int) -> List[dict]:
     client = CoinGeckoClient()
 
     # Fetch OHLCV candles
-    # CoinGecko returns DAILY granularity when days >= 7
+    # CoinGecko granularity: 1-30 days=4h, 31-90 days=daily, 91+ days=4-day
     candles = await client.fetch_ohlcv(coin_id="bitcoin", vs_currency="usd", days=days)
 
     # Convert to dictionaries
@@ -245,6 +253,14 @@ async def main() -> int:
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Add warning for days > 30
+    if args.days > 30:
+        logger.warning(
+            f"Requesting {args.days} days of data. "
+            f"CoinGecko returns degraded granularity (daily/4-day) beyond 30 days. "
+            f"Recommended: Use --days=30 for best 4-hour granularity."
+        )
 
     try:
         logger.info("=" * 70)

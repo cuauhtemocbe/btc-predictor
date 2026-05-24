@@ -283,6 +283,104 @@ class TestFetchActualPrice:
 
         assert price is None
 
+    def test_fetch_actual_price_with_4hour_candles(self, db_session: Session) -> None:
+        """Test evaluator finds 8am candle with 4-hour granularity."""
+        target_date = date(2026, 5, 24)
+
+        # Insert 4-hour candles for May 24: 0am, 4am, 8am, 12pm, 4pm, 8pm
+        candles = [
+            datetime(2026, 5, 24, 0, 0, tzinfo=UTC),  # 0am
+            datetime(2026, 5, 24, 4, 0, tzinfo=UTC),  # 4am
+            datetime(2026, 5, 24, 8, 0, tzinfo=UTC),  # 8am ← should be selected
+            datetime(2026, 5, 24, 12, 0, tzinfo=UTC),  # 12pm
+            datetime(2026, 5, 24, 16, 0, tzinfo=UTC),  # 4pm
+            datetime(2026, 5, 24, 20, 0, tzinfo=UTC),  # 8pm
+        ]
+
+        for i, timestamp in enumerate(candles):
+            price = Decimal("95000.00") + Decimal(i * 100)  # Incrementing prices
+            db_session.add(
+                BtcPrice(
+                    timestamp=timestamp,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0"),
+                    source="coingecko",
+                )
+            )
+        db_session.commit()
+
+        # Should find 8am candle (index 2 → $95200)
+        result = evaluator.fetch_actual_price(db_session, target_date)
+
+        assert result == Decimal("95200.00")
+
+    def test_fetch_actual_price_no_data_after_7am(self, db_session: Session) -> None:
+        """Should return None if no candles exist at or after 7am on target date."""
+        target_date = date(2026, 5, 25)
+
+        # Insert candles only before 7am (0am, 4am)
+        early_candles = [
+            datetime(2026, 5, 25, 0, 0, tzinfo=UTC),  # 0am
+            datetime(2026, 5, 25, 4, 0, tzinfo=UTC),  # 4am
+        ]
+
+        for i, timestamp in enumerate(early_candles):
+            price = Decimal("96000.00") + Decimal(i * 100)
+            db_session.add(
+                BtcPrice(
+                    timestamp=timestamp,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0"),
+                    source="coingecko",
+                )
+            )
+        db_session.commit()
+
+        # Should return None (no candles >= 7am)
+        result = evaluator.fetch_actual_price(db_session, target_date)
+
+        assert result is None
+
+    def test_fetch_actual_price_excludes_next_day(self, db_session: Session) -> None:
+        """Should not return candles from the next day."""
+        target_date = date(2026, 5, 26)
+
+        # Insert candles for May 26 (0am, 4am only) and May 27 (0am, 4am, 8am)
+        candles = [
+            # May 26 (target date) - only early candles
+            (datetime(2026, 5, 26, 0, 0, tzinfo=UTC), Decimal("97000.00")),
+            (datetime(2026, 5, 26, 4, 0, tzinfo=UTC), Decimal("97100.00")),
+            # May 27 (next day) - has 8am candle but should be excluded
+            (datetime(2026, 5, 27, 0, 0, tzinfo=UTC), Decimal("97200.00")),
+            (datetime(2026, 5, 27, 4, 0, tzinfo=UTC), Decimal("97300.00")),
+            (datetime(2026, 5, 27, 8, 0, tzinfo=UTC), Decimal("97400.00")),
+        ]
+
+        for timestamp, price in candles:
+            db_session.add(
+                BtcPrice(
+                    timestamp=timestamp,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0"),
+                    source="coingecko",
+                )
+            )
+        db_session.commit()
+
+        # Should return None (no candles >= 7am on May 26, May 27's 8am excluded)
+        result = evaluator.fetch_actual_price(db_session, target_date)
+
+        assert result is None
+
 
 class TestUpdatePrediction:
     """Test the update_prediction() function."""

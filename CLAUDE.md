@@ -39,8 +39,9 @@ btc-predictor/
 **Railway Services:**
 - `postgres` — Shared database
 - `api` — Web service (FastAPI + dashboard)
-- `fetch-price` — Cron job every hour (`0 * * * *`)
-- `daily` — Cron job daily at 7am (`0 7 * * *`)
+- `fetch-price` — Cron job daily at 6am UTC (`0 6 * * *`)
+- `daily` — Cron job daily at 7am UTC (`0 7 * * *`)
+- `weekly` — Cron job weekly on Mondays at 7am UTC (`0 7 * * 1`)
 
 ---
 
@@ -67,14 +68,17 @@ btc-predictor/
 - CoinGecko free API with rate limit handling
 
 ### 6. Daily Data Frequency with 4-Hour Aggregation
-- **Data Storage:** CoinGecko API returns ~4-hour granularity (6 candles/day)
+
+- **Data Storage:** CoinGecko API returns 4-hour granularity for 1-30 day windows (~6 candles/day)
+- **Fetch Strategy:** Daily worker fetches last 24 hours at 6am UTC, inserts ~6 new candles
 - **Model Training:** Daily worker aggregates 4-hour data to daily using `DATE_TRUNC('day')`
+- **Evaluator:** Uses first candle at/after 7am UTC (typically the 8am candle)
 - **Rationale:**
-  - Provides flexibility to test models with different frequencies (daily, 12h, 8h, 6h, 4h)
+  - Provides flexibility to test models with different frequencies (daily, 8h, 4h)
   - Daily frequency yields 65-66% ML accuracy vs 51-55% for hourly (research-backed)
   - Lower transaction costs: ~20-30 trades/month vs 180+ for hourly
   - Target users: part-time investors, not day traders
-- **Implementation:** Workers use SQL subqueries to aggregate multiple records/day to single daily values
+- **CoinGecko Limitation:** Beyond 30-day windows, granularity degrades to daily/4-day spacing
 
 ---
 

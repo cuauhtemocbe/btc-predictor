@@ -41,7 +41,7 @@ El proyecto se despliega como **4 servicios en Railway**:
 └─────────────┘
       ↓
 ┌─────────────┐
-│ fetch-price │  Cron cada hora: obtiene precios de CoinGecko
+│ fetch-price │  Cron diario (6am): obtiene precios de CoinGecko
 └─────────────┘
       ↓
 ┌─────────────┐
@@ -167,15 +167,23 @@ docker compose exec api pytest -n auto
 Para cargar datos históricos de BTC desde CoinGecko y acelerar el desarrollo sin esperar meses de datos:
 
 ```bash
-# Cargar últimos 90 días de precios horarios (default)
-docker compose exec api python scripts/backfill_prices.py
+# Cargar últimos 30 días (RECOMENDADO: granularidad de 4 horas, ~180 candles)
+docker compose exec api python scripts/backfill_daily_prices.py --days=30
 
-# Cargar últimos 7 días
-docker compose exec api python scripts/backfill_prices.py --days=7
+# Cargar últimos 7 días (testing)
+docker compose exec api python scripts/backfill_daily_prices.py --days=7
 
-# Cargar último año con logs verbose
-docker compose exec api python scripts/backfill_prices.py --days=365 --verbose
+# Cargar 90 días con logs verbose (granularidad diaria)
+docker compose exec api python scripts/backfill_daily_prices.py --days=90 --verbose
+
+# Production backfill (Railway)
+railway run -s api python scripts/backfill_daily_prices.py --days=30
 ```
+
+**Granularidad de CoinGecko:**
+- ✅ **1-30 días:** Candles de 4 horas (~6/día) — **Mejor para ML**
+- ⚠️ **31-90 días:** Candles diarios (~1/día) — Menos precisión
+- ❌ **91+ días:** Candles de 4 días — Muy espaciado para ML
 
 **Características:**
 - ✅ **Idempotente:** Seguro ejecutar múltiples veces (UNIQUE constraint previene duplicados)
@@ -185,11 +193,11 @@ docker compose exec api python scripts/backfill_prices.py --days=365 --verbose
 
 **Ejemplo de salida:**
 ```
-INFO - Fetching 90 days of data from CoinGecko API...
-INFO - Fetched 2160 price points from CoinGecko
-INFO - Processing batch 1/22 (0/2160 records, 0%)
-INFO - Processing batch 22/22 (2100/2160 records, 97%)
-INFO - Backfill completed: 2160 new prices inserted, 0 duplicates skipped
+INFO - Fetching 30 days of data from CoinGecko API...
+INFO - Fetched 180 price points from CoinGecko (4-hour granularity)
+INFO - Processing batch 1/2 (0/180 records, 0%)
+INFO - Processing batch 2/2 (100/180 records, 55%)
+INFO - Backfill completed: 180 new prices inserted, 0 duplicates skipped
 ```
 
 ### Backtesting Walk-Forward (US-020)
@@ -431,7 +439,7 @@ ENVIRONMENT=development
 2. Agregar plugin PostgreSQL
 3. Crear 4 servicios:
    - **api:** Web service (start command: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`)
-   - **fetch-price:** Cron `0 * * * *` (cada hora)
+   - **fetch-price:** Cron `0 6 * * *` (6am UTC diario)
    - **daily:** Cron `0 7 * * *` (7am diario)
    - **postgres:** Plugin (automático)
 

@@ -145,8 +145,8 @@ async def main() -> int:
     try:
         logger.info("Fetch price job starting")
 
-        # Fetch prices from CoinGecko (30 days = 4-hour granularity, ~180 candles)
-        prices = await fetch_prices(days=30)
+        # Fetch prices from CoinGecko (1 day = 4-hour granularity, ~6 candles)
+        prices = await fetch_prices(days=1)
 
         # Filter and save
         with SessionLocal() as session:
@@ -154,7 +154,10 @@ async def main() -> int:
 
             if new_prices:
                 inserted = save_prices(new_prices, session)
-                logger.info(f"Job completed: {inserted} new records added")
+                logger.info(
+                    f"Job completed: {inserted} new records added "
+                    f"(expected ~6 candles/day with 4h granularity)"
+                )
             else:
                 logger.info(
                     f"Job completed: No new prices to insert (all {len(prices)} already exist)"

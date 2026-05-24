@@ -8,8 +8,9 @@ Your project will have **4 services**:
 
 1. **postgres** — PostgreSQL database (plugin)
 2. **api** — Web service (always running)
-3. **fetch-price** — Cron job (runs hourly)
-4. **daily** — Cron job (runs daily at 7am Mexico City time)
+3. **fetch-price** — Cron job (runs daily at 6am UTC)
+4. **daily** — Cron job (runs daily at 7am UTC)
+5. **weekly** — Cron job (runs weekly on Mondays at 7am UTC)
 
 ---
 
@@ -77,14 +78,19 @@ Railway will automatically use this from the Dockerfile.
 4. **Settings** → **Deploy**:
    - **Start Command:** `python -m workers.fetch_price.main`
 5. **Settings** → **Cron Schedule**:
-   - **Schedule:** `0 * * * *` (every hour)
+   - **Schedule:** `0 6 * * *` (daily at 6am UTC)
    - **Region:** Use same as your database
 
-✅ **Ready to deploy!** US-003 (Binance client) and US-004 (fetch_price job) are complete. This service will:
-- Fetch hourly BTC/USDT prices from Binance API
+✅ **Ready to deploy!** This service will:
+- Fetch daily BTC/USD prices from CoinGecko API (~6 candles with 4-hour granularity)
 - Store OHLCV data in `btc_prices` table
 - Handle idempotency (skips duplicate timestamps)
 - Implement rate limiting and error handling
+
+**Note:** CoinGecko granularity varies by time window:
+- 1-30 days: 4-hour candles (~6/day) ✅ Best for ML
+- 31-90 days: Daily candles
+- 91+ days: 4-day candles (too sparse)
 
 ---
 

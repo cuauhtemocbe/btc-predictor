@@ -15,11 +15,8 @@ Entry point: python -m workers.daily.evaluator
 
 import logging
 import sys
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Prediction
@@ -29,6 +26,8 @@ from shared.utils import (
     calculate_pnl_realistic,
     calculate_pnl_threshold,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 # Configure logging
 logging.basicConfig(
@@ -93,7 +92,10 @@ def find_unevaluated_prediction(
 
 def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
     """
-    Fetch the 7am BTC close price for the given date.
+    Fetch the BTC close price for the given date at or after 7am UTC.
+
+    With 4-hour candles (0am, 4am, 8am, 12pm, 4pm, 8pm), this will return
+    the 8am candle close price as it's the first one at/after 7am.
 
     Args:
         session: Database session
@@ -104,18 +106,31 @@ def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
     """
     # Construct 7am timestamp in UTC
     target_datetime = datetime.combine(target_date, time(7, 0), tzinfo=UTC)
+    # Next day at midnight (to exclude candles from the next day)
+    next_day = datetime.combine(target_date + timedelta(days=1), time(0, 0), tzinfo=UTC)
 
-    stmt = select(BtcPrice.close).where(BtcPrice.timestamp == target_datetime)
-    price = session.execute(stmt).scalar_one_or_none()
+    # Find first candle at or after 7am on target_date
+    stmt = (
+        select(BtcPrice.close, BtcPrice.timestamp)
+        .where(BtcPrice.timestamp >= target_datetime)
+        .where(BtcPrice.timestamp < next_day)
+        .order_by(BtcPrice.timestamp.asc())
+        .limit(1)
+    )
+    result = session.execute(stmt).first()
 
-    if price:
-        logger.info(f"Fetched actual price for {target_date} 7am: ${price}")
+    if result:
+        price, timestamp = result
+        logger.info(
+            f"Fetched actual price for {target_date}: ${price} (timestamp: {timestamp})"
+        )
+        return price
     else:
         logger.warning(
-            f"No price data available for {target_date} 7am (will retry tomorrow)"
+            f"No price data available for {target_date} at/after 7am "
+            f"(will retry tomorrow)"
         )
-
-    return price
+        return None
 
 
 def calculate_direction_correct(
@@ -333,7 +348,8 @@ def main() -> int:
         for prediction in predictions:
             try:
                 logger.info(
-                    f"Evaluating prediction #{prediction.id} (model_id={prediction.model_id})"
+                    f"Evaluating prediction #{prediction.id} "
+                    f"(model_id={prediction.model_id})"
                 )
 
                 # Calculate metrics
@@ -351,7 +367,7 @@ def main() -> int:
                 continue
 
         logger.info(
-            f"Evaluator job completed successfully: {len(predictions)} prediction(s) evaluated"
+            f"Evaluator job completed: {len(predictions)} prediction(s) evaluated"
         )
         return 0
 
