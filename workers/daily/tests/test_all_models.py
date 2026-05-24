@@ -10,9 +10,6 @@ This test suite validates that all models work together consistently:
 
 import numpy as np
 import pytest
-from shared.db.models import Base
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from workers.daily.models import (
     ARIMAModel,
@@ -227,7 +224,7 @@ class TestAllModelsIntegration:
         ],
     )
     def test_store_all_models_in_db(
-        self, model_class, model_name, hyperparams, sliding_window_data
+        self, model_class, model_name, hyperparams, sliding_window_data, db_session
     ):
         """
         Gherkin Scenario: All models can be stored in database
@@ -240,64 +237,46 @@ class TestAllModelsIntegration:
         """
         from datetime import UTC, date, datetime, timedelta
 
-        from shared.config import settings
         from shared.db.models import Model
 
-        # Setup test database
-        engine = create_engine(settings.database_url, echo=False)
-        Base.metadata.create_all(engine)
-        connection = engine.connect()
-        transaction = connection.begin()
-        TestSessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-        session = TestSessionLocal()
+        # Train model
+        X, y = sliding_window_data
+        model = model_class(**hyperparams)
+        model.train(X, y)
 
-        try:
-            # Train model
-            X, y = sliding_window_data
-            model = model_class(**hyperparams)
-            model.train(X, y)
+        # Serialize and store
+        model_bytes = model.serialize()
+        model_record = Model(
+            name=model_name,
+            version="1.0.0",
+            params=hyperparams,
+            artifact=model_bytes,
+            trained_at=datetime.now(UTC),
+            train_from=date.today() - timedelta(days=60),
+            train_to=date.today() - timedelta(days=1),
+            is_active=True,
+        )
 
-            # Serialize and store
-            model_bytes = model.serialize()
-            model_record = Model(
-                name=model_name,
-                version="1.0.0",
-                params=hyperparams,
-                artifact=model_bytes,
-                trained_at=datetime.now(UTC),
-                train_from=date.today() - timedelta(days=60),
-                train_to=date.today() - timedelta(days=1),
-                is_active=True,
-            )
+        db_session.add(model_record)
+        db_session.commit()
+        db_session.refresh(model_record)
 
-            session.add(model_record)
-            session.commit()
-            session.refresh(model_record)
+        # Verify stored
+        assert model_record.id is not None
+        assert model_record.artifact is not None
+        assert isinstance(model_record.artifact, bytes)
 
-            # Verify stored
-            assert model_record.id is not None
-            assert model_record.artifact is not None
-            assert isinstance(model_record.artifact, bytes)
+        # Retrieve and deserialize
+        retrieved_artifact = model_record.artifact
+        restored_model = model_class.deserialize(retrieved_artifact)
 
-            # Retrieve and deserialize
-            retrieved_artifact = model_record.artifact
-            restored_model = model_class.deserialize(retrieved_artifact)
+        # Verify predictions match
+        X_new = X[-1:].reshape(1, -1)  # Last sample
+        original_pred = model.predict(X_new)
+        restored_pred = restored_model.predict(X_new)
 
-            # Verify predictions match
-            X_new = X[-1:].reshape(1, -1)  # Last sample
-            original_pred = model.predict(X_new)
-            restored_pred = restored_model.predict(X_new)
-
-            # Allow small differences due to serialization
-            assert np.isclose(original_pred, restored_pred, rtol=0.05)
-
-        finally:
-            # Cleanup
-            session.close()
-            transaction.rollback()
-            Base.metadata.drop_all(engine)
-            connection.close()
-            engine.dispose()
+        # Allow small differences due to serialization
+        assert np.isclose(original_pred, restored_pred, rtol=0.05)
 
 
 class TestModelComparison:

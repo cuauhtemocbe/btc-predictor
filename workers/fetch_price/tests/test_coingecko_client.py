@@ -332,6 +332,9 @@ class TestErrorHandling:
         """Test that HTTP 429 raises RateLimitError."""
         client = CoinGeckoClient()
 
+        # Mock asyncio.sleep to avoid real waiting during retries
+        mock_sleep = mocker.patch("asyncio.sleep", return_value=None)
+
         # Mock 429 response
         mock_response = mocker.Mock()
         mock_response.status_code = 429
@@ -346,7 +349,10 @@ class TestErrorHandling:
         )
 
         with pytest.raises(RateLimitError, match="Rate limit exceeded"):
-            await client.fetch_ohlcv()
+            await client.fetch_ohlcv(max_retries=1)
+
+        # Verify that sleep was called during retry logic
+        assert mock_sleep.called
 
     async def test_invalid_coin_id_404_raises_invalid_symbol_error(self, mocker):
         """Test that HTTP 404 raises InvalidSymbolError."""

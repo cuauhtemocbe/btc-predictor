@@ -33,9 +33,22 @@ pytest-cov = "^6.0.0"
 ruff = "^0.9.0"
 cosmic-ray = "^8.3"
 asyncpg = "^0.30.0"
+pytest-xdist = "^3.8.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Ensure pytest uses /app as root to discover conftest.py
+# This is critical for centralized DB fixtures to work
+pythonpath = "."
+testpaths = [
+    "shared/tests",
+    "workers/daily/tests",
+    "workers/fetch_price/tests",
+    "workers/weekly/tests",
+    "scripts/tests"
+]
+# Parallel execution with pytest-xdist (auto-detect CPU cores)
+# addopts = "-n auto"  # Disabled while fixing Fase 1
 
 [tool.ruff]
 line-length = 88

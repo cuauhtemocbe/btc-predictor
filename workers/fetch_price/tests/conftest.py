@@ -4,9 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from shared.db.models import Base, BtcPrice
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from shared.db.models import BtcPrice
 
 
 @pytest.fixture
@@ -85,36 +83,8 @@ def sample_binance_multiple_candles():
     ]
 
 
-@pytest.fixture
-def test_db_engine():
-    """Create PostgreSQL engine for tests (matches production)."""
-    from shared.config import settings
-
-    # Use PostgreSQL (not SQLite) to match production and support JSONB
-    engine = create_engine(settings.database_url, echo=False)
-    Base.metadata.create_all(engine)
-    yield engine
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-
-
-@pytest.fixture
-def test_db_session(test_db_engine):
-    """Create database session for tests with automatic cleanup."""
-    # Create connection and transaction for rollback isolation
-    connection = test_db_engine.connect()
-    transaction = connection.begin()
-
-    # Create session bound to this connection
-    test_session_local = sessionmaker(bind=connection, expire_on_commit=False)
-    session = test_session_local()
-
-    yield session
-
-    # Cleanup: rollback all changes
-    session.close()
-    transaction.rollback()
-    connection.close()
+# Note: db_session is provided by root conftest.py
+# Note: Database schema is created by session-scoped fixture in root conftest.py
 
 
 @pytest.fixture
@@ -152,7 +122,7 @@ def sample_price_data():
 
 
 @pytest.fixture
-def existing_btc_prices(test_db_session):
+def existing_btc_prices(db_session):
     """Pre-populate database with 2 existing prices."""
     prices = [
         BtcPrice(
@@ -174,6 +144,6 @@ def existing_btc_prices(test_db_session):
             source="binance",
         ),
     ]
-    test_db_session.add_all(prices)
-    test_db_session.commit()
+    db_session.add_all(prices)
+    db_session.commit()
     return prices

@@ -7,9 +7,8 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
-from shared.db.models import Base, BtcPrice, Model, Prediction
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from shared.db.models import BtcPrice, Model, Prediction
+from sqlalchemy.orm import Session
 
 from workers.daily.models import LinearRegressionModel, XGBoostModel
 
@@ -103,40 +102,8 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
 # ============================================================================
 # Predictor test fixtures
 # ============================================================================
-
-
-@pytest.fixture
-def db_session() -> Session:
-    """
-    Create a test database session with automatic cleanup.
-
-    Uses PostgreSQL database (same as production) for real tests.
-    All changes are rolled back after each test.
-    """
-    from shared.config import settings
-
-    # Use PostgreSQL (not SQLite) to support JSONB and match production
-    engine = create_engine(settings.database_url, echo=False)
-
-    # Create all tables (equivalent to running migrations)
-    Base.metadata.create_all(engine)
-
-    # Create connection and transaction for rollback isolation
-    connection = engine.connect()
-    transaction = connection.begin()
-
-    # Create session bound to this connection
-    TestSessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-    session = TestSessionLocal()
-
-    yield session
-
-    # Cleanup: rollback all changes, drop tables, close connection
-    session.close()
-    transaction.rollback()
-    Base.metadata.drop_all(engine)
-    connection.close()
-    engine.dispose()
+# Note: db_session is provided by root conftest.py
+# Note: Database schema is created by autouse fixture in root conftest.py
 
 
 @pytest.fixture

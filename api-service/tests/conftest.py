@@ -9,11 +9,13 @@ from decimal import Decimal
 import pytest
 from api.main import app
 from httpx import ASGITransport, AsyncClient
-from shared.config import settings
 from shared.db.database import get_db
 from shared.db.models import BtcPrice, Model, Prediction
-from sqlalchemy import create_engine, event
+from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
+
+# Note: db_engine_session is provided by root conftest.py (session-scoped)
+# Note: Database schema is created by autouse fixture in root conftest.py
 
 
 @pytest.fixture
@@ -28,35 +30,16 @@ async def client():
 
 
 @pytest.fixture(scope="function")
-def db_engine():
-    """
-    Create a function-scoped SQLAlchemy engine for tests.
-    Automatically creates all tables before tests and drops them after.
-    """
-    from shared.db.models import Base
-
-    engine = create_engine(settings.database_url, echo=False)
-
-    # Create all tables (equivalent to running Alembic migrations)
-    Base.metadata.create_all(engine)
-
-    yield engine
-
-    # Cleanup: drop all tables after test
-    Base.metadata.drop_all(engine)
-    engine.dispose()
-
-
-@pytest.fixture(scope="function")
-def db_session(db_engine):
+def db_session(db_engine_session):
     """
     Create a database session with automatic rollback after test.
     This ensures test isolation - changes are not persisted.
 
+    Schema is created by autouse fixture in root conftest.py.
     Uses nested transactions (savepoints) to ensure all commits
     within the test are rolled back at the end.
     """
-    connection = db_engine.connect()
+    connection = db_engine_session.connect()
     transaction = connection.begin()
     SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
     session = SessionLocal()

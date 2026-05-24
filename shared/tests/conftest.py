@@ -7,10 +7,8 @@ from decimal import Decimal
 
 import pytest
 from shared.config import settings
-from shared.db.models import Base, BtcPrice, Model, Prediction
-from sqlalchemy import create_engine, event
+from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
@@ -32,65 +30,13 @@ def mock_database_url(monkeypatch):
     return test_url
 
 
-@pytest.fixture(scope="session")
-def db_engine_session():
-    """
-    Create a session-scoped SQLAlchemy engine for migrations.
-    """
-    engine = create_engine(settings.database_url, echo=False)
-    yield engine
-    engine.dispose()
+# Note: db_engine_session is provided by root conftest.py
+# Note: db_session is provided by root conftest.py
+# Note: Database schema is created by session-scoped fixture in root conftest.py
 
 
 @pytest.fixture(scope="function")
-def db_engine():
-    """
-    Create a function-scoped SQLAlchemy engine for tests.
-    """
-    engine = create_engine(settings.database_url, echo=False)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="function")
-def db_session(db_engine, apply_migrations):
-    """
-    Create a database session with automatic rollback after test.
-    This ensures test isolation - changes are not persisted.
-    Depends on apply_migrations to ensure table exists.
-
-    Uses nested transactions (savepoints) to ensure all commits
-    within the test are rolled back at the end.
-    """
-    connection = db_engine.connect()
-    transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-    session = SessionLocal()
-
-    # Clean all tables before test to ensure isolation
-    session.execute(Prediction.__table__.delete())
-    session.execute(Model.__table__.delete())
-    session.execute(BtcPrice.__table__.delete())
-    session.commit()
-
-    # Start a savepoint (nested transaction)
-    session.begin_nested()
-
-    # When the application code calls commit(), restart the savepoint
-    @event.listens_for(session, "after_transaction_end")
-    def restart_savepoint(session, transaction):
-        if transaction.nested and not transaction._parent.nested:
-            session.begin_nested()
-
-    yield session
-
-    session.close()
-    transaction.rollback()
-    connection.close()
-
-
-@pytest.fixture(scope="function")
-async def async_db_session(db_engine, apply_migrations):
+async def async_db_session():
     """
     Create an async database session with automatic rollback after test.
     This ensures test isolation - changes are not persisted.
@@ -122,30 +68,20 @@ async def async_db_session(db_engine, apply_migrations):
     await async_engine.dispose()
 
 
-@pytest.fixture(scope="session")
-def apply_migrations(db_engine_session):
+# Compatibility fixtures for tests that still reference old fixture names
+@pytest.fixture
+def db_engine(db_engine_session):
+    """Compatibility: points to root db_engine_session"""
+    return db_engine_session
+
+
+@pytest.fixture
+def apply_migrations():
     """
-    Ensures database tables exist for integration tests.
-
-    Automatically creates all tables using Base.metadata.create_all()
-    (equivalent to running Alembic migrations).
-
-    Tables are created once per test session and dropped at the end.
+    Compatibility: no-op fixture.
+    Schema is now created by autouse fixture in root conftest.py.
     """
-    from sqlalchemy import inspect
-
-    # Check if tables already exist
-    inspector = inspect(db_engine_session)
-    tables_exist = "btc_prices" in inspector.get_table_names()
-
-    if not tables_exist:
-        # Create all tables (equivalent to alembic upgrade head)
-        Base.metadata.create_all(db_engine_session)
-
     yield
-
-    # Cleanup: drop all tables at end of session
-    Base.metadata.drop_all(db_engine_session)
 
 
 @pytest.fixture

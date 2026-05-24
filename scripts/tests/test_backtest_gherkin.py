@@ -88,7 +88,7 @@ class TestWalkForwardBacktest:
         backtest_run_id = uuid4()
 
         # When: Run backtest
-        stats = run_backtest(start_date, end_date, training_window, backtest_run_id)
+        stats = run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Should create 29 predictions (May 1-29)
         assert stats["predictions"] == 29
@@ -222,10 +222,10 @@ class TestBacktestRunIdentification:
         uuid_b = uuid4()
 
         # When: Run first backtest
-        stats_a = run_backtest(start_date, end_date, training_window, uuid_a)
+        stats_a = run_backtest(start_date, end_date, training_window, uuid_a, db_session)
 
         # And: Run second backtest
-        stats_b = run_backtest(start_date, end_date, training_window, uuid_b)
+        stats_b = run_backtest(start_date, end_date, training_window, uuid_b, db_session)
 
         # Then: Both runs should create results
         assert stats_a["predictions"] > 0
@@ -286,7 +286,7 @@ class TestInsufficientData:
         backtest_run_id = uuid4()
 
         stats = run_backtest(
-            backtest_start, backtest_end, training_window, backtest_run_id
+            backtest_start, backtest_end, training_window, backtest_run_id, db_session
         )
 
         # Then: Should skip all days due to insufficient data
@@ -341,7 +341,7 @@ class TestDataGaps:
         backtest_run_id = uuid4()
 
         stats = run_backtest(
-            backtest_start, backtest_end, training_window, backtest_run_id
+            backtest_start, backtest_end, training_window, backtest_run_id, db_session
         )
 
         # Then: Should skip May 15
@@ -383,7 +383,7 @@ class TestModelParameters:
         backtest_run_id = uuid4()
 
         # When: Run backtest
-        run_backtest(start_date, end_date, training_window, backtest_run_id)
+        run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Check model params
         results = (
@@ -418,7 +418,7 @@ class TestProgressLogging:
         backtest_run_id = uuid4()
 
         # When: Run backtest (progress logging happens in main script)
-        stats = run_backtest(start_date, end_date, training_window, backtest_run_id)
+        stats = run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Should process 30 days (progress logging tested via manual inspection)
         assert stats["total_days"] == 30
@@ -446,12 +446,12 @@ class TestDifferentDateRanges:
 
         # Test case 1: 7 days
         stats_7 = run_backtest(
-            date(2024, 5, 1), date(2024, 5, 7), training_window, uuid4()
+            date(2024, 5, 1), date(2024, 5, 7), training_window, uuid4(), db_session
         )
         assert stats_7["predictions"] == 7
 
         # Test case 2: 29 days (May 1-29, last day with data)
         stats_29 = run_backtest(
-            date(2024, 5, 1), date(2024, 5, 29), training_window, uuid4()
+            date(2024, 5, 1), date(2024, 5, 29), training_window, uuid4(), db_session
         )
         assert stats_29["predictions"] == 29

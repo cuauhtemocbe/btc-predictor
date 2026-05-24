@@ -101,14 +101,14 @@ class TestFetchPrices:
 class TestFilterExistingTimestamps:
     """Tests for filter_existing_timestamps() function."""
 
-    def test_filter_no_existing(self, test_db_session, sample_price_data):
+    def test_filter_no_existing(self, db_session, sample_price_data):
         """Test filtering when no existing records (all new)."""
-        new_prices = filter_existing_timestamps(sample_price_data, test_db_session)
+        new_prices = filter_existing_timestamps(sample_price_data, db_session)
 
         assert len(new_prices) == 3
         assert new_prices == sample_price_data
 
-    def test_filter_with_existing(self, test_db_session, sample_price_data):
+    def test_filter_with_existing(self, db_session, sample_price_data):
         """Test filtering when some records already exist."""
         # First, add 2 existing prices to DB
         existing = [
@@ -131,17 +131,17 @@ class TestFilterExistingTimestamps:
                 source="coingecko",
             ),
         ]
-        test_db_session.add_all(existing)
-        test_db_session.commit()
+        db_session.add_all(existing)
+        db_session.commit()
 
         # sample_price_data has 3 prices, 2 of which overlap
-        new_prices = filter_existing_timestamps(sample_price_data, test_db_session)
+        new_prices = filter_existing_timestamps(sample_price_data, db_session)
 
         # Only 1 new price (2024-05-01 02:00:00)
         assert len(new_prices) == 1
         assert new_prices[0]["timestamp"] == datetime(2024, 5, 1, 2, 0, 0, tzinfo=timezone.utc)
 
-    def test_filter_all_existing(self, test_db_session):
+    def test_filter_all_existing(self, db_session):
         """Test filtering when all records already exist."""
         # Add existing record
         existing = BtcPrice(
@@ -153,8 +153,8 @@ class TestFilterExistingTimestamps:
             volume=Decimal("950.98765432"),
             source="coingecko",
         )
-        test_db_session.add(existing)
-        test_db_session.commit()
+        db_session.add(existing)
+        db_session.commit()
 
         # Use same data as existing record
         prices = [
@@ -169,13 +169,13 @@ class TestFilterExistingTimestamps:
             }
         ]
 
-        new_prices = filter_existing_timestamps(prices, test_db_session)
+        new_prices = filter_existing_timestamps(prices, db_session)
 
         assert len(new_prices) == 0
 
-    def test_filter_empty_input(self, test_db_session):
+    def test_filter_empty_input(self, db_session):
         """Test filtering with empty input list."""
-        new_prices = filter_existing_timestamps([], test_db_session)
+        new_prices = filter_existing_timestamps([], db_session)
 
         assert new_prices == []
 
@@ -183,23 +183,23 @@ class TestFilterExistingTimestamps:
 class TestSavePrices:
     """Tests for save_prices() function."""
 
-    def test_save_prices_success(self, test_db_session, sample_price_data):
+    def test_save_prices_success(self, db_session, sample_price_data):
         """Test saving prices successfully."""
-        inserted = save_prices(sample_price_data, test_db_session)
+        inserted = save_prices(sample_price_data, db_session)
 
         assert inserted == 3
 
         # Verify records in database
-        count = test_db_session.query(BtcPrice).count()
+        count = db_session.query(BtcPrice).count()
         assert count == 3
 
-    def test_save_prices_empty(self, test_db_session):
+    def test_save_prices_empty(self, db_session):
         """Test saving empty list."""
-        inserted = save_prices([], test_db_session)
+        inserted = save_prices([], db_session)
 
         assert inserted == 0
 
-    def test_save_prices_rollback_on_error(self, test_db_session):
+    def test_save_prices_rollback_on_error(self, db_session):
         """Test that session rolls back on error."""
         # Invalid data (missing required field)
         invalid_prices = [
@@ -210,13 +210,13 @@ class TestSavePrices:
         ]
 
         with pytest.raises(Exception):
-            save_prices(invalid_prices, test_db_session)
+            save_prices(invalid_prices, db_session)
 
         # Rollback the failed transaction before querying
-        test_db_session.rollback()
+        db_session.rollback()
 
         # Verify no records were inserted
-        count = test_db_session.query(BtcPrice).count()
+        count = db_session.query(BtcPrice).count()
         assert count == 0
 
 

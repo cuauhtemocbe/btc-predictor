@@ -37,7 +37,7 @@ class TestBacktestIntegration:
         backtest_run_id = UUID("12345678-1234-5678-1234-567812345678")
 
         # When: Run backtest
-        stats = run_backtest(start_date, end_date, training_window, backtest_run_id)
+        stats = run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Should process 29 days (May 2-30)
         assert stats["total_days"] == 29
@@ -85,7 +85,7 @@ class TestBacktestIntegration:
         backtest_run_id = UUID("87654321-4321-8765-4321-876543218765")
 
         # When: Run backtest
-        stats = run_backtest(start_date, end_date, training_window, backtest_run_id)
+        stats = run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Should process 7 days
         assert stats["total_days"] == 7
@@ -118,7 +118,7 @@ class TestBacktestIntegration:
         training_window = 30
         backtest_run_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
-        run_backtest(start_date, end_date, training_window, backtest_run_id)
+        run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # When: Query cumulative PnL
         results = (
@@ -270,7 +270,7 @@ class TestBacktestWithDataGaps:
         training_window = 30
         backtest_run_id = UUID("12341234-1234-1234-1234-123412341234")
 
-        stats = run_backtest(start_date, end_date, training_window, backtest_run_id)
+        stats = run_backtest(start_date, end_date, training_window, backtest_run_id, db_session)
 
         # Then: Should skip May 15
         assert stats["skipped_no_actual"] >= 1  # At least one day skipped

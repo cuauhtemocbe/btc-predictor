@@ -2,40 +2,16 @@
 Pytest configuration and fixtures for backtest script tests.
 """
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from shared.config import settings
-from shared.db.models import Base, BtcPrice
+from shared.db.models import BtcPrice
 
 
-@pytest.fixture(scope="function")
-def db_session():
-    """
-    Create test database session using PostgreSQL test database.
-    Uses the same database as other tests but with transaction rollback.
-    """
-    engine = create_engine(settings.database_url, echo=False)
-
-    # Create all tables
-    Base.metadata.create_all(engine)
-
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
-
-    yield session
-
-    # Rollback and close
-    session.rollback()
-    session.close()
-
-    # Drop all tables to clean up
-    Base.metadata.drop_all(engine)
-    engine.dispose()
+# Note: db_session is provided by root conftest.py
+# Note: Database schema is created by autouse fixture in root conftest.py
 
 
 @pytest.fixture
@@ -51,7 +27,9 @@ def sample_btc_prices(db_session):
         # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
         for interval in range(6):
             hour = interval * 4
-            timestamp = datetime.combine(current_date, time(hour, 0))
+            timestamp = datetime.combine(current_date, time(hour, 0)).replace(
+                tzinfo=timezone.utc
+            )
             price = BtcPrice(
                 timestamp=timestamp,
                 open=base_price + Decimal(interval * 10),
@@ -81,7 +59,9 @@ def historical_data_60_days(db_session):
         # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
         for interval in range(6):
             hour = interval * 4
-            timestamp = datetime.combine(current_date, time(hour, 0))
+            timestamp = datetime.combine(current_date, time(hour, 0)).replace(
+                tzinfo=timezone.utc
+            )
             price = BtcPrice(
                 timestamp=timestamp,
                 open=base_price + Decimal(interval * 5),
@@ -111,7 +91,9 @@ def historical_90_days(db_session):
         # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
         for interval in range(6):
             hour = interval * 4
-            timestamp = datetime.combine(current_date, time(hour, 0))
+            timestamp = datetime.combine(current_date, time(hour, 0)).replace(
+                tzinfo=timezone.utc
+            )
             price = BtcPrice(
                 timestamp=timestamp,
                 open=base_price + Decimal(interval * 5),

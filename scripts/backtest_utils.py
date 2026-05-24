@@ -52,15 +52,20 @@ def fetch_training_data(
         start_date = end_date - timedelta(days=window_days)
 
         # Subquery: Get the latest timestamp for each day
+        from datetime import datetime, timezone as tz
         from sqlalchemy import func
+
+        # Convert dates to datetime with timezone for proper comparison
+        start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=tz.utc)
+        end_datetime = datetime.combine(end_date, datetime.min.time()).replace(tzinfo=tz.utc) + timedelta(days=1)
 
         latest_per_day = (
             select(
                 func.date_trunc("day", BtcPrice.timestamp).label("day"),
                 func.max(BtcPrice.timestamp).label("latest_timestamp"),
             )
-            .where(func.date_trunc("day", BtcPrice.timestamp) >= start_date)
-            .where(func.date_trunc("day", BtcPrice.timestamp) <= end_date)
+            .where(BtcPrice.timestamp >= start_datetime)
+            .where(BtcPrice.timestamp < end_datetime)
             .group_by("day")
             .order_by(func.date_trunc("day", BtcPrice.timestamp))
             .subquery()
@@ -285,11 +290,17 @@ def get_actual_price_for_date(
         close_db = True
 
     try:
+        from datetime import datetime, timezone as tz
+
+        # Convert date to datetime with UTC timezone for comparison
+        start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=tz.utc)
+        end_datetime = start_datetime + timedelta(days=1)
+
         # Get last price of the day
         stmt = (
             select(BtcPrice)
-            .where(BtcPrice.timestamp >= target_date)
-            .where(BtcPrice.timestamp < target_date + timedelta(days=1))
+            .where(BtcPrice.timestamp >= start_datetime)
+            .where(BtcPrice.timestamp < end_datetime)
             .order_by(BtcPrice.timestamp.desc())
             .limit(1)
         )

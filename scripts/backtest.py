@@ -31,6 +31,7 @@ from scripts.backtest_utils import (
     save_backtest_result,
 )
 from shared.db.database import SessionLocal
+from sqlalchemy.orm import Session
 from shared.utils import (
     calculate_pnl,
     calculate_pnl_long_short,
@@ -166,6 +167,7 @@ def run_backtest(
     end_date: date,
     training_window: int,
     backtest_run_id: UUID,
+    db: Session | None = None,
 ) -> dict:
     """
     Run walk-forward backtest for date range.
@@ -175,11 +177,15 @@ def run_backtest(
         end_date: End date for backtest
         training_window: Training window in days
         backtest_run_id: Unique UUID for this backtest run
+        db: Database session (optional, will create if None)
 
     Returns:
         Dictionary with run statistics
     """
-    db = SessionLocal()
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
     stats = {
         "total_days": 0,
         "predictions": 0,
@@ -291,7 +297,8 @@ def run_backtest(
             current_date += timedelta(days=1)
 
     finally:
-        db.close()
+        if close_db:
+            db.close()
 
     return stats
 
