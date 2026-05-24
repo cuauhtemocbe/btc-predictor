@@ -1,0 +1,8 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+target = "api"
+
+[deploy]
+startCommand = "/app/entrypoint.sh"
+restartPolicyType = "always"

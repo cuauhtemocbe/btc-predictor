@@ -1,0 +1,9 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+target = "fetch"
+
+[deploy]
+startCommand = "python -m fetch_price.main"
+restartPolicyType = "never"
+cronSchedule = "0 6 * * *"
