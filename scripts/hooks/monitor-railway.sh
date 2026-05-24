@@ -19,7 +19,7 @@
 set -e
 
 # Configuration
-TIMEOUT_SECONDS=300  # 5 minutes max
+TIMEOUT_SECONDS=420  # 7 minutes max
 CHECK_INTERVAL=5     # Check every 5 seconds
 SERVICES=("btc-predictor" "weekly-predictor" "daily" "fetch-price")
 
