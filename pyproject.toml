@@ -7,23 +7,40 @@ packages = [{include = "app", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = ">=0.115.7"
-uvicorn = {extras = ["standard"], version = "^0.34.0"}
-starlette = ">=0.49.1"
+# Base dependencies (required by all services)
 sqlalchemy = "^2.0"
 psycopg2-binary = "^2.9"
 alembic = "^1.13"
 pydantic-settings = "^2.0"
-urllib3 = ">=2.7.0"
-httpx = "^0.28.1"
-jinja2 = "^3.1.0"
 shared = {path = "shared", develop = true}
+
+[tool.poetry.group.api]
+optional = true
+
+[tool.poetry.group.api.dependencies]
+fastapi = ">=0.115.7"
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+starlette = ">=0.49.1"
+jinja2 = "^3.1.0"
+httpx = "^0.28.1"
+
+[tool.poetry.group.fetch]
+optional = true
+
+[tool.poetry.group.fetch.dependencies]
+httpx = "^0.28.1"
+urllib3 = ">=2.7.0"
+yarl = ">=1.17.0,<1.24.0"
+
+[tool.poetry.group.ml]
+optional = true
+
+[tool.poetry.group.ml.dependencies]
 scikit-learn = "^1.5.0"
 numpy = "^2.0.0"
 tensorflow-cpu = ">=2.13.0"
 xgboost = ">=2.0.0"
 statsmodels = ">=0.14.0"
-yarl = ">=1.17.0,<1.24.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
