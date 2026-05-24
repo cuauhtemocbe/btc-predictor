@@ -3,19 +3,19 @@ Daily trainer job - trains ML model on historical BTC price data.
 
 This job:
 1. Detects available historical data and calculates optimal window size
-2. Fetches recent historical prices (adapts to available data: 40-200+ days)
+2. Fetches recent historical prices (adapts to available data: 30-200+ days)
 3. Creates sliding window features for time series prediction
 4. Trains ML models (adapts model selection based on data availability)
 5. Saves the trained model to the database
 6. Sets it as the active model (deactivates previous models)
 
 Dynamic Window Strategy:
-- < 40 days: Not enough data to train
-- 40-54 days: window=7, min=40 (Phase 1: Initial)
-- 55-74 days: window=10, min=55 (Phase 2: Growth)
-- 75-109 days: window=14, min=75 (Phase 3: Intermediate)
-- 110-154 days: window=21, min=110 (Phase 4: Mature)
-- 155+ days: window=30, min=155 (Phase 5: Optimal)
+- < 30 days: Not enough data to train
+- 30-44 days: window=5, min=30 (Phase 1: Initial - limited data)
+- 45-59 days: window=7, min=40 (Phase 2: Growth)
+- 60-89 days: window=10, min=55 (Phase 3: Intermediate)
+- 90-144 days: window=14, min=75 (Phase 4: Mature)
+- 145+ days: window=21, min=110 (Phase 5: Optimal)
 
 Multi-Model Training:
 - ARIMA requires 60+ days (excluded automatically with less data)
@@ -74,41 +74,41 @@ def calculate_dynamic_window(days_available: int) -> tuple[int, int]:
         - min_days: Minimum days needed (accounts for train/val split)
 
     Raises:
-        ValueError: If less than 40 days available (insufficient for training)
+        ValueError: If less than 30 days available (insufficient for training)
 
     Strategy:
-    - Phase 1 (40-54 days): window=7, min=40 - Initial phase
-    - Phase 2 (55-74 days): window=10, min=55 - Growth phase
-    - Phase 3 (75-109 days): window=14, min=75 - Intermediate phase
-    - Phase 4 (110-154 days): window=21, min=110 - Mature phase
-    - Phase 5 (155+ days): window=30, min=155 - Optimal configuration
+    - Phase 1 (30-44 days): window=5, min=30 - Initial phase (limited data)
+    - Phase 2 (45-59 days): window=7, min=40 - Growth phase
+    - Phase 3 (60-89 days): window=10, min=55 - Intermediate phase
+    - Phase 4 (90-144 days): window=14, min=75 - Mature phase
+    - Phase 5 (145+ days): window=21, min=110 - Optimal configuration
 
     Example:
-        >>> calculate_dynamic_window(45)
-        (7, 40)  # Initial phase
+        >>> calculate_dynamic_window(30)
+        (5, 30)  # Initial phase
         >>> calculate_dynamic_window(200)
-        (30, 155)  # Optimal phase
+        (21, 110)  # Optimal phase
     """
     # With 70/20/10 split, validation set is 20% of total
     # Need at least (window + 1) elements in validation to create 1 sample
     # Therefore: min_days * 0.2 >= window + 1
     # Solving: min_days >= (window + 1) * 5
 
-    if days_available < 40:
+    if days_available < 30:
         raise ValueError(
             f"Insufficient data for training: {days_available} days available, "
-            f"need at least 40 days. Wait for more data to accumulate."
+            f"need at least 30 days. Wait for more data to accumulate."
         )
-    elif days_available < 55:
-        return (7, 40)  # Phase 1: window=7 -> min = 8*5 = 40
-    elif days_available < 75:
-        return (10, 55)  # Phase 2: window=10 -> min = 11*5 = 55
-    elif days_available < 110:
-        return (14, 75)  # Phase 3: window=14 -> min = 15*5 = 75
-    elif days_available < 155:
-        return (21, 110)  # Phase 4: window=21 -> min = 22*5 = 110
+    elif days_available < 45:
+        return (5, 30)  # Phase 1: window=5 -> min = 6*5 = 30
+    elif days_available < 60:
+        return (7, 40)  # Phase 2: window=7 -> min = 8*5 = 40
+    elif days_available < 90:
+        return (10, 55)  # Phase 3: window=10 -> min = 11*5 = 55
+    elif days_available < 145:
+        return (14, 75)  # Phase 4: window=14 -> min = 15*5 = 75
     else:
-        return (30, 155)  # Phase 5: window=30 -> min = 31*5 = 155
+        return (21, 110)  # Phase 5: window=21 -> min = 22*5 = 110
 
 
 def count_available_days(session: Session) -> int:
@@ -133,15 +133,15 @@ def _get_phase_name(days_available: int) -> str:
     Returns:
         Phase name (e.g., "Initial", "Optimal")
     """
-    if days_available < 40:
+    if days_available < 30:
         return "Insufficient"
-    elif days_available < 55:
+    elif days_available < 45:
         return "Phase 1 - Initial"
-    elif days_available < 75:
+    elif days_available < 60:
         return "Phase 2 - Growth"
-    elif days_available < 110:
+    elif days_available < 90:
         return "Phase 3 - Intermediate"
-    elif days_available < 155:
+    elif days_available < 145:
         return "Phase 4 - Mature"
     else:
         return "Phase 5 - Optimal"

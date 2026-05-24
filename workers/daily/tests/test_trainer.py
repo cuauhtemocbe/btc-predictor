@@ -266,52 +266,52 @@ class TestCalculateDynamicWindow:
     """Test calculate_dynamic_window function."""
 
     def test_phase_1_initial(self):
-        """Test Phase 1: 40-54 days -> window=7, min=40."""
-        window, min_days = calculate_dynamic_window(45)
+        """Test Phase 1: 30-44 days -> window=5, min=30."""
+        window, min_days = calculate_dynamic_window(35)
+        assert window == 5
+        assert min_days == 30
+
+    def test_phase_2_growth(self):
+        """Test Phase 2: 45-59 days -> window=7, min=40."""
+        window, min_days = calculate_dynamic_window(50)
         assert window == 7
         assert min_days == 40
 
-    def test_phase_2_growth(self):
-        """Test Phase 2: 55-74 days -> window=10, min=55."""
-        window, min_days = calculate_dynamic_window(60)
+    def test_phase_3_intermediate(self):
+        """Test Phase 3: 60-89 days -> window=10, min=55."""
+        window, min_days = calculate_dynamic_window(70)
         assert window == 10
         assert min_days == 55
 
-    def test_phase_3_intermediate(self):
-        """Test Phase 3: 75-109 days -> window=14, min=75."""
-        window, min_days = calculate_dynamic_window(90)
+    def test_phase_4_mature(self):
+        """Test Phase 4: 90-144 days -> window=14, min=75."""
+        window, min_days = calculate_dynamic_window(100)
         assert window == 14
         assert min_days == 75
 
-    def test_phase_4_mature(self):
-        """Test Phase 4: 110-154 days -> window=21, min=110."""
-        window, min_days = calculate_dynamic_window(120)
+    def test_phase_5_optimal(self):
+        """Test Phase 5: 145+ days -> window=21, min=110."""
+        window, min_days = calculate_dynamic_window(200)
         assert window == 21
         assert min_days == 110
 
-    def test_phase_5_optimal(self):
-        """Test Phase 5: 155+ days -> window=30, min=155."""
-        window, min_days = calculate_dynamic_window(200)
-        assert window == 30
-        assert min_days == 155
-
     def test_insufficient_data_raises_error(self):
-        """Test that less than 40 days raises ValueError."""
+        """Test that less than 30 days raises ValueError."""
         with pytest.raises(ValueError, match="Insufficient data for training"):
-            calculate_dynamic_window(39)
+            calculate_dynamic_window(29)
 
     def test_edge_case_boundaries(self):
         """Test boundary values between phases."""
-        # Exactly 40 days -> Phase 1
-        assert calculate_dynamic_window(40) == (7, 40)
-        # Exactly 55 days -> Phase 2
-        assert calculate_dynamic_window(55) == (10, 55)
-        # Exactly 75 days -> Phase 3
-        assert calculate_dynamic_window(75) == (14, 75)
-        # Exactly 110 days -> Phase 4
-        assert calculate_dynamic_window(110) == (21, 110)
-        # Exactly 155 days -> Phase 5
-        assert calculate_dynamic_window(155) == (30, 155)
+        # Exactly 30 days -> Phase 1
+        assert calculate_dynamic_window(30) == (5, 30)
+        # Exactly 45 days -> Phase 2
+        assert calculate_dynamic_window(45) == (7, 40)
+        # Exactly 60 days -> Phase 3
+        assert calculate_dynamic_window(60) == (10, 55)
+        # Exactly 90 days -> Phase 4
+        assert calculate_dynamic_window(90) == (14, 75)
+        # Exactly 145 days -> Phase 5
+        assert calculate_dynamic_window(145) == (21, 110)
 
 
 class TestCountAvailableDays:
