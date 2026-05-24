@@ -16,6 +16,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 COPY shared/ ./shared/
 COPY workers/backtest/ ./workers/backtest/
+COPY workers/daily/ ./workers/daily/
 COPY scripts/backtest.py scripts/backtest_utils.py ./scripts/
 
 # Install dependencies (base + ml group)
