@@ -10,7 +10,7 @@ import pytest
 from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
-from workers.daily.models import LinearRegressionModel, XGBoostModel
+from workers.daily.models import LinearRegressionModel, LSTMModel, XGBoostModel
 
 
 @pytest.fixture
@@ -105,29 +105,125 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
 # Note: db_session is provided by root conftest.py
 # Note: Database schema is created by autouse fixture in root conftest.py
 
+# ============================================================================
+# Module-scoped CACHED artifacts (trained once, reused across tests)
+# ============================================================================
+# These fixtures cache the TRAINED MODEL ARTIFACTS (serialized bytes) in memory.
+# Training happens ONCE per module, but each test gets a fresh DB record.
+
+
+@pytest.fixture(scope="module")
+def cached_linear_artifact() -> bytes:
+    """
+    Module-scoped cached LinearRegression model artifact.
+
+    Trains the model ONCE and caches the serialized bytes.
+    Tests use this to create fresh DB records without re-training.
+    """
+    # Generate training data (same as sliding_window_data fixture)
+    base_prices = np.linspace(50000, 51500, 60)
+    noise = np.random.uniform(-500, 500, 60)
+    prices = base_prices + noise
+
+    window_days = 30
+    n_samples = len(prices) - window_days
+    X = np.zeros((n_samples, window_days))
+    y = np.zeros(n_samples)
+
+    for i in range(n_samples):
+        X[i] = prices[i : i + window_days]
+        y[i] = prices[i + window_days]
+
+    # Train model ONCE
+    lr_model = LinearRegressionModel(window_days=30)
+    lr_model.train(X, y)
+
+    # Return serialized bytes (cached for all tests in this module)
+    return lr_model.serialize()
+
+
+@pytest.fixture(scope="module")
+def cached_xgboost_artifact() -> bytes:
+    """
+    Module-scoped cached XGBoost model artifact.
+
+    Trains the model ONCE and caches the serialized bytes.
+    Tests use this to create fresh DB records without re-training.
+    """
+    # Generate training data (same as sliding_window_data fixture)
+    base_prices = np.linspace(50000, 51500, 60)
+    noise = np.random.uniform(-500, 500, 60)
+    prices = base_prices + noise
+
+    window_days = 30
+    n_samples = len(prices) - window_days
+    X = np.zeros((n_samples, window_days))
+    y = np.zeros(n_samples)
+
+    for i in range(n_samples):
+        X[i] = prices[i : i + window_days]
+        y[i] = prices[i + window_days]
+
+    # Train model ONCE
+    xgb_model = XGBoostModel(window_days=30)
+    xgb_model.train(X, y)
+
+    # Return serialized bytes (cached for all tests in this module)
+    return xgb_model.serialize()
+
+
+@pytest.fixture(scope="module")
+def cached_lstm_artifact() -> bytes:
+    """
+    Module-scoped cached LSTM model artifact.
+
+    Trains the model ONCE and caches the serialized bytes.
+    Tests use this to create fresh DB records without re-training.
+    """
+    # Generate training data (same as sliding_window_data fixture)
+    base_prices = np.linspace(50000, 51500, 60)
+    noise = np.random.uniform(-500, 500, 60)
+    prices = base_prices + noise
+
+    window_days = 30
+    n_samples = len(prices) - window_days
+    X = np.zeros((n_samples, window_days))
+    y = np.zeros(n_samples)
+
+    for i in range(n_samples):
+        X[i] = prices[i : i + window_days]
+        y[i] = prices[i + window_days]
+
+    # Train model ONCE
+    lstm_model = LSTMModel(window_days=30, epochs=10)
+    lstm_model.train(X, y)
+
+    # Return serialized bytes (cached for all tests in this module)
+    return lstm_model.serialize()
+
+
+# ============================================================================
+# Function-scoped model fixtures (use cached artifacts)
+# ============================================================================
+
 
 @pytest.fixture
-def sample_trained_model(
-    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
-) -> Model:
+def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> Model:
     """
-    Create a trained LinearRegressionModel and save it to the database.
+    Function-scoped LinearRegressionModel using cached artifact.
+
+    Uses pre-trained model artifact (cached at module scope) to avoid
+    redundant training. Each test gets a fresh DB record.
 
     Returns:
         Model record with is_active=True
     """
-    X, y = sliding_window_data
-
-    # Train model
-    lr_model = LinearRegressionModel(window_days=30)
-    lr_model.train(X, y)
-
-    # Serialize and save to database
+    # Use cached artifact (NO re-training!)
     model_record = Model(
         name="linear_v1",
         version="1.0.0",
         params={"window_days": 30},
-        artifact=lr_model.serialize(),
+        artifact=cached_linear_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
@@ -142,27 +238,22 @@ def sample_trained_model(
 
 
 @pytest.fixture
-def sample_xgboost_model(
-    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
-) -> Model:
+def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) -> Model:
     """
-    Create a trained XGBoostModel and save it to the database.
+    Function-scoped XGBoostModel using cached artifact.
+
+    Uses pre-trained model artifact (cached at module scope) to avoid
+    redundant training. Each test gets a fresh DB record.
 
     Returns:
         Model record with is_active=False (default for multi-model tests)
     """
-    X, y = sliding_window_data
-
-    # Train model
-    xgb_model = XGBoostModel(window_days=30)
-    xgb_model.train(X, y)
-
-    # Serialize and save to database
+    # Use cached artifact (NO re-training!)
     model_record = Model(
         name="xgboost_v1",
         version="1.0.0",
         params={"window_days": 30, "n_estimators": 100, "learning_rate": 0.1},
-        artifact=xgb_model.serialize(),
+        artifact=cached_xgboost_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
@@ -176,89 +267,136 @@ def sample_xgboost_model(
     return model_record
 
 
-@pytest.fixture
-def sample_btc_prices_30_days(db_session: Session) -> list[BtcPrice]:
+@pytest.fixture(scope="module")
+def cached_price_data_30_days():
     """
-    Create 30 days of BTC price records in the database (4-hour granularity).
+    Module-scoped cached price data (pre-calculated values).
 
-    Returns:
-        List of 180 BtcPrice records (6 per day at 4-hour intervals)
+    Returns list of tuples: (timestamp, open, high, low, close, volume)
+    Generated ONCE per module, reused by all tests.
     """
-    prices = []
-    # Use midnight as base to ensure all 6 intervals stay within same calendar day
+    data = []
     today = datetime.now(UTC).date()
     base_date = today - timedelta(days=30)
 
     for i in range(30):
         current_date = base_date + timedelta(days=i)
-        # Prices range from $50,000 to $51,500
-        base_close = Decimal("50000") + Decimal(str(i * 50))
+        base_close = 50000 + (i * 50)
 
-        # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
         for interval in range(6):
             timestamp = datetime.combine(current_date, datetime.min.time()).replace(
                 tzinfo=UTC
             ) + timedelta(hours=interval * 4)
-            close_price = base_close + Decimal(str(interval * 10))
+            close_price = base_close + (interval * 10)
 
-            price_record = BtcPrice(
-                timestamp=timestamp,
-                open=close_price - Decimal("100"),
-                high=close_price + Decimal("200"),
-                low=close_price - Decimal("150"),
-                close=close_price,
-                volume=Decimal("1000.5"),
-                source="test",
+            data.append(
+                (
+                    timestamp,
+                    Decimal(str(close_price - 100)),  # open
+                    Decimal(str(close_price + 200)),  # high
+                    Decimal(str(close_price - 150)),  # low
+                    Decimal(str(close_price)),  # close
+                    Decimal("1000.5"),  # volume
+                )
             )
 
-            db_session.add(price_record)
-            prices.append(price_record)
-
-    db_session.commit()
-
-    return prices
+    return data
 
 
 @pytest.fixture
-def sample_btc_prices_10_days(db_session: Session) -> list[BtcPrice]:
+def sample_btc_prices_30_days(
+    db_session: Session, cached_price_data_30_days
+) -> list[BtcPrice]:
     """
-    Create 10 days of BTC price records (4-hour granularity).
+    Create 30 days of BTC price records using cached data.
+
+    Uses pre-calculated price data to avoid redundant computations.
+
+    Returns:
+        List of 180 BtcPrice records (6 per day at 4-hour intervals)
+    """
+    prices = []
+
+    for timestamp, open_price, high, low, close, volume in cached_price_data_30_days:
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            source="test",
+        )
+        db_session.add(price_record)
+        prices.append(price_record)
+
+    db_session.commit()
+    return prices
+
+
+@pytest.fixture(scope="module")
+def cached_price_data_10_days():
+    """
+    Module-scoped cached price data for 10 days.
+
+    Returns list of tuples: (timestamp, open, high, low, close, volume)
+    Generated ONCE per module, reused by all tests.
+    """
+    data = []
+    today = datetime.now(UTC).date()
+    base_date = today - timedelta(days=10)
+
+    for i in range(10):
+        current_date = base_date + timedelta(days=i)
+        base_close = 50000 + (i * 50)
+
+        for interval in range(6):
+            timestamp = datetime.combine(current_date, datetime.min.time()).replace(
+                tzinfo=UTC
+            ) + timedelta(hours=interval * 4)
+            close_price = base_close + (interval * 10)
+
+            data.append(
+                (
+                    timestamp,
+                    Decimal(str(close_price - 100)),
+                    Decimal(str(close_price + 200)),
+                    Decimal(str(close_price - 150)),
+                    Decimal(str(close_price)),
+                    Decimal("1000.5"),
+                )
+            )
+
+    return data
+
+
+@pytest.fixture
+def sample_btc_prices_10_days(
+    db_session: Session, cached_price_data_10_days
+) -> list[BtcPrice]:
+    """
+    Create 10 days of BTC price records using cached data.
     Insufficient for 30-day window.
 
     Returns:
         List of 60 BtcPrice records (6 per day at 4-hour intervals)
     """
     prices = []
-    # Use midnight as base to ensure all 6 intervals stay within same calendar day
-    today = datetime.now(UTC).date()
-    base_date = today - timedelta(days=10)
 
-    for i in range(10):
-        current_date = base_date + timedelta(days=i)
-        base_close = Decimal("50000") + Decimal(str(i * 50))
-
-        # Create 6 records per day at 4-hour intervals (0h, 4h, 8h, 12h, 16h, 20h)
-        for interval in range(6):
-            timestamp = datetime.combine(current_date, datetime.min.time()).replace(
-                tzinfo=UTC
-            ) + timedelta(hours=interval * 4)
-            close_price = base_close + Decimal(str(interval * 10))
-
-            price_record = BtcPrice(
-                timestamp=timestamp,
-                open=close_price - Decimal("100"),
-                high=close_price + Decimal("200"),
-                low=close_price - Decimal("150"),
-                close=close_price,
-                volume=Decimal("1000.5"),
-                source="test",
-            )
-
-            db_session.add(price_record)
-            prices.append(price_record)
+    for timestamp, open_price, high, low, close, volume in cached_price_data_10_days:
+        price_record = BtcPrice(
+            timestamp=timestamp,
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            source="test",
+        )
+        db_session.add(price_record)
+        prices.append(price_record)
 
     db_session.commit()
-
     return prices
 
 
