@@ -23,6 +23,7 @@ uvicorn = {extras = ["standard"], version = "^0.34.0"}
 starlette = ">=0.49.1"
 jinja2 = "^3.1.0"
 httpx = "^0.28.1"
+numpy = "^2.0.0"  # Required by shared/btc_shared/strategies.py
 
 [tool.poetry.group.fetch]
 optional = true
