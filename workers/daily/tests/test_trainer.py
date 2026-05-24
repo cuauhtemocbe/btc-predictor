@@ -16,6 +16,8 @@ from shared.db.models import BtcPrice
 
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
+    calculate_dynamic_window,
+    count_available_days,
     create_sliding_windows,
     train_all_models,
     train_single_model,
@@ -133,12 +135,14 @@ class TestTrainAllModels:
     """Test train_all_models function."""
 
     def test_train_all_models_success(self, db_session, sample_prices):
-        """Test successful training of all 4 models."""
-        # Train all models (need 160+ days for 70/20 split with window_days=30)
-        models = train_all_models(db_session, window_days=30, min_days=160)
+        """Test successful training of all models with dynamic window."""
+        # Train all models (200 days -> Phase 5 Optimal: window=30, min=60)
+        # Should train all 4 models including ARIMA (200 days >= 60)
+        models = train_all_models(db_session)
 
-        # Verify we got models back
-        assert len(models) > 0  # At least some models should succeed
+        # Verify we got models back (should be 4: linear, lstm, xgboost, arima)
+        assert len(models) >= 3  # At least 3 models should succeed
+        assert len(models) <= 4  # Maximum 4 models
 
         # Verify models are saved to database
         all_models = get_all_models(db_session)
@@ -155,13 +159,17 @@ class TestTrainAllModels:
             assert "training_samples" in model.params
             assert "validation_samples" in model.params
 
+        # Verify ARIMA is included (200 days >= 60)
+        model_names = [m.name for m in models]
+        assert any("arima" in name for name in model_names)
+
     def test_train_all_models_activates_best(self, db_session, sample_prices):
         """
         Test that train_all_models activates the model with lowest error.
 
         Lowest validation error.
         """
-        models = train_all_models(db_session, window_days=30, min_days=160)
+        models = train_all_models(db_session)
 
         # Get active model
         active = get_active_model(db_session)
@@ -180,7 +188,7 @@ class TestTrainAllModels:
 
     def test_train_all_models_uses_same_data(self, db_session, sample_prices):
         """Test that all models are trained on the same training data."""
-        models = train_all_models(db_session, window_days=30, min_days=160)
+        models = train_all_models(db_session)
 
         # All models should have same number of training samples
         training_samples = models[0].params["training_samples"]
@@ -198,7 +206,7 @@ class TestTrainAllModels:
         with valid data. Actual failure testing would require mocking.
         """
         # Train with valid data - all should succeed
-        models = train_all_models(db_session, window_days=30, min_days=160)
+        models = train_all_models(db_session)
 
         # At minimum, Linear Regression should always work
         model_names = [m.name for m in models]
@@ -206,10 +214,10 @@ class TestTrainAllModels:
 
     def test_train_all_models_insufficient_data_raises_error(self, db_session):
         """Test that train_all_models raises ValueError with insufficient data."""
-        # Create only 20 days of data (< 90 min_days)
-        for i in range(20):
+        # Create only 39 days of data (< 40 min for Phase 1)
+        for i in range(39):
             price_record = BtcPrice(
-                timestamp=datetime.now(UTC) - timedelta(days=20 - i),
+                timestamp=datetime.now(UTC) - timedelta(days=39 - i),
                 open=Decimal(50000 + i * 100),
                 high=Decimal(50000 + i * 100 + 500),
                 low=Decimal(50000 + i * 100 - 500),
@@ -221,9 +229,124 @@ class TestTrainAllModels:
 
         db_session.commit()
 
-        # Should raise ValueError
-        with pytest.raises(ValueError, match="Insufficient training data"):
-            train_all_models(db_session, window_days=30, min_days=160)
+        # Should raise ValueError (39 days < 40 minimum)
+        with pytest.raises(ValueError, match="Insufficient data for training"):
+            train_all_models(db_session)
+
+    def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
+        """Test that ARIMA is excluded when less than 60 days available."""
+        # Create 55 days of data (Phase 2: enough for training but not for ARIMA)
+        for i in range(55):
+            price_record = BtcPrice(
+                timestamp=datetime.now(UTC) - timedelta(days=55 - i),
+                open=Decimal(50000 + i * 100),
+                high=Decimal(50000 + i * 100 + 500),
+                low=Decimal(50000 + i * 100 - 500),
+                close=Decimal(50000 + i * 100),
+                volume=Decimal("1000.5"),
+                source="coingecko",
+            )
+            db_session.add(price_record)
+
+        db_session.commit()
+
+        # Train with automatic configuration (55 days -> Phase 2: window=10, min=55)
+        models = train_all_models(db_session)
+
+        # Should have 3 models (linear, lstm, xgboost) but NOT arima
+        assert len(models) == 3
+        model_names = [m.name for m in models]
+        assert not any("arima" in name for name in model_names)
+        assert any("linear" in name for name in model_names)
+        assert any("lstm" in name for name in model_names)
+        assert any("xgboost" in name for name in model_names)
+
+
+class TestCalculateDynamicWindow:
+    """Test calculate_dynamic_window function."""
+
+    def test_phase_1_initial(self):
+        """Test Phase 1: 40-54 days -> window=7, min=40."""
+        window, min_days = calculate_dynamic_window(45)
+        assert window == 7
+        assert min_days == 40
+
+    def test_phase_2_growth(self):
+        """Test Phase 2: 55-74 days -> window=10, min=55."""
+        window, min_days = calculate_dynamic_window(60)
+        assert window == 10
+        assert min_days == 55
+
+    def test_phase_3_intermediate(self):
+        """Test Phase 3: 75-109 days -> window=14, min=75."""
+        window, min_days = calculate_dynamic_window(90)
+        assert window == 14
+        assert min_days == 75
+
+    def test_phase_4_mature(self):
+        """Test Phase 4: 110-154 days -> window=21, min=110."""
+        window, min_days = calculate_dynamic_window(120)
+        assert window == 21
+        assert min_days == 110
+
+    def test_phase_5_optimal(self):
+        """Test Phase 5: 155+ days -> window=30, min=155."""
+        window, min_days = calculate_dynamic_window(200)
+        assert window == 30
+        assert min_days == 155
+
+    def test_insufficient_data_raises_error(self):
+        """Test that less than 40 days raises ValueError."""
+        with pytest.raises(ValueError, match="Insufficient data for training"):
+            calculate_dynamic_window(39)
+
+    def test_edge_case_boundaries(self):
+        """Test boundary values between phases."""
+        # Exactly 40 days -> Phase 1
+        assert calculate_dynamic_window(40) == (7, 40)
+        # Exactly 55 days -> Phase 2
+        assert calculate_dynamic_window(55) == (10, 55)
+        # Exactly 75 days -> Phase 3
+        assert calculate_dynamic_window(75) == (14, 75)
+        # Exactly 110 days -> Phase 4
+        assert calculate_dynamic_window(110) == (21, 110)
+        # Exactly 155 days -> Phase 5
+        assert calculate_dynamic_window(155) == (30, 155)
+
+
+class TestCountAvailableDays:
+    """Test count_available_days function."""
+
+    def test_count_available_days(self, db_session):
+        """Test counting distinct days of price data."""
+        # Create 10 days of data with 6 records per day (4-hour candles)
+        # Start from a fixed date to avoid timezone issues
+        from datetime import datetime as dt
+
+        base_time = dt(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
+        for day in range(10):
+            for hour in [0, 4, 8, 12, 16, 20]:  # 6 candles per day
+                price_record = BtcPrice(
+                    timestamp=base_time + timedelta(days=day, hours=hour),
+                    open=Decimal(50000),
+                    high=Decimal(51000),
+                    low=Decimal(49000),
+                    close=Decimal(50000),
+                    volume=Decimal("1000.5"),
+                    source="coingecko",
+                )
+                db_session.add(price_record)
+
+        db_session.commit()
+
+        # Should count 10 distinct days despite having 60 records
+        count = count_available_days(db_session)
+        assert count == 10
+
+    def test_count_available_days_empty_database(self, db_session):
+        """Test counting with empty database."""
+        count = count_available_days(db_session)
+        assert count == 0
 
 
 class TestCreateSlidingWindows:

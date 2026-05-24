@@ -80,6 +80,35 @@ btc-predictor/
   - Target users: part-time investors, not day traders
 - **CoinGecko Limitation:** Beyond 30-day windows, granularity degrades to daily/4-day spacing
 
+### 7. Dynamic Training Window Strategy
+
+**Problem:** CoinGecko free API limits historical data to 30 days with 4-hour granularity. System needs to train models immediately while data accumulates.
+
+**Solution:** Adaptive training strategy that adjusts window size and minimum data requirements based on available historical data:
+
+| Phase | Days Available | Window Size | Min Days | Models Trained |
+|-------|---------------|-------------|----------|----------------|
+| **Phase 1 - Initial** | 40-54 days | 7 days | 40 | Linear, LSTM, XGBoost |
+| **Phase 2 - Growth** | 55-74 days | 10 days | 55 | Linear, LSTM, XGBoost |
+| **Phase 3 - Intermediate** | 75-109 days | 14 days | 75 | Linear, LSTM, XGBoost, ARIMA |
+| **Phase 4 - Mature** | 110-154 days | 21 days | 110 | Linear, LSTM, XGBoost, ARIMA |
+| **Phase 5 - Optimal** | 155+ days | 30 days | 155 | Linear, LSTM, XGBoost, ARIMA |
+
+**Key Features:**
+- **Auto-detection:** `count_available_days()` queries database for distinct days of data
+- **Automatic scaling:** As data accumulates, window size grows automatically for better predictions
+- **Train/Val split safety:** `min_days` ensures enough data for 70/20/10 split after sliding windows
+- **ARIMA threshold:** ARIMA model requires 60+ days (excluded in Phases 1-2)
+- **No user intervention:** System self-optimizes from day 40 to optimal configuration at 155+ days
+
+**Timeline:**
+- **Week 6 (40 days):** First models can be trained (Phase 1: window=7)
+- **Month 2 (60 days):** ARIMA becomes available (Phase 3)
+- **Month 3 (90 days):** Intermediate configuration (Phase 3: window=14)
+- **Month 5+ (155 days):** Optimal configuration achieved (Phase 5: window=30) ✅
+
+**Implementation:** `workers/daily/trainer.py` → `calculate_dynamic_window()` function
+
 ---
 
 ## Testing Requirements

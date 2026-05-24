@@ -2,11 +2,24 @@
 Daily trainer job - trains ML model on historical BTC price data.
 
 This job:
-1. Fetches recent historical prices (60 days minimum)
-2. Creates sliding window features for time series prediction
-3. Trains a LinearRegressionModel
-4. Saves the trained model to the database
-5. Sets it as the active model (deactivates previous models)
+1. Detects available historical data and calculates optimal window size
+2. Fetches recent historical prices (adapts to available data: 40-200+ days)
+3. Creates sliding window features for time series prediction
+4. Trains ML models (adapts model selection based on data availability)
+5. Saves the trained model to the database
+6. Sets it as the active model (deactivates previous models)
+
+Dynamic Window Strategy:
+- < 40 days: Not enough data to train
+- 40-54 days: window=7, min=40 (Phase 1: Initial)
+- 55-74 days: window=10, min=55 (Phase 2: Growth)
+- 75-109 days: window=14, min=75 (Phase 3: Intermediate)
+- 110-154 days: window=21, min=110 (Phase 4: Mature)
+- 155+ days: window=30, min=155 (Phase 5: Optimal)
+
+Multi-Model Training:
+- ARIMA requires 60+ days (excluded automatically with less data)
+- Linear, LSTM, XGBoost work with any phase
 
 Entry point: python -m workers.daily.trainer
 """
@@ -39,6 +52,99 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def calculate_dynamic_window(days_available: int) -> tuple[int, int]:
+    """
+    Calculate optimal window_days and min_days based on available historical data.
+
+    This allows the system to start training with limited data and automatically
+    improve as more data accumulates over time.
+
+    The min_days calculation ensures enough data for train/validation split (70/20/10):
+    - Validation set needs at least (window_days + 1) samples
+    - With 20% for validation: min_days >= (window_days + 1) * 5
+
+    Args:
+        days_available: Number of days of historical data available in database
+
+    Returns:
+        Tuple of (window_days, min_days) where:
+        - window_days: Size of sliding window for features
+        - min_days: Minimum days needed (accounts for train/val split)
+
+    Raises:
+        ValueError: If less than 40 days available (insufficient for training)
+
+    Strategy:
+    - Phase 1 (40-54 days): window=7, min=40 - Initial phase
+    - Phase 2 (55-74 days): window=10, min=55 - Growth phase
+    - Phase 3 (75-109 days): window=14, min=75 - Intermediate phase
+    - Phase 4 (110-154 days): window=21, min=110 - Mature phase
+    - Phase 5 (155+ days): window=30, min=155 - Optimal configuration
+
+    Example:
+        >>> calculate_dynamic_window(45)
+        (7, 40)  # Initial phase
+        >>> calculate_dynamic_window(200)
+        (30, 155)  # Optimal phase
+    """
+    # With 70/20/10 split, validation set is 20% of total
+    # Need at least (window + 1) elements in validation to create 1 sample
+    # Therefore: min_days * 0.2 >= window + 1
+    # Solving: min_days >= (window + 1) * 5
+
+    if days_available < 40:
+        raise ValueError(
+            f"Insufficient data for training: {days_available} days available, "
+            f"need at least 40 days. Wait for more data to accumulate."
+        )
+    elif days_available < 55:
+        return (7, 40)  # Phase 1: window=7 -> min = 8*5 = 40
+    elif days_available < 75:
+        return (10, 55)  # Phase 2: window=10 -> min = 11*5 = 55
+    elif days_available < 110:
+        return (14, 75)  # Phase 3: window=14 -> min = 15*5 = 75
+    elif days_available < 155:
+        return (21, 110)  # Phase 4: window=21 -> min = 22*5 = 110
+    else:
+        return (30, 155)  # Phase 5: window=30 -> min = 31*5 = 155
+
+
+def count_available_days(session: Session) -> int:
+    """
+    Count how many distinct days of price data are available in the database.
+
+    Returns:
+        Number of distinct days with price data
+    """
+    stmt = select(func.count(func.distinct(func.date_trunc("day", BtcPrice.timestamp))))
+    count = session.execute(stmt).scalar_one()
+    return count
+
+
+def _get_phase_name(days_available: int) -> str:
+    """
+    Get human-readable phase name for logging.
+
+    Args:
+        days_available: Number of days of historical data
+
+    Returns:
+        Phase name (e.g., "Initial", "Optimal")
+    """
+    if days_available < 40:
+        return "Insufficient"
+    elif days_available < 55:
+        return "Phase 1 - Initial"
+    elif days_available < 75:
+        return "Phase 2 - Growth"
+    elif days_available < 110:
+        return "Phase 3 - Intermediate"
+    elif days_available < 155:
+        return "Phase 4 - Mature"
+    else:
+        return "Phase 5 - Optimal"
 
 
 def fetch_training_data(
@@ -225,6 +331,8 @@ def main() -> int:
     """
     Main entry point for the trainer job.
 
+    Dynamically adapts training strategy based on available historical data.
+
     Returns:
         Exit code (0 = success, 1 = failure)
     """
@@ -233,13 +341,19 @@ def main() -> int:
     session = SessionLocal()
 
     try:
+        # Detect available data and calculate optimal window
+        days_available = count_available_days(session)
+        logger.info(f"Available historical data: {days_available} days")
+
+        window_days, min_days = calculate_dynamic_window(days_available)
+        logger.info(
+            f"Dynamic configuration: window={window_days}d, min={min_days}d "
+            f"(Phase: {_get_phase_name(days_available)})"
+        )
+
         # Configuration
-        window_days = 30
-        min_days = 60  # Need at least 2x window for meaningful training
         model_name = "linear_v1"
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")  # Timestamp version
-
-        logger.info(f"Training configuration: window={window_days}d, min={min_days}d")
 
         # Fetch training data
         prices = fetch_training_data(session, window_days, min_days)
@@ -350,24 +464,30 @@ def train_single_model(
 
 def train_all_models(
     session: Session,
-    window_days: int = 30,
-    min_days: int = 90,
+    window_days: int | None = None,
+    min_days: int | None = None,
 ) -> list[Model]:
     """
     Train all available ML models with the same training data.
 
+    Dynamically adapts training strategy based on available historical data:
+    - Detects available data and calculates optimal window size
+    - Excludes ARIMA if less than 60 days (ARIMA needs more data)
+    - Automatically scales to optimal configuration as data accumulates
+
     This function:
-    1. Fetches historical price data
-    2. Splits into train/validation sets (70/20/10)
-    3. Trains all 4 models sequentially
-    4. Calculates validation error (MAPE) for each
-    5. Saves all models to database with is_active=False
-    6. Activates the model with lowest validation error
+    1. Detects available data and calculates optimal window (if not provided)
+    2. Fetches historical price data
+    3. Splits into train/validation sets (70/20/10)
+    4. Trains available models (3-4 models depending on data)
+    5. Calculates validation error (MAPE) for each
+    6. Saves all models to database with is_active=False
+    7. Activates the model with lowest validation error
 
     Args:
         session: Database session
-        window_days: Size of sliding window for features
-        min_days: Minimum days needed (default 90 for ARIMA)
+        window_days: Size of sliding window (auto-calculated if None)
+        min_days: Minimum days needed (auto-calculated if None)
 
     Returns:
         List of created Model records
@@ -377,13 +497,32 @@ def train_all_models(
     """
     logger.info("Starting multi-model training...")
 
-    # Model registry - all available models
+    # Auto-detect configuration if not provided
+    if window_days is None or min_days is None:
+        days_available = count_available_days(session)
+        logger.info(f"Available historical data: {days_available} days")
+        window_days, min_days = calculate_dynamic_window(days_available)
+        logger.info(
+            f"Dynamic configuration: window={window_days}d, min={min_days}d "
+            f"(Phase: {_get_phase_name(days_available)})"
+        )
+    else:
+        # If provided, count days to determine model selection
+        days_available = count_available_days(session)
+
+    # Model registry - adapt based on available data
+    # ARIMA requires at least 60 days of data
     MODEL_CLASSES = {
         "linear": LinearRegressionModel,
         "lstm": LSTMModel,
         "xgboost": XGBoostModel,
-        "arima": ARIMAModel,
     }
+
+    if days_available >= 60:
+        MODEL_CLASSES["arima"] = ARIMAModel
+        logger.info("ARIMA model included (sufficient data: 60+ days)")
+    else:
+        logger.info(f"ARIMA model excluded (need 60+ days, have {days_available} days)")
 
     # Fetch training data
     logger.info(f"Fetching last {min_days} days of historical prices...")
