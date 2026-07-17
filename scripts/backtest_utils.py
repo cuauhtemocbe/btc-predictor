@@ -120,6 +120,7 @@ def generate_prediction(
     prediction_date: date,
     price_at_prediction: Decimal,
     db: Session | None = None,
+    window_days: int = 30,
 ) -> tuple[Decimal, dict]:
     """
     Train model and generate next-day price prediction.
@@ -129,6 +130,7 @@ def generate_prediction(
         prediction_date: Date to predict for
         price_at_prediction: Current BTC price at prediction time
         db: Database session (optional)
+        window_days: Training window size in days (default: 30)
 
     Returns:
         Tuple of (predicted_price, model_params)
@@ -140,7 +142,6 @@ def generate_prediction(
     import numpy as np
 
     # Initialize model
-    window_days = 30
     model = LinearRegressionModel(window_days=window_days)
 
     # Prepare training data: data already comes in daily frequency

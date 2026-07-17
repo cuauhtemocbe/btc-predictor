@@ -112,6 +112,48 @@ class TestGeneratePrediction:
         assert model_params["training_samples"] > 0
         assert model_params["training_days"] >= 30
 
+    def test_generate_prediction_respects_custom_window_days(
+        self, db_session, sample_btc_prices
+    ):
+        """Scenario: Custom window_days is honored instead of the hardcoded default.
+
+        Regression test: generate_prediction() used to hardcode window_days=30
+        internally, ignoring the caller's training window. With only ~15 days
+        of training data, the default window (30) can't train (needs >= 31
+        rows), but an explicit window_days=10 should succeed and be reflected
+        in the returned model_params.
+        """
+        # Given: ~15 days of training data (not enough for the old hardcoded 30)
+        end_date = date(2024, 5, 15)
+        training_data = fetch_training_data(end_date, window_days=15, db=db_session)
+        assert training_data is not None
+        assert len(training_data) < 31
+
+        prediction_date = date(2024, 5, 16)
+        price_at_prediction = Decimal("66000.00")
+
+        # When: Generate prediction with a custom window_days=10
+        predicted_price, model_params = generate_prediction(
+            training_data,
+            prediction_date,
+            price_at_prediction,
+            db=db_session,
+            window_days=10,
+        )
+
+        # Then: Should succeed and report the custom window, not 30
+        assert isinstance(predicted_price, Decimal)
+        assert model_params["window_days"] == 10
+
+        # And: The same data would fail training with the default window_days
+        with pytest.raises(ValueError, match="Insufficient data for training"):
+            generate_prediction(
+                training_data,
+                prediction_date,
+                price_at_prediction,
+                db=db_session,
+            )
+
     def test_generate_prediction_insufficient_data(self, db_session):
         """Scenario: Raise ValueError when insufficient training data."""
         # Given: Only 10 days of daily data (not enough for 30-day window)

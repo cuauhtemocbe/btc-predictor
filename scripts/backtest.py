@@ -244,6 +244,7 @@ def run_backtest(
                     current_date,
                     price_at_prediction,
                     db,
+                    window_days=training_window,
                 )
             except ValueError as e:
                 logger.warning(f"Skipping {current_date}: training failed - {e}")
