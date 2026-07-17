@@ -19,6 +19,7 @@ build/
 .mypy_cache/
 htmlcov/
 .coverage
+.coverage.*
 coverage.xml
 
 # docker
@@ -28,6 +29,13 @@ coverage.xml
 .vscode/
 .idea/
 *.swp
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Railway CLI (link local al proyecto)
+.railway/
 
 # Claude Code (configuración local)
 .claude/

@@ -248,7 +248,7 @@ ValueError: Insufficient data: need at least 30 days of data before 2024-05-01
 
 **Solution**: Run the backfill script to load more historical data:
 ```bash
-docker compose exec api python scripts/backfill_prices.py --days=90
+docker compose exec api python scripts/backfill_daily_prices.py --days=90
 ```
 
 ### Error: "No actual price data"
