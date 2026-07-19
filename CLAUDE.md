@@ -109,6 +109,23 @@ btc-predictor/
 
 **Implementation:** `workers/daily/trainer.py` → `calculate_dynamic_window()` function
 
+### 8. Docker Image Hardening
+
+- **Production `Dockerfile`:** base image pinned by immutable `sha256` digest
+  (`python:3.13-slim@sha256:...`) so prod builds are byte-for-byte
+  reproducible and can't silently pick up an upstream base image change.
+- **`Dockerfile.dev`:** intentionally keeps the floating `python:3.13-slim`
+  tag — dev images rebuild often and should track the latest patch release
+  instead of requiring a manual digest bump for every security fix.
+- **API healthcheck:** the `api` stage of `Dockerfile` (and the `api`
+  service in `docker-compose.yml`) declare a `HEALTHCHECK` against the
+  existing `GET /health` endpoint (`api-service/api/main.py`), using
+  Python's stdlib `urllib` since the slim base image ships neither `curl`
+  nor `wget`.
+- **`fetch` and `ml-worker` stages:** intentionally have no `HEALTHCHECK` —
+  they're one-shot Railway cron jobs, not long-running processes, so there's
+  nothing for a container healthcheck to probe.
+
 ---
 
 ## Testing Requirements

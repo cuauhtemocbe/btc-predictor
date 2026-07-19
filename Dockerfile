@@ -1,7 +1,7 @@
 # ============================================================================
 # Stage 1: Base - Common dependencies for all services
 # ============================================================================
-FROM python:3.13-slim as base
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,7 +26,7 @@ RUN poetry install --no-interaction --no-ansi --only main --no-root
 # ============================================================================
 # Stage 2: API Service
 # ============================================================================
-FROM base as api
+FROM base AS api
 
 # Install API dependencies (fastapi, uvicorn, jinja2, etc.)
 RUN poetry install --no-interaction --no-ansi --only main --with api --no-root
@@ -42,12 +42,19 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser &&
     chown -R appuser:appgroup /app
 
 USER appuser
+
+# Probes GET /health so Railway/Docker can detect a dead uvicorn process.
+# Uses python's stdlib instead of curl/wget, neither of which ships with
+# the slim base image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8000') + '/health', timeout=3)" || exit 1
+
 CMD ["/app/entrypoint.sh"]
 
 # ============================================================================
 # Stage 3: Fetch Price Worker
 # ============================================================================
-FROM base as fetch
+FROM base AS fetch
 
 # Install fetch dependencies (httpx, urllib3, yarl)
 RUN poetry install --no-interaction --no-ansi --only main --with fetch --no-root
@@ -65,7 +72,7 @@ CMD ["python", "-m", "fetch_price.main"]
 # ============================================================================
 # Stage 4: ML Workers (Daily & Weekly)
 # ============================================================================
-FROM base as ml-worker
+FROM base AS ml-worker
 
 # Install ML dependencies (scikit-learn, tensorflow, xgboost, statsmodels, numpy)
 RUN poetry install --no-interaction --no-ansi --only main --with ml --no-root
