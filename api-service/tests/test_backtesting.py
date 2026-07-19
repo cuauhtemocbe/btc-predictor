@@ -14,8 +14,9 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from shared.db.models import BacktestResult
 from sqlalchemy.orm import Session
+
+from shared.db.models import BacktestResult
 
 
 @pytest.fixture

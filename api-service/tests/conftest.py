@@ -7,12 +7,13 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from api.main import app
 from httpx import ASGITransport, AsyncClient
-from shared.db.database import get_db
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
+
+from api.main import app
+from shared.db.database import get_db
+from shared.db.models import BtcPrice, Model, Prediction
 
 # Note: db_engine_session is provided by root conftest.py (session-scoped)
 # Note: Database schema is created by autouse fixture in root conftest.py

@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime
 
 import numpy as np
 import pytest
+
 from shared.db.crud import (
     activate_model,
     deactivate_all_models,

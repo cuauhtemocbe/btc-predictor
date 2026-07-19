@@ -11,9 +11,9 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+
 from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import BtcPrice
-
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
     calculate_dynamic_window,

@@ -16,9 +16,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
+from shared.db.models import BtcPrice, Model, Prediction
 from workers.daily import evaluator
 
 # ============================================================================
@@ -457,8 +457,9 @@ class TestEvaluatorMain:
         assert exit_code == 0
 
         # Re-fetch prediction to verify it was updated
-        from shared.db.models import Prediction
         from sqlalchemy import select
+
+        from shared.db.models import Prediction
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)
         prediction = db_session.execute(stmt).scalar_one()
@@ -529,8 +530,9 @@ class TestEvaluatorMain:
         assert exit_code == 0
 
         # Re-fetch prediction to verify it was NOT updated
-        from shared.db.models import Prediction
         from sqlalchemy import select
+
+        from shared.db.models import Prediction
 
         stmt = select(Prediction).where(Prediction.id == prediction_id)
         prediction = db_session.execute(stmt).scalar_one()

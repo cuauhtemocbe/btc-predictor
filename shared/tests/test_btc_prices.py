@@ -14,10 +14,11 @@ from decimal import Decimal
 import pytest
 from alembic import command
 from alembic.config import Config
-from shared.config import settings
-from shared.db.models import BtcPrice
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
+
+from shared.config import settings
+from shared.db.models import BtcPrice
 
 
 class TestBtcPricesTableMigration:

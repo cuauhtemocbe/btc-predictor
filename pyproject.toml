@@ -112,6 +112,13 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.ruff.lint.isort]
+# Without this, ruff's first-party auto-detection disagrees between the
+# host (repo root has "api-service/") and the dev container (Dockerfile.dev
+# mounts it as "/app/api"), sorting "api.*" imports differently depending
+# on where ruff runs from. Pin it explicitly so lint is deterministic.
+known-first-party = ["api", "shared", "btc_shared", "workers"]
+
 [tool.cosmic-ray]
 module-path = "."
 timeout = 30.0

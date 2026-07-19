@@ -15,8 +15,9 @@ from decimal import Decimal
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
-from shared.db.models import Model, Prediction
 from sqlalchemy.orm import Session
+
+from shared.db.models import Model, Prediction
 
 # ============================================================================
 # Fixtures

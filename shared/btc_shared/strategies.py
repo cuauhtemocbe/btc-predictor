@@ -3,8 +3,9 @@
 from typing import Any
 
 import numpy as np
-from shared.db.models import Prediction
 from sqlalchemy.orm import Session
+
+from shared.db.models import Prediction
 
 
 def calculate_strategy_metrics(

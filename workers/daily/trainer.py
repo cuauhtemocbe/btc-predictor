@@ -31,13 +31,13 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
+
 from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Model
 from shared.utils import calculate_mape, split_train_validation
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
-
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,

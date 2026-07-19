@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+
 from shared.utils import (
     calculate_accuracy,
     calculate_mape,

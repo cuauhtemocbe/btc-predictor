@@ -10,9 +10,10 @@ from datetime import UTC, date, datetime
 
 import numpy as np
 import pytest
-from shared.db.models import Model
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
+
+from shared.db.models import Model
 
 
 # Gherkin Scenario 1: Create models table via migration
