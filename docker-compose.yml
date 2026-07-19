@@ -30,6 +30,13 @@ services:
       - ./poetry.lock:/app/poetry.lock
       - ./pyproject.toml:/app/pyproject.toml
       - ./cosmic-ray.toml:/app/cosmic-ray.toml
+      - ./LICENSE:/app/LICENSE
+      - ./CHANGELOG.md:/app/CHANGELOG.md
+      - ./.pre-commit-config.yaml:/app/.pre-commit-config.yaml
+      - ./Makefile:/app/Makefile
+      - ./Dockerfile:/app/Dockerfile
+      - ./Dockerfile.dev:/app/Dockerfile.dev
+      - ./docker-compose.yml:/app/docker-compose.yml
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
