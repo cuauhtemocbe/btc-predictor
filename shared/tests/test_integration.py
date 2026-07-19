@@ -10,9 +10,8 @@ Note: These tests require DATABASE_URL to point to a running PostgreSQL instance
 Run with: docker compose exec api pytest shared/tests/test_integration.py
 """
 
-from sqlalchemy import text
-
 from shared.db.database import SessionLocal, engine, get_db
+from sqlalchemy import text
 
 
 class TestPostgreSQLIntegration:

@@ -13,9 +13,9 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
 from workers.weekly import predictor
 from workers.weekly.models import LinearRegressionModel
 

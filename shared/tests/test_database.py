@@ -10,10 +10,9 @@ Covers all Gherkin scenarios from US-001:
 from unittest.mock import Mock, patch
 
 import pytest
+from shared.db.database import SessionLocal, engine, get_db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-
-from shared.db.database import SessionLocal, engine, get_db
 
 
 class TestDatabaseEngine:

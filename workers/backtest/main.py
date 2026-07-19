@@ -19,10 +19,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backtest import main as run_backtest_main
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice
 from sqlalchemy import func
+
+from backtest import main as run_backtest_main
 
 # Configure logging
 logging.basicConfig(

@@ -9,7 +9,6 @@ Covers all Gherkin scenarios from US-001:
 
 import pytest
 from pydantic import ValidationError
-
 from shared.config import Settings
 
 

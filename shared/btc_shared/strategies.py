@@ -3,9 +3,8 @@
 from typing import Any
 
 import numpy as np
-from sqlalchemy.orm import Session
-
 from shared.db.models import Prediction
+from sqlalchemy.orm import Session
 
 
 def calculate_strategy_metrics(
@@ -16,7 +15,8 @@ def calculate_strategy_metrics(
 
     Args:
         predictions: List of Prediction objects with evaluated PnL values
-        strategy_key: One of 'pnl_simulated', 'pnl_long_short', 'pnl_threshold', 'pnl_realistic'
+        strategy_key: One of 'pnl_simulated', 'pnl_long_short',
+            'pnl_threshold', 'pnl_realistic'
 
     Returns:
         Dictionary with metrics:
@@ -86,7 +86,8 @@ def calculate_cumulative_pnl(
 
     Args:
         predictions: List of Prediction objects with evaluated PnL values
-        strategy_key: One of 'pnl_simulated', 'pnl_long_short', 'pnl_threshold', 'pnl_realistic'
+        strategy_key: One of 'pnl_simulated', 'pnl_long_short',
+            'pnl_threshold', 'pnl_realistic'
 
     Returns:
         List of dicts with:

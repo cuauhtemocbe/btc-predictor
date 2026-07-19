@@ -76,7 +76,7 @@ def upgrade() -> None:
             "error_pct",
             sa.NUMERIC(precision=5, scale=2),
             nullable=True,
-            comment="Percentage error: (actual_price - predicted_price) / actual_price * 100",
+            comment="Percentage error: (actual_price - predicted_price) / actual_price * 100",  # noqa: E501
         ),
         sa.Column(
             "direction_correct",

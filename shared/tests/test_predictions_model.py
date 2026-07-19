@@ -14,10 +14,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from shared.db.models import Prediction
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
-
-from shared.db.models import Prediction
 
 
 def test_migration_creates_predictions_table(db_engine):

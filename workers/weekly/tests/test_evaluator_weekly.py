@@ -11,9 +11,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from shared.db.models import BtcPrice, Model, Prediction
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
 from workers.weekly import evaluator
 
 # ============================================================================

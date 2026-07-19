@@ -96,7 +96,7 @@ def upgrade() -> None:
         "backtest_results",
         "model_params",
         existing_type=postgresql.JSONB(astext_type=sa.Text()),
-        comment="Model training parameters as JSONB (e.g., {'model_name': 'linear_v1', 'window_days': 30})",
+        comment="Model training parameters as JSONB (e.g., {'model_name': 'linear_v1', 'window_days': 30})",  # noqa: E501
         existing_nullable=True,
     )
     op.alter_column(
@@ -147,7 +147,7 @@ def upgrade() -> None:
         "predictions",
         "predicted_for",
         existing_type=sa.DATE(),
-        comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",
+        comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",  # noqa: E501
         existing_comment="Date being predicted (usually tomorrow)",
         existing_nullable=False,
     )
@@ -168,7 +168,7 @@ def downgrade() -> None:
         "predicted_for",
         existing_type=sa.DATE(),
         comment="Date being predicted (usually tomorrow)",
-        existing_comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",
+        existing_comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",  # noqa: E501
         existing_nullable=False,
     )
     op.drop_column("predictions", "timeframe")
@@ -201,7 +201,7 @@ def downgrade() -> None:
         "model_params",
         existing_type=postgresql.JSONB(astext_type=sa.Text()),
         comment=None,
-        existing_comment="Model training parameters as JSONB (e.g., {'model_name': 'linear_v1', 'window_days': 30})",
+        existing_comment="Model training parameters as JSONB (e.g., {'model_name': 'linear_v1', 'window_days': 30})",  # noqa: E501
         existing_nullable=True,
     )
     op.alter_column(
@@ -217,7 +217,7 @@ def downgrade() -> None:
         "pnl_threshold",
         existing_type=sa.NUMERIC(precision=15, scale=2),
         comment=None,
-        existing_comment="PnL with threshold filter: only trade if predicted change > 1%",
+        existing_comment="PnL with threshold filter: only trade if predicted change > 1%",  # noqa: E501
         existing_nullable=True,
     )
     op.alter_column(

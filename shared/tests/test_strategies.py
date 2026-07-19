@@ -9,9 +9,8 @@ from btc_shared.strategies import (
     calculate_strategy_metrics,
     get_all_strategies_metrics,
 )
-from sqlalchemy.orm import Session
-
 from shared.db.models import Model, Prediction
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
@@ -150,7 +149,7 @@ def test_calculate_strategy_metrics_with_empty_predictions():
 def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
     db_session: Session, test_model: Model
 ):
-    """Test metrics with predictions that haven't been evaluated yet (actual_price is NULL)."""
+    """Test metrics with predictions not yet evaluated (actual_price is NULL)."""
     predictions = [
         Prediction(
             model_id=test_model.id,

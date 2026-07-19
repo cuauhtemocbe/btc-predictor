@@ -9,12 +9,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from shared.config import settings
+from shared.db.models import BtcPrice
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-
-from shared.config import settings
-from shared.db.models import BtcPrice
 
 
 @pytest.fixture(scope="module")

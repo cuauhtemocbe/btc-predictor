@@ -14,11 +14,10 @@ from decimal import Decimal
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect
-from sqlalchemy.exc import IntegrityError
-
 from shared.config import settings
 from shared.db.models import BtcPrice
+from sqlalchemy import inspect
+from sqlalchemy.exc import IntegrityError
 
 
 class TestBtcPricesTableMigration:
@@ -214,7 +213,10 @@ class TestDowngradeMigrationRemovesTable:
     """
 
     @pytest.mark.skip(
-        reason="Downgrade test conflicts with other tests that need the table. Tested manually."
+        reason=(
+            "Downgrade test conflicts with other tests that need the table. "
+            "Tested manually."
+        )
     )
     def test_downgrade_removes_btc_prices_table(self, db_engine, apply_migrations):
         """Test that downgrading migration removes btc_prices table.
@@ -265,7 +267,7 @@ class TestBtcPriceModelEdgeCases:
         assert price.id is not None, "Should save record with zero volume"
 
     def test_null_timestamp_raises_error(self, db_session, apply_migrations):
-        """Test that NULL timestamp violates NOT NULL constraint (ZOMBIES: Exceptions)."""
+        """Test that NULL timestamp violates NOT NULL constraint (ZOMBIES: Exceptions)."""  # noqa: E501
         price = BtcPrice(
             timestamp=None,  # NULL timestamp should fail
             open=Decimal("50000.0"),
@@ -293,7 +295,7 @@ class TestBtcPriceModelEdgeCases:
             low=Decimal("50000.0"),
             close=Decimal("50000.0"),
             volume=Decimal("100.0"),
-            source="binance",  # Explicit for now; could be made optional if model has default
+            source="binance",  # Explicit; could be optional if model had a default
         )
         db_session.add(price)
         db_session.commit()

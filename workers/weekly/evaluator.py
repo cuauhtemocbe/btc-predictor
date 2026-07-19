@@ -17,9 +17,6 @@ import sys
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from shared.db.database import SessionLocal
 from shared.db.models import BtcPrice, Prediction
 from shared.utils import (
@@ -28,6 +25,8 @@ from shared.utils import (
     calculate_pnl_realistic,
     calculate_pnl_threshold,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 # Configure logging
 logging.basicConfig(
