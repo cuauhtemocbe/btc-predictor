@@ -4,6 +4,7 @@ Pytest configuration and fixtures for shared package tests.
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from shared.config import settings
@@ -92,7 +93,7 @@ def sample_btc_price(db_session):
     """
 
     def _create_price(
-        timestamp: datetime = None,
+        timestamp: datetime | None = None,
         open: Decimal = Decimal("50000.0"),
         high: Decimal = Decimal("51000.0"),
         low: Decimal = Decimal("49000.0"),
@@ -130,11 +131,11 @@ def sample_model(db_session):
     def _create_model(
         name: str = "test_model",
         version: str = "1.0.0",
-        params: dict = None,
+        params: dict[str, Any] | None = None,
         artifact: bytes = b"fake_pickle_data",
-        trained_at: datetime = None,
-        train_from: date = None,
-        train_to: date = None,
+        trained_at: datetime | None = None,
+        train_from: date | None = None,
+        train_to: date | None = None,
         is_active: bool = False,
     ) -> Model:
         if params is None:
@@ -175,9 +176,9 @@ def sample_prediction(db_session, sample_model):
     """
 
     def _create_prediction(
-        model_id: int = None,
-        predicted_for: date = None,
-        predicted_at: datetime = None,
+        model_id: int | None = None,
+        predicted_for: date | None = None,
+        predicted_at: datetime | None = None,
         price_at_prediction: Decimal = Decimal("67000.00"),
         predicted_price: Decimal = Decimal("68000.00"),
     ) -> Prediction:
@@ -223,13 +224,13 @@ def evaluated_prediction(db_session, sample_model):
     """
 
     def _create_evaluated_prediction(
-        model_id: int = None,
-        predicted_for: date = None,
-        predicted_at: datetime = None,
+        model_id: int | None = None,
+        predicted_for: date | None = None,
+        predicted_at: datetime | None = None,
         price_at_prediction: Decimal = Decimal("67000.00"),
         predicted_price: Decimal = Decimal("68000.00"),
         actual_price: Decimal = Decimal("67500.00"),
-        evaluated_at: datetime = None,
+        evaluated_at: datetime | None = None,
         error_abs: Decimal = Decimal("500.00"),
         error_pct: Decimal = Decimal("0.74"),
         direction_correct: bool = True,

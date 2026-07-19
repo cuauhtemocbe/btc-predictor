@@ -18,6 +18,17 @@ repos:
         args: [--no-cache]
         files: ^(shared|api-service|workers)/
 
+  # mypy --strict on shared/ (runs in Docker, needs project's real
+  # dependencies/stubs — not the isolated venv the mirrors-mypy hook uses)
+  - repo: local
+    hooks:
+      - id: mypy-docker
+        name: Type-check shared/ with mypy --strict
+        entry: scripts/hooks/run-mypy.sh
+        language: system
+        pass_filenames: false
+        files: ^shared/
+
   # Pytest with Docker (runs on pre-push)
   - repo: local
     hooks:

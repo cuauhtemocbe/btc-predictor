@@ -52,12 +52,19 @@ ruff = "^0.9.0"
 cosmic-ray = "^8.3"
 asyncpg = "^0.30.0"
 pytest-xdist = "^3.8.0"
+mypy = "^1.14.0"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 # Ensure pytest uses /app as root to discover conftest.py
 # This is critical for centralized DB fixtures to work
 pythonpath = "."
+# NOTE: api-service/api/tests is intentionally NOT here. Its "db_session"
+# fixture (api-service/tests/conftest.py) doesn't pre-clean tables like the
+# root conftest.py's version does, and leaks committed rows across test
+# files when run in the same session as the rest of the suite (see
+# test_models_api.py failures). Tracked as a follow-up; run those tests
+# explicitly via `pytest api/tests/` in the meantime.
 testpaths = [
     "shared/tests",
     "workers/daily/tests",
@@ -65,6 +72,7 @@ testpaths = [
     "workers/weekly/tests",
     "scripts/tests"
 ]
+addopts = "--cov-fail-under=90"
 
 # Registrar markers para evitar warnings y habilitar ejecución selectiva
 markers = [
@@ -74,6 +82,28 @@ markers = [
     "db: marks tests that use database fixtures",
     "asyncio: marks async tests (automatically detected)"
 ]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+# explicit_package_bases + mypy_path lets mypy name shared/btc_shared/* as
+# "btc_shared.*" and shared/tests/* as "tests.*" without adding __init__.py
+# files there (which would break pytest test collection for sibling
+# "tests" dirs elsewhere in the monorepo, e.g. workers/daily/tests).
+mypy_path = "shared"
+explicit_package_bases = true
+files = ["shared/shared", "shared/btc_shared", "shared/tests"]
+exclude = ["shared/alembic/", "shared/\\.venv/", "shared/poetry\\.lock"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+strict_optional = false
+implicit_optional = true
+disable_error_code = ["method-assign"]
 
 [tool.ruff]
 line-length = 88

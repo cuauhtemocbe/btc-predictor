@@ -630,9 +630,9 @@ def calculate_max_drawdown(
         return None
 
     # Calculate running maximum and drawdown
-    cumulative_pnl = np.array(cumulative_pnl)
-    running_max = np.maximum.accumulate(cumulative_pnl)
-    drawdown = cumulative_pnl - running_max
+    cumulative_pnl_arr = np.array(cumulative_pnl)
+    running_max = np.maximum.accumulate(cumulative_pnl_arr)
+    drawdown = cumulative_pnl_arr - running_max
 
     max_drawdown = float(np.min(drawdown))
 

@@ -10,6 +10,7 @@ Models:
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
@@ -109,7 +110,7 @@ class Model(Base):
         nullable=False,
         comment="Model version (e.g., '1.0.0', '2024-05-17-001')",
     )
-    params: Mapped[dict] = mapped_column(
+    params: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         comment="Training hyperparameters as JSON (e.g., {'window_days': 30})",
@@ -328,7 +329,7 @@ class BacktestResult(Base):
         nullable=True,
         comment="PnL with trading fees (0.1%) and stop-loss (2% max loss)",
     )
-    model_params: Mapped[dict | None] = mapped_column(
+    model_params: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB,
         nullable=True,
         comment="Model training parameters as JSONB "
