@@ -1,4 +1,10 @@
 repos:
+  # Secret scanning (runs on pre-commit, before anything reaches git history)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.9.0
+    hooks:
+      - id: gitleaks
+
   # Ruff linter and formatter (runs on pre-commit)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.14

@@ -404,6 +404,8 @@ railway logs --service daily
 - **Project Board:** https://github.com/users/cuauhtemocbe/projects/1/views/1
 - **Implementation History:** `docs/archive/specs/IMPLEMENTATION_HISTORY.md`
 - **User Stories:** GitHub Issues #2 to #17 (all closed ✅)
+- **License:** [MIT](LICENSE)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format)
 
 ---
 
