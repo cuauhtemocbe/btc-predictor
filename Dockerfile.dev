@@ -20,8 +20,9 @@ COPY pyproject.toml poetry.lock* ./
 # Copy shared package first (dependency)
 COPY shared/ ./shared/
 
-# Install root dependencies
-RUN poetry install --no-interaction --no-ansi --no-root
+# Install root dependencies (including ml group: daily/weekly worker tests
+# import ARIMA/LSTM/XGBoost models, which require statsmodels/tensorflow/xgboost)
+RUN poetry install --no-interaction --no-ansi --no-root --with ml
 
 # Copy API code (mounted as volume in dev, but needed for poetry install)
 COPY api-service/ ./api/
