@@ -7,9 +7,13 @@ Tests the GET / endpoint that renders the dashboard HTML:
 - Dashboard displays model name and version
 """
 
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
+from shared.db.models import Prediction
 from sqlalchemy.orm import Session
 
 
@@ -26,7 +30,8 @@ async def test_dashboard_with_predictions(
     Then the response status is 200 OK
     And the response content-type is text/html
     And the HTML contains a table with 10 rows (one per prediction)
-    And each row shows: predicted_for, predicted_price, actual_price, error_pct, direction_correct
+    And each row shows: predicted_for, predicted_price, actual_price, error_pct,
+    direction_correct
     """
     # Arrange: Create 10 evaluated predictions
     sample_predictions_factory(count=10, evaluated=True)
@@ -57,7 +62,8 @@ async def test_dashboard_with_predictions(
     first_row = rows[0]
     cells = first_row.find_all("td")
 
-    # Each row should have 7 cells: date, price_at_prediction, predicted, actual, error, direction, model
+    # Each row should have 7 cells: date, price_at_prediction, predicted, actual,
+    # error, direction, model
     assert len(cells) == 7
 
     # Verify cells contain data (not empty)
@@ -250,3 +256,56 @@ async def test_dashboard_responsive_meta_tag(
     viewport = soup.find("meta", attrs={"name": "viewport"})
     assert viewport is not None, "Dashboard should have viewport meta tag"
     assert "width=device-width" in viewport.get("content", "")
+
+
+# Gherkin: Redundant non-color signal for PnL indicators (accessibility)
+@pytest.mark.asyncio
+async def test_pnl_glyphs_are_redundant_non_color_signal(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model,
+):
+    """
+    Given a strategy row with total_pnl >= 0 and another with total_pnl < 0
+    When dashboard.html renders the positive-pnl/negative-pnl cells
+    Then each cell is prefixed with a glyph (▲ for positive, ▼ for negative)
+    in addition to its color, and the static max_drawdown/avg_win/avg_loss
+    columns also carry their corresponding glyph.
+    """
+    # Arrange: one winning trade (positive total_pnl) so the "simple"
+    # strategy renders with the positive-pnl class and glyph.
+    db_session.add(
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2024, 5, 1),
+            predicted_at=datetime(2024, 4, 30, 10, 0, tzinfo=UTC),
+            price_at_prediction=Decimal("67000.00"),
+            predicted_price=Decimal("68000.00"),
+            actual_price=Decimal("67500.00"),
+            evaluated_at=datetime(2024, 5, 1, 10, 0, tzinfo=UTC),
+            error_abs=Decimal("500.00"),
+            error_pct=Decimal("0.74"),
+            direction_correct=True,
+            pnl_simulated=Decimal("500.00"),
+        )
+    )
+    db_session.commit()
+
+    # Act
+    response = await client.get("/")
+
+    # Assert
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    positive_cells = soup.find_all(class_="positive-pnl")
+    negative_cells = soup.find_all(class_="negative-pnl")
+
+    assert positive_cells, "Expected at least one positive-pnl cell"
+    assert negative_cells, "Expected at least one negative-pnl cell"
+
+    assert any("▲" in cell.get_text() for cell in positive_cells), (
+        "positive-pnl cells should be prefixed with a ▲ glyph"
+    )
+    assert any("▼" in cell.get_text() for cell in negative_cells), (
+        "negative-pnl cells should be prefixed with a ▼ glyph"
+    )

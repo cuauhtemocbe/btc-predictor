@@ -6,6 +6,12 @@
     <title>BTC Predictor - Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        /*
+         * Accessibility note: this stylesheet only uses simple 0.2s hover
+         * transitions (color/background/border/transform). No animated
+         * loaders or element enter/exit transitions exist, so these are
+         * trivial and intentionally do not honor prefers-reduced-motion.
+         */
         * {
             margin: 0;
             padding: 0;
@@ -435,12 +441,12 @@
                                 {% endif %}
                             </td>
                             <td class="{{ 'positive-pnl' if strategy.total_pnl >= 0 else 'negative-pnl' }}">
-                                ${{ "%.2f"|format(strategy.total_pnl) }}
+                                {{ '▲' if strategy.total_pnl >= 0 else '▼' }} ${{ "%.2f"|format(strategy.total_pnl) }}
                             </td>
                             <td>{{ "%.1f"|format(strategy.win_rate * 100) }}%</td>
-                            <td class="negative-pnl">${{ "%.2f"|format(strategy.max_drawdown) }}</td>
-                            <td class="positive-pnl">${{ "%.2f"|format(strategy.avg_win) }}</td>
-                            <td class="negative-pnl">${{ "%.2f"|format(strategy.avg_loss) }}</td>
+                            <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.max_drawdown) }}</td>
+                            <td class="positive-pnl">▲ ${{ "%.2f"|format(strategy.avg_win) }}</td>
+                            <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.avg_loss) }}</td>
                             <td>{{ "%.2f"|format(strategy.sharpe_ratio) }}</td>
                             <td>{{ strategy.trade_count }}</td>
                         </tr>
