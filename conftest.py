@@ -71,13 +71,22 @@ def db_session(db_engine_session):
     session.commit()
 
     # Start a savepoint (nested transaction)
-    session.begin_nested()
+    connection.begin_nested()
 
-    # When application code calls commit(), restart the savepoint
+    # Whenever a transaction ends -- via commit() OR via rollback() after
+    # a caught error (e.g. a test asserting an IntegrityError) -- restart
+    # the savepoint. Checking connection.in_nested_transaction() directly
+    # (SQLAlchemy's documented pattern for this) is what makes this robust
+    # to error-triggered rollbacks: inferring the restart condition from
+    # the SQLAlchemy Transaction object's .nested/._parent chain instead
+    # (as this used to) does not reliably fire after session.rollback(),
+    # which leaves the connection's savepoint dead for the rest of the
+    # (session-scoped, StaticPool-shared) test run -- corrupting every
+    # later test that reuses this connection.
     @event.listens_for(session, "after_transaction_end")
     def restart_savepoint(session, trans):
-        if trans.nested and not trans._parent.nested:
-            session.begin_nested()
+        if not connection.in_nested_transaction():
+            connection.begin_nested()
 
     yield session
 

@@ -59,14 +59,11 @@ asyncio_mode = "auto"
 # Ensure pytest uses /app as root to discover conftest.py
 # This is critical for centralized DB fixtures to work
 pythonpath = "."
-# NOTE: api-service/api/tests is intentionally NOT here. Its "db_session"
-# fixture (api-service/tests/conftest.py) doesn't pre-clean tables like the
-# root conftest.py's version does, and leaks committed rows across test
-# files when run in the same session as the rest of the suite (see
-# test_models_api.py failures). Tracked as a follow-up; run those tests
-# explicitly via `pytest api/tests/` in the meantime.
+# NOTE: "api/tests" (not "api-service/tests") because Dockerfile.dev mounts
+# ./api-service to /app/api inside the container where tests actually run.
 testpaths = [
     "shared/tests",
+    "api/tests",
     "workers/daily/tests",
     "workers/fetch_price/tests",
     "workers/weekly/tests",

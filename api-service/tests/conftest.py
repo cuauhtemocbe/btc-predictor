@@ -8,8 +8,7 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from api.main import app
 from shared.db.database import get_db
@@ -31,46 +30,24 @@ async def client():
 
 
 @pytest.fixture(scope="function")
-def db_session(db_engine_session):
+def db_session(db_session):
     """
-    Create a database session with automatic rollback after test.
-    This ensures test isolation - changes are not persisted.
-
-    Schema is created by autouse fixture in root conftest.py.
-    Uses nested transactions (savepoints) to ensure all commits
-    within the test are rolled back at the end.
+    Extends the root conftest.py db_session fixture (SAVEPOINT-based
+    isolation, with pre-test table cleanup) by also overriding FastAPI's
+    get_db dependency so API requests made through `client` are routed
+    through this same test session/transaction.
     """
-    connection = db_engine_session.connect()
-    transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-    session = SessionLocal()
 
-    # Start a savepoint (nested transaction)
-    # This allows commits within the test to succeed without
-    # actually committing to the database
-    session.begin_nested()
-
-    # When the application code calls commit(), restart the savepoint
-    @event.listens_for(session, "after_transaction_end")
-    def restart_savepoint(session, transaction):
-        if transaction.nested and not transaction._parent.nested:
-            session.begin_nested()
-
-    # Override the get_db dependency to use this test session
     def override_get_db():
         try:
-            yield session
+            yield db_session
         finally:
-            pass  # Don't close here, let the fixture handle it
+            pass  # Don't close here, the root fixture's teardown handles it
 
     app.dependency_overrides[get_db] = override_get_db
 
-    yield session
+    yield db_session
 
-    # Cleanup
-    session.close()
-    transaction.rollback()
-    connection.close()
     app.dependency_overrides.clear()
 
 
