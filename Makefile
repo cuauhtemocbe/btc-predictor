@@ -1,41 +1,54 @@
 IMAGE = btc-predictor
 
-# --- Docker ---
-build:
+.DEFAULT_GOAL := help
+
+.PHONY: help build up up-d down logs test test-v lint validate install-local test-local lint-local
+
+help: ## Show this help message
+	@echo "BTC Predictor"
+	@echo ""
+	@awk 'BEGIN {FS = ":.*##"} \
+		/^[a-zA-Z0-9_-]+:.*##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } \
+		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+
+##@ Docker (default, no local Python needed)
+
+build: ## Build all Docker images
 	docker compose build
 
-up:
+up: ## Start all services in the foreground
 	docker compose up
 
-up-d:
+up-d: ## Start all services in the background
 	docker compose up -d
 
-down:
+down: ## Stop all services
 	docker compose down
 
-logs:
+logs: ## Follow api service logs
 	docker compose logs -f api
 
-# --- Tests en container ---
-test:
+test: ## Run the test suite in Docker (waits for postgres to be healthy)
+	docker compose up -d --wait postgres
 	docker compose run --rm api pytest
 
-test-v:
+test-v: ## Run the test suite in Docker, verbose (waits for postgres to be healthy)
+	docker compose up -d --wait postgres
 	docker compose run --rm api pytest -v
 
-# --- Lint en container ---
-lint:
-	docker compose run --rm api ruff check src/ tests/
+lint: ## Lint shared/api-service/workers with ruff in Docker
+	docker compose run --rm api ruff check shared api workers
 
-# --- Local (requiere Python 3.13 activo) ---
-install:
+validate: ## Run the full local quality gate: lint + format check + tests with coverage
+	./scripts/validate.sh
+
+##@ Local, no Docker, best-effort (requires Python 3.13 + Poetry active)
+
+install-local: ## Install dependencies locally with Poetry
 	poetry install
 
-run-local:
-	poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-test-local:
+test-local: ## Run tests locally with Poetry
 	poetry run pytest -v
 
-lint-local:
-	poetry run ruff check src/ tests/
+lint-local: ## Lint locally with Poetry
+	poetry run ruff check shared api-service workers
