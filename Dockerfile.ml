@@ -20,4 +20,4 @@ RUN poetry install --no-interaction --no-ansi --with ml --without dev --no-root 
     chown -R appuser:appgroup /app
 
 USER appuser
-CMD ["python", "-m", "daily.main"]
+CMD ["python", "-m", "workers.daily"]

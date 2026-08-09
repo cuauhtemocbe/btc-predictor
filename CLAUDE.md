@@ -358,10 +358,10 @@ docker compose exec api sh -c "cd shared && alembic history"
 
 ```bash
 # Manually run fetch_price job
-docker compose exec api python -m fetch_price.main
+docker compose exec api python -m workers.fetch_price.main
 
 # Manually run daily job
-docker compose exec api python -m daily.main
+docker compose exec api python -m workers.daily
 ```
 
 ### Shell Access (for debugging)

@@ -3,6 +3,6 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile.ml"
 
 [deploy]
-startCommand = "python -m weekly.main"
+startCommand = "python -m workers.weekly"
 restartPolicyType = "never"
 cronSchedule = "0 7 * * 1"
