@@ -15,7 +15,7 @@ COPY pyproject.toml poetry.lock* ./
 COPY shared/ ./shared/
 COPY workers/fetch_price/ ./workers/fetch_price/
 
-RUN poetry install --no-interaction --no-ansi --only main --with fetch --no-root && \
+RUN poetry install --no-interaction --no-ansi --with fetch --without dev --no-root && \
     chown -R appuser:appgroup /app
 
 USER appuser

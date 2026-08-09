@@ -16,7 +16,7 @@ COPY shared/ ./shared/
 COPY workers/daily/ ./workers/daily/
 COPY workers/weekly/ ./workers/weekly/
 
-RUN poetry install --no-interaction --no-ansi --only main --with ml --no-root && \
+RUN poetry install --no-interaction --no-ansi --with ml --without dev --no-root && \
     chown -R appuser:appgroup /app
 
 USER appuser
