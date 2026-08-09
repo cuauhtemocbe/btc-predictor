@@ -171,13 +171,7 @@ GitHub Actions ejecuta la misma validación dentro de Docker en cada push y pull
 - pytest con cobertura mínima del proyecto
 - Reporte de cobertura como artefacto del workflow
 
-El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los despliegues a Railway se ejecutan únicamente después de un CI exitoso sobre `main` y cubren los servicios `btc-predictor`, `fetch-price`, `daily` y `weekly-predictor`.
-
-Para habilitar el despliegue desde GitHub, configura estos secretos en el entorno `production` del repositorio:
-
-- `RAILWAY_TOKEN`: token de proyecto de Railway
-- `RAILWAY_PROJECT_ID`: ID del proyecto Railway
-- `RAILWAY_ENVIRONMENT`: nombre o ID del entorno Railway
+El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
 
 La protección de `main` y la exigencia de checks obligatorios se configura por separado en la issue [#49](https://github.com/cuauhtemocbe/btc-predictor/issues/49).
 

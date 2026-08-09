@@ -40,16 +40,5 @@ def test_quality_runs_mutation_testing_weekly_and_manually():
     assert "cr-report" in workflow
 
 
-def test_deploy_is_limited_to_main_and_deploys_all_railway_services():
-    workflow = read_workflow("deploy.yml")
-
-    assert "workflow_run:" in workflow
-    assert "workflows:\n      - CI" in workflow
-    assert "- main" in workflow
-    assert "conclusion == 'success'" in workflow
-    assert "RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}" in workflow
-    assert "--service btc-predictor" in workflow
-    assert "--service fetch-price" in workflow
-    assert "--service daily" in workflow
-    assert "--service weekly-predictor" in workflow
-    assert "permissions:\n  contents: read" in workflow
+def test_ci_does_not_duplicate_railway_deployment():
+    assert not (WORKFLOWS / "deploy.yml").exists()

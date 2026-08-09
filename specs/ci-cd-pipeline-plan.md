@@ -18,15 +18,15 @@
 - **Files**: `.github/workflows/quality.yml`
 - **Effort**: S
 
-### 3. Railway deployment
+### 3. Railway deployment integration
 
-- **Purpose**: Deploy all application services after successful CI on `main`.
-- **Files**: `.github/workflows/deploy.yml`
-- **Effort**: M
+- **Purpose**: Preserve Railway's existing native GitHub deployment without duplicating it in Actions.
+- **Files**: Railway project configuration, no new workflow file
+- **Effort**: XS
 
 ### 4. Documentation and regression tests
 
-- **Purpose**: Document secrets and protect workflow contracts from accidental removal.
+- **Purpose**: Document workflow ownership and protect contracts from accidental removal.
 - **Files**: `README.md`, `specs/ci-cd-pipeline.md`, `scripts/tests/test_ci_workflows.py`
 - **Effort**: S
 
@@ -37,32 +37,32 @@
 1. Docker CI quality gate
 2. Workflow contract tests
 3. Scheduled mutation testing
-4. Railway deployment workflow
+4. Railway integration compatibility
 5. Documentation and verification
 
 ### External Dependencies
 
 - GitHub-hosted Ubuntu runners with Docker Compose.
-- Railway project token, project ID, and environment secrets.
+- Existing Railway native GitHub integration.
 
 ## Risks & Assumptions
 
 ### Risks
 
 - **Mutation runtime**: Cosmic Ray may exceed the weekly job timeout as the test suite grows. Mitigation: keep it scheduled and cap execution at 60 minutes.
-- **Railway service names**: Deployment depends on the existing service names. Mitigation: keep names explicit and fail the workflow when a service is unavailable.
+- **Railway integration drift**: Deployment behavior is configured outside the repository. Mitigation: keep the native integration as the single deployment owner.
 
 ### Assumptions
 
 - Railway service build configuration remains managed by the linked Railway services.
-- The repository environment `production` contains the three documented Railway secrets.
+- Railway is already configured to deploy from GitHub after changes to `main`.
 
 ## Milestones
 
 - [x] Docker quality gate passes in a clean container.
 - [x] Workflow definitions pass actionlint.
 - [x] Workflow contract tests pass.
-- [x] Deployment is gated on successful CI for `main`.
+- [x] The repository has no duplicate Railway deployment workflow.
 
 ## Tasks
 
@@ -82,16 +82,16 @@
   - **Tests**: actionlint and workflow contract tests.
   - **Effort**: S
 
-- [x] **Task 3**: Add successful-CI-gated Railway deployment.
-  - **Acceptance**: The four services deploy only after CI succeeds on `main`.
-  - **Files**: `.github/workflows/deploy.yml`
-  - **Tests**: actionlint and workflow contract tests.
-  - **Effort**: M
+- [x] **Task 3**: Keep Railway deployment owned by the native GitHub integration.
+  - **Acceptance**: No GitHub Actions workflow requires Railway credentials or duplicates deployment.
+  - **Files**: `.github/workflows/`
+  - **Tests**: workflow contract tests and GitHub checks.
+  - **Effort**: XS
 
 ### Polish
 
 - [x] **Task 4**: Document setup and add regression tests.
-  - **Acceptance**: Required secrets and workflow responsibilities are documented.
+  - **Acceptance**: Workflow responsibilities and Railway ownership are documented.
   - **Files**: `README.md`, `scripts/tests/test_ci_workflows.py`, `specs/`
   - **Tests**: Four passing workflow contract tests.
   - **Effort**: S
