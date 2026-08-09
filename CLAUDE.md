@@ -389,6 +389,15 @@ railway logs --service fetch-price
 railway logs --service daily
 ```
 
+### Main Branch Protection
+
+The `main` branch is protected in GitHub with force-pushes and branch deletion
+disabled. `enforce_admins` is intentionally `false`, allowing the repository
+owner to push directly when necessary; this is an explicit solo-maintainer
+exception, not an omission. Pull-request and required status-check enforcement
+will be added when the repository adopts hosted CI checks that GitHub can
+require.
+
 **Claude Code Automation:**
 - After successfully pushing to `main` branch, ALWAYS execute `./scripts/hooks/monitor-railway.sh`
 - This monitors Railway deployment status and reports any issues

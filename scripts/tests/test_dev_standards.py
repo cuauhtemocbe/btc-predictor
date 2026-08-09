@@ -13,7 +13,9 @@ Standards Compliance", issues #43-#47):
   image intentionally floats (#43)
 """
 
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -171,6 +173,45 @@ def test_validate_script_is_reused_by_pre_push_hook():
     # The pre-push hook must call validate.sh, not duplicate its checks.
     assert "validate.sh" in run_tests_hook
     assert "ruff check" not in run_tests_hook
+
+
+def test_validate_script_checks_lockfile_before_tests():
+    validate_script = (REPO_ROOT / "scripts" / "validate.sh").read_text()
+
+    lockfile_check = "docker compose exec -T api poetry check --lock"
+    assert lockfile_check in validate_script
+    assert validate_script.index(lockfile_check) < validate_script.index("pytest --cov")
+    assert "Lockfile out of sync" in validate_script
+
+
+def test_validate_script_stops_before_pytest_when_lockfile_is_stale(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "calls.log"
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> '{calls}'\n"
+        "case \"$*\" in\n"
+        "  'compose ps') printf 'api running\\n' ;;\n"
+        "  *'poetry check --lock'*) exit 1 ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    fake_docker.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "validate.sh")],
+        cwd=REPO_ROOT,
+        env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Lockfile out of sync" in result.stderr
+    assert "pytest --cov" not in calls.read_text()
 
 
 def test_production_dockerfile_base_pinned_by_digest():
