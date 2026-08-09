@@ -48,3 +48,4 @@ Thumbs.db
 *.sqlite
 mutation_output.txt
 mutation_testing_report.md
+opencode.json
