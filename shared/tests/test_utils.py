@@ -15,6 +15,7 @@ from shared.utils import (
     calculate_accuracy,
     calculate_mape,
     calculate_max_drawdown,
+    calculate_max_drawdown_pct,
     calculate_model_mape,
     calculate_pnl,
     calculate_pnl_long_short,
@@ -1185,3 +1186,188 @@ class TestMetricsRespectTimeframe:
 
         assert m1_weekly["predictions_count"] == 1
         assert m1_weekly["total_pnl"] == 1000.0
+
+
+class TestCapitalNormalizedMetrics:
+    """
+    Capital-normalized financial metrics (issue #72).
+
+    Sharpe ratio and max-drawdown-% are normalized against a fixed
+    reference capital instead of each trade's own spot price, so they're
+    comparable across trades made at very different BTC prices.
+    """
+
+    def test_sharpe_ratio_normalized_by_capital_not_spot_price(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Scenario: Returns are normalized by invested capital, not by spot price
+
+        Given evaluated trades executed at different BTC prices
+        When the Sharpe ratio is calculated
+        Then each trade's return is pnl divided by the configured capital,
+        not by that trade's BTC price
+        """
+        model = sample_model(name="linear_v1")
+
+        # Same pnl values, but wildly different price_at_prediction --
+        # under the OLD spot-price-normalized formula these would produce
+        # very different Sharpe ratios; under capital normalization the
+        # price_at_prediction is irrelevant to the result.
+        for i, pnl in enumerate([100, -50, 150, 80, -30]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("10000.00"),
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        sharpe_low_price = calculate_sharpe_ratio(
+            db_session, model.id, capital=10_000.0
+        )
+
+        model2 = sample_model(name="linear_v2")
+        for i, pnl in enumerate([100, -50, 150, 80, -30]):
+            evaluated_prediction(
+                model_id=model2.id,
+                predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("500000.00"),  # 50x higher spot price
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        sharpe_high_price = calculate_sharpe_ratio(
+            db_session, model2.id, capital=10_000.0
+        )
+
+        # Same pnl series + same capital => identical Sharpe, regardless
+        # of how different the trades' spot prices were.
+        assert sharpe_low_price == pytest.approx(sharpe_high_price)
+
+    def test_sharpe_ratio_with_nonzero_risk_free_rate_depends_on_capital(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        With risk_free_rate=0 (the default), Sharpe = mean/stdev is scale
+        invariant -- any constant reference capital cancels out of the
+        ratio, so it doesn't matter which one is used. capital only
+        changes the *value* once a nonzero risk_free_rate is mixed in
+        (risk_free_rate/365 is an absolute rate, not scaled by capital).
+        This is exactly why normalizing by a *varying* per-trade spot
+        price was the actual bug: unlike a constant, it does NOT cancel
+        out of mean/stdev, and it directly distorted comparisons across
+        trades made at different BTC prices (the previous test).
+        """
+        model = sample_model(name="linear_v1")
+        for i, pnl in enumerate([100, -50, 150, 80, -30]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        sharpe_large_capital = calculate_sharpe_ratio(
+            db_session, model.id, capital=10_000.0, risk_free_rate=0.05
+        )
+        sharpe_small_capital = calculate_sharpe_ratio(
+            db_session, model.id, capital=100.0, risk_free_rate=0.05
+        )
+
+        assert sharpe_large_capital != pytest.approx(sharpe_small_capital)
+
+    def test_sharpe_ratio_rejects_invalid_capital(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Scenario: Invalid capital configuration is rejected
+
+        Given a capital configuration of zero or a negative value
+        When Sharpe ratio calculation is attempted
+        Then it raises a validation error
+        """
+        model = sample_model(name="linear_v1")
+        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
+        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 2))
+
+        with pytest.raises(ValueError, match="capital must be positive"):
+            calculate_sharpe_ratio(db_session, model.id, capital=0.0)
+
+        with pytest.raises(ValueError, match="capital must be positive"):
+            calculate_sharpe_ratio(db_session, model.id, capital=-500.0)
+
+    def test_max_drawdown_pct_rejects_invalid_capital(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Scenario: Invalid capital configuration is rejected, for drawdown too."""
+        model = sample_model(name="linear_v1")
+        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
+
+        with pytest.raises(ValueError, match="capital must be positive"):
+            calculate_max_drawdown_pct(db_session, model.id, capital=0.0)
+
+    def test_max_drawdown_pct_computed_from_capital_based_equity_curve(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Scenario: Drawdown is calculated from a capital-based equity curve,
+        as a percentage
+
+        Given a sequence of gains, losses, and inactive (zero-return) days
+        When maximum drawdown is calculated
+        Then the equity curve starts at the configured capital and
+        accumulates PnL
+        And drawdown is reported as a percentage of the equity curve's
+        running peak, not a raw dollar amount
+        """
+        model = sample_model(name="linear_v1")
+
+        # Equity curve starting at capital=1000: 1000 -> 1200 (peak) ->
+        # 1200 (inactive day, pnl=0) -> 900 (trough) -> 950
+        for i, pnl in enumerate([200, 0, -300, 50]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        dollar_dd = calculate_max_drawdown(db_session, model.id)
+        pct_dd = calculate_max_drawdown_pct(db_session, model.id, capital=1000.0)
+
+        # Dollar drawdown: trough 900 vs peak 1200 => -300 (unchanged by this issue)
+        assert dollar_dd == -300.0
+
+        # Percentage drawdown: (900 - 1200) / 1200 * 100 = -25%
+        assert pct_dd == pytest.approx(-25.0)
+
+    def test_max_drawdown_pct_returns_none_with_no_data(self, db_session, sample_model):
+        model = sample_model(name="linear_v1")
+
+        assert calculate_max_drawdown_pct(db_session, model.id) is None
+
+    def test_get_all_models_metrics_includes_capital_normalized_fields(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Scenario: Capital normalization is applied consistently across metrics
+
+        Given the same configured capital value
+        When PnL, Sharpe ratio, and drawdown are calculated for the same
+        evaluated predictions
+        Then all three use that same capital base with no discrepancy
+        between them
+        """
+        model = sample_model(name="linear_v1")
+        for i, pnl in enumerate([200, 0, -300, 50]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                pnl_simulated=Decimal(str(pnl)),
+            )
+
+        metrics = get_all_models_metrics(db_session, capital=1000.0)
+        m1 = next(m for m in metrics if m["id"] == model.id)
+
+        assert m1["max_drawdown"] == -300.0
+        assert m1["max_drawdown_pct"] == pytest.approx(-25.0, abs=0.01)
+        assert m1["sharpe_ratio"] == pytest.approx(
+            calculate_sharpe_ratio(db_session, model.id, capital=1000.0), abs=0.01
+        )

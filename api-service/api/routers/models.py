@@ -142,7 +142,8 @@ async def models_metrics_api(
                     "total_pnl": 1200.50,
                     "win_rate": 0.60,
                     "sharpe_ratio": 1.25,
-                    "max_drawdown": -450.00
+                    "max_drawdown": -450.00,
+                    "max_drawdown_pct": -4.50
                 },
                 ...
             ],
