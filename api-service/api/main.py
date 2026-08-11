@@ -15,6 +15,7 @@ from api.routers.prices import router as prices_router
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
+from shared.utils import DEFAULT_TIMEFRAME
 
 app = FastAPI(title="BTC Predictor", version="0.1.0")
 app.include_router(router)
@@ -45,9 +46,10 @@ async def dashboard(
         db: Database session
         timeframe: Optional filter for timeframe ('1d', '1w'). Defaults to '1d' if None.
     """
-    # Default to daily predictions if no timeframe specified
+    # Default timeframe if none specified -- shared across every metrics
+    # endpoint so daily and weekly results are never silently combined.
     if timeframe is None:
-        timeframe = "1d"
+        timeframe = DEFAULT_TIMEFRAME
 
     # Fetch evaluated predictions filtered by timeframe
     predictions_data = get_evaluated_predictions(session=db, timeframe=timeframe)
@@ -71,8 +73,8 @@ async def dashboard(
         for p in predictions_data
     ]
 
-    # Fetch strategy metrics
-    strategies = get_all_strategies_metrics(db)
+    # Fetch strategy metrics for the same timeframe as the predictions above
+    strategies = get_all_strategies_metrics(db, timeframe=timeframe)
 
     return templates.TemplateResponse(
         request=request,

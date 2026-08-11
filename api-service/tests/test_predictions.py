@@ -921,3 +921,104 @@ async def test_timeframe_filter_with_date_range(
         assert pred["timeframe"] == "1w"
         pred_date = date.fromisoformat(pred["predicted_for"])
         assert date.fromisoformat(from_date) <= pred_date <= date.fromisoformat(to_date)
+
+
+# ============================================================================
+# Gherkin scenarios: /pnl and /strategies respect timeframe (issue #67)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_total_pnl_does_not_mix_timeframes(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Scenario: Total PnL does not mix timeframes
+
+    Given a model has daily and weekly PnL records
+    When total PnL is requested for one timeframe
+    Then the returned value contains only records from that timeframe
+    """
+    # 5 daily predictions x $1200 = $6000
+    response_daily = await client.get("/api/predictions/pnl?timeframe=1d")
+    assert response_daily.status_code == 200
+    assert response_daily.json()["total_pnl"] == 6000.0
+    assert response_daily.json()["evaluated_predictions"] == 5
+
+    # 3 weekly predictions x $2000 = $6000
+    response_weekly = await client.get("/api/predictions/pnl?timeframe=1w")
+    assert response_weekly.status_code == 200
+    assert response_weekly.json()["total_pnl"] == 6000.0
+    assert response_weekly.json()["evaluated_predictions"] == 3
+
+
+@pytest.mark.asyncio
+async def test_total_pnl_missing_timeframe_applies_default(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Scenario: Missing timeframe applies the documented default
+
+    Given a metrics request does not specify a timeframe
+    When the request is processed
+    Then the API applies DEFAULT_TIMEFRAME ("1d")
+    And it does not silently combine daily and weekly predictions
+    """
+    response = await client.get("/api/predictions/pnl")
+
+    assert response.status_code == 200
+    # Same result as explicitly requesting timeframe=1d, NOT 6000+6000=12000
+    assert response.json()["total_pnl"] == 6000.0
+    assert response.json()["evaluated_predictions"] == 5
+
+
+@pytest.mark.asyncio
+async def test_total_pnl_invalid_timeframe_is_rejected(client: AsyncClient) -> None:
+    """
+    Scenario: Invalid timeframe is rejected
+
+    Given a client requests /pnl with an unsupported timeframe value
+    When the endpoint processes the request
+    Then it returns a validation error
+    """
+    response = await client.get("/api/predictions/pnl?timeframe=1y")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_strategies_does_not_mix_timeframes(
+    client: AsyncClient,
+    db_session: Session,
+    sample_predictions_with_timeframes,
+):
+    """
+    Given a model has daily and weekly PnL records
+    When strategy metrics are requested for one timeframe
+    Then trade_count reflects only that timeframe
+    """
+    response_daily = await client.get("/api/predictions/strategies?timeframe=1d")
+    assert response_daily.status_code == 200
+    simple_daily = next(
+        s for s in response_daily.json()["strategies"] if s["name"] == "simple"
+    )
+    assert simple_daily["trade_count"] == 5
+
+    response_weekly = await client.get("/api/predictions/strategies?timeframe=1w")
+    assert response_weekly.status_code == 200
+    simple_weekly = next(
+        s for s in response_weekly.json()["strategies"] if s["name"] == "simple"
+    )
+    assert simple_weekly["trade_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_strategies_invalid_timeframe_is_rejected(client: AsyncClient) -> None:
+    """Scenario: Invalid timeframe is rejected, for /strategies too."""
+    response = await client.get("/api/predictions/strategies?timeframe=bogus")
+
+    assert response.status_code == 422

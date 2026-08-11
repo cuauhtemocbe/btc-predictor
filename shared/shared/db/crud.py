@@ -62,6 +62,7 @@ async def get_evaluated_predictions_async(
     session: AsyncSession,
     from_date: date | None = None,
     to_date: date | None = None,
+    timeframe: str | None = None,
 ) -> list[Prediction]:
     """
     Async version of get_evaluated_predictions.
@@ -72,6 +73,7 @@ async def get_evaluated_predictions_async(
         session: SQLAlchemy async database session
         from_date: Optional start date filter (inclusive)
         to_date: Optional end date filter (inclusive)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w')
 
     Returns:
         List of Prediction objects with model relationship loaded,
@@ -88,6 +90,8 @@ async def get_evaluated_predictions_async(
         query = query.where(Prediction.predicted_for >= from_date)
     if to_date:
         query = query.where(Prediction.predicted_for <= to_date)
+    if timeframe:
+        query = query.where(Prediction.timeframe == timeframe)
 
     # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())

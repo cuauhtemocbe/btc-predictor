@@ -119,12 +119,16 @@ def calculate_cumulative_pnl(
     return result
 
 
-def get_all_strategies_metrics(db: Session) -> list[dict[str, Any]]:
+def get_all_strategies_metrics(
+    db: Session, timeframe: str | None = None
+) -> list[dict[str, Any]]:
     """
     Calculate metrics for all 4 PnL strategies.
 
     Args:
         db: Database session
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together in one series.
 
     Returns:
         List of dicts, one per strategy with name and metrics
@@ -137,7 +141,10 @@ def get_all_strategies_metrics(db: Session) -> list[dict[str, Any]]:
     ]
 
     # Fetch all predictions (will reuse for all strategies)
-    predictions = db.query(Prediction).order_by(Prediction.predicted_for).all()
+    query = db.query(Prediction)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
+    predictions = query.order_by(Prediction.predicted_for).all()
 
     results = []
     for strategy in strategies:

@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from shared.db.database import get_db
-from shared.utils import get_all_models_metrics, get_cumulative_pnl
+from shared.utils import DEFAULT_TIMEFRAME, get_all_models_metrics, get_cumulative_pnl
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -38,6 +38,11 @@ async def models_dashboard(
     request: Request,
     start_date: date | None = Query(None, description="Start date filter (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="End date filter (YYYY-MM-DD)"),
+    timeframe: str = Query(
+        default=DEFAULT_TIMEFRAME,
+        description="Timeframe filter: '1h', '1d', or '1w'",
+        pattern="^(1h|1d|1w)$",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -47,13 +52,17 @@ async def models_dashboard(
         request: FastAPI request object
         start_date: Optional start date for filtering metrics
         end_date: Optional end date for filtering metrics
+        timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
+            daily and weekly metrics are never silently combined
         db: Database session
 
     Returns:
         HTML template with model comparison table and chart
     """
     # Get metrics for all models
-    models_metrics = get_all_models_metrics(db, start_date, end_date)
+    models_metrics = get_all_models_metrics(
+        db, start_date, end_date, timeframe=timeframe
+    )
 
     # Identify best performing model (highest Total PnL)
     best_model_id = None
@@ -68,7 +77,9 @@ async def models_dashboard(
     for model_metrics in models_metrics:
         model_id = model_metrics["id"]
         model_name = model_metrics["name"]
-        cumulative = get_cumulative_pnl(db, model_id, start_date, end_date)
+        cumulative = get_cumulative_pnl(
+            db, model_id, start_date, end_date, timeframe=timeframe
+        )
         daily_pnl[model_name] = cumulative
 
     return templates.TemplateResponse(
@@ -80,6 +91,7 @@ async def models_dashboard(
             "daily_pnl": daily_pnl,
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
+            "timeframe": timeframe,
         },
     )
 
@@ -93,6 +105,11 @@ async def models_metrics_api(
         description="PnL column to use",
         pattern="^(pnl_simulated|pnl_long_short|pnl_threshold|pnl_realistic)$",
     ),
+    timeframe: str = Query(
+        default=DEFAULT_TIMEFRAME,
+        description="Timeframe filter: '1h', '1d', or '1w'",
+        pattern="^(1h|1d|1w)$",
+    ),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -105,6 +122,8 @@ async def models_metrics_api(
         start_date: Optional start date for filtering metrics
         end_date: Optional end date for filtering metrics
         pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
+            daily and weekly metrics are never silently combined
         db: Database session
 
     Returns:
@@ -137,14 +156,18 @@ async def models_metrics_api(
         }
     """
     # Get metrics for all models
-    models_metrics = get_all_models_metrics(db, start_date, end_date, pnl_column)
+    models_metrics = get_all_models_metrics(
+        db, start_date, end_date, pnl_column, timeframe
+    )
 
     # Get daily cumulative PnL for all models
     daily_pnl = {}
     for model_metrics in models_metrics:
         model_id = model_metrics["id"]
         model_name = model_metrics["name"]
-        cumulative = get_cumulative_pnl(db, model_id, start_date, end_date, pnl_column)
+        cumulative = get_cumulative_pnl(
+            db, model_id, start_date, end_date, pnl_column, timeframe
+        )
         daily_pnl[model_name] = cumulative
 
     # Convert datetime to ISO format for JSON serialization
@@ -159,5 +182,6 @@ async def models_metrics_api(
             "start_date": start_date.isoformat() if start_date else None,
             "end_date": end_date.isoformat() if end_date else None,
             "pnl_column": pnl_column,
+            "timeframe": timeframe,
         },
     }
