@@ -7,7 +7,7 @@ Covers Gherkin acceptance criteria scenarios from US-022:
 3. Direction correctness calculation
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -158,6 +158,45 @@ class TestFetchActualPrice:
         price = evaluator.fetch_actual_price(db_session, today)
 
         assert price is None
+
+    def test_fetches_8am_candle_with_4hour_granularity(
+        self, db_session: Session
+    ) -> None:
+        """
+        With 4-hour candles there is no exact 7:00:00 timestamp, so the
+        evaluator must fall back to the first candle at or after 7am --
+        the same range-based rule as workers/daily/evaluator.py.
+        """
+        target_date = date(2026, 5, 24)
+
+        # 4-hour candles: 0am, 4am, 8am, 12pm, 4pm, 8pm -- none at exactly 7am
+        candles = [
+            datetime(2026, 5, 24, 0, 0, tzinfo=UTC),
+            datetime(2026, 5, 24, 4, 0, tzinfo=UTC),
+            datetime(2026, 5, 24, 8, 0, tzinfo=UTC),  # should be selected
+            datetime(2026, 5, 24, 12, 0, tzinfo=UTC),
+            datetime(2026, 5, 24, 16, 0, tzinfo=UTC),
+            datetime(2026, 5, 24, 20, 0, tzinfo=UTC),
+        ]
+
+        for i, timestamp in enumerate(candles):
+            price = Decimal("95000.00") + Decimal(i * 100)
+            db_session.add(
+                BtcPrice(
+                    timestamp=timestamp,
+                    open=price,
+                    high=price,
+                    low=price,
+                    close=price,
+                    volume=Decimal("0"),
+                    source="coingecko",
+                )
+            )
+        db_session.commit()
+
+        result = evaluator.fetch_actual_price(db_session, target_date)
+
+        assert result == Decimal("95200.00")  # 8am candle
 
 
 class TestCalculateDirectionCorrect:

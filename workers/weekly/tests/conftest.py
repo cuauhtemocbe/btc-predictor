@@ -87,13 +87,14 @@ def sample_trained_model(
 
     # Serialize and save to database
     model_record = Model(
-        name="linear_v1",
+        name="linear_weekly_v1",
         version="1.0.0",
-        params={"window_days": 30},
+        params={"window_days": 30, "horizon_days": 7},
         artifact=lr_model.serialize(),
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
         train_to=date.today() - timedelta(days=1),
+        timeframe="1w",
         is_active=True,
     )
 

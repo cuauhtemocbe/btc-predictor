@@ -3,7 +3,8 @@ Weekly cron job orchestration.
 
 This job runs every Monday and orchestrates:
 1. Evaluator: Evaluate prediction from 7 days ago (weekly prediction)
-2. Predictor: Generate prediction for 7 days ahead
+2. Trainer: Train/retrain the dedicated 7-day-horizon model
+3. Predictor: Generate prediction for 7 days ahead
 
 Entry point: python -m workers.weekly
 Railway cron: 0 7 * * 1 (Mondays at 7am UTC)
@@ -12,7 +13,7 @@ Railway cron: 0 7 * * 1 (Mondays at 7am UTC)
 import logging
 import sys
 
-from workers.weekly import evaluator, predictor
+from workers.weekly import evaluator, predictor, trainer
 
 # Configure logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ def main() -> int:
     """
     Main entry point for the weekly job.
 
-    Runs evaluator → predictor in sequence.
+    Runs evaluator → trainer → predictor in sequence.
 
     Returns:
         Exit code (0 = success, non-zero = failure)
@@ -41,10 +42,18 @@ def main() -> int:
 
     if evaluator_exit != 0:
         logger.error(f"Evaluator failed with exit code {evaluator_exit}")
-        logger.info("Continuing to predictor despite evaluator failure")
+        logger.info("Continuing to trainer despite evaluator failure")
 
-    # Step 2: Generate prediction for 7 days ahead
-    logger.info("Step 2: Running weekly predictor")
+    # Step 2: Train/retrain the 7-day-horizon model
+    logger.info("Step 2: Running weekly trainer")
+    trainer_exit = trainer.main()
+
+    if trainer_exit != 0:
+        logger.error(f"Trainer failed with exit code {trainer_exit}")
+        logger.info("Continuing to predictor despite trainer failure")
+
+    # Step 3: Generate prediction for 7 days ahead
+    logger.info("Step 3: Running weekly predictor")
     predictor_exit = predictor.main()
 
     if predictor_exit != 0:

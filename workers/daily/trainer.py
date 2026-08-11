@@ -208,20 +208,28 @@ def fetch_training_data(
 
 
 def create_sliding_windows(
-    prices: list[Decimal], window_days: int = 30
+    prices: list[Decimal], window_days: int = 30, horizon_days: int = 1
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """
     Create sliding window features and labels from price history.
 
-    For 60 days of prices with a 30-day window:
+    For 60 days of prices with a 30-day window and the default 1-day
+    horizon:
     - Sample 1: days 1-30 → predict day 31
     - Sample 2: days 2-31 → predict day 32
     - ...
     - Sample 30: days 30-59 → predict day 60
 
+    With horizon_days=7 (weekly training), each sample's target shifts 7
+    days past the end of its window instead of 1 -- e.g. days 1-30 predict
+    day 37. horizon_days=1 reproduces the original daily behavior exactly.
+
     Args:
         prices: List of close prices (oldest to newest)
         window_days: Size of sliding window
+        horizon_days: How many days past the end of the window the target
+            is. 1 = predict the very next day (daily). 7 = predict 7
+            calendar days after the window's last observed day (weekly).
 
     Returns:
         Tuple (X, y) where:
@@ -229,18 +237,19 @@ def create_sliding_windows(
         - y: Target vector of shape (n_samples,)
     """
     prices_float = [float(p) for p in prices]
-    n_samples = len(prices_float) - window_days
+    n_samples = len(prices_float) - window_days - horizon_days + 1
 
     X = np.zeros((n_samples, window_days))
     y = np.zeros(n_samples)
 
     for i in range(n_samples):
         X[i] = prices_float[i : i + window_days]
-        y[i] = prices_float[i + window_days]
+        y[i] = prices_float[i + window_days + horizon_days - 1]
 
     logger.info(
         f"Created {n_samples} training samples "
-        f"(feature shape: {X.shape}, target shape: {y.shape})"
+        f"(feature shape: {X.shape}, target shape: {y.shape}, "
+        f"horizon_days={horizon_days})"
     )
 
     return X, y
