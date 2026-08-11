@@ -1047,3 +1047,141 @@ class TestGetAllModelsMetrics:
         assert metrics[0]["predictions_count"] == 0
         assert metrics[0]["accuracy"] is None
         assert metrics[0]["total_pnl"] is None
+
+
+class TestMetricsRespectTimeframe:
+    """
+    Timeframe-separated performance metrics (issue #67).
+
+    A model can have both daily (1d) and weekly (1w) evaluated predictions
+    in the same date range; every metric function must be able to isolate
+    one timeframe instead of always mixing them.
+    """
+
+    def _seed_daily_and_weekly(self, sample_model, evaluated_prediction):
+        model = sample_model(name="linear_v1")
+
+        # Daily: 3 correct, 1 incorrect, total pnl = 100+100+100-50 = 250
+        for i in range(3):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                direction_correct=True,
+                pnl_simulated=Decimal("100.00"),
+                timeframe="1d",
+            )
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 4),
+            direction_correct=False,
+            pnl_simulated=Decimal("-50.00"),
+            timeframe="1d",
+        )
+
+        # Weekly: 1 correct, total pnl = 1000
+        evaluated_prediction(
+            model_id=model.id,
+            predicted_for=date(2024, 5, 8),
+            direction_correct=True,
+            pnl_simulated=Decimal("1000.00"),
+            timeframe="1w",
+        )
+
+        return model
+
+    def test_daily_metrics_include_only_daily_predictions(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Given a model has evaluated daily and weekly predictions in the
+        same date range
+        When daily metrics are requested for timeframe "1d"
+        Then accuracy, total PnL, and win rate use only daily predictions
+        """
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        assert calculate_accuracy(db_session, model.id, timeframe="1d") == 0.75
+        assert calculate_total_pnl(db_session, model.id, timeframe="1d") == 250.0
+        assert calculate_win_rate(db_session, model.id, timeframe="1d") == 0.75
+
+    def test_weekly_metrics_include_only_weekly_predictions(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Given the same mixed data
+        When weekly metrics are requested for timeframe "1w"
+        Then accuracy, total PnL, and win rate use only weekly predictions
+        """
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        assert calculate_accuracy(db_session, model.id, timeframe="1w") == 1.0
+        assert calculate_total_pnl(db_session, model.id, timeframe="1w") == 1000.0
+        assert calculate_win_rate(db_session, model.id, timeframe="1w") == 1.0
+
+    def test_missing_timeframe_mixes_both(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Without a timeframe filter, utils functions mix every timeframe --
+        the API layer is what applies DEFAULT_TIMEFRAME (see
+        api-service/tests), not these lower-level functions themselves.
+        """
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        assert calculate_total_pnl(db_session, model.id) == 1250.0  # 250 + 1000
+
+    def test_cumulative_pnl_does_not_mix_timeframes(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """
+        Scenario: Cumulative PnL does not mix timeframes
+
+        Given a model has daily and weekly PnL records
+        When cumulative PnL is requested for one timeframe
+        Then the returned series contains only records from that timeframe
+        """
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        daily_series = get_cumulative_pnl(db_session, model.id, timeframe="1d")
+        weekly_series = get_cumulative_pnl(db_session, model.id, timeframe="1w")
+
+        assert len(daily_series) == 4
+        assert daily_series[-1]["cumulative_pnl"] == 250.0
+
+        assert len(weekly_series) == 1
+        assert weekly_series[-1]["cumulative_pnl"] == 1000.0
+
+    def test_sharpe_and_drawdown_respect_timeframe(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """Sharpe ratio and max drawdown must also isolate one timeframe."""
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        # Sharpe needs >= 2 data points; daily has 4, weekly has only 1
+        daily_sharpe = calculate_sharpe_ratio(db_session, model.id, timeframe="1d")
+        weekly_sharpe = calculate_sharpe_ratio(db_session, model.id, timeframe="1w")
+        assert daily_sharpe is not None
+        assert weekly_sharpe is None  # insufficient data points for that timeframe
+
+        daily_dd = calculate_max_drawdown(db_session, model.id, timeframe="1d")
+        weekly_dd = calculate_max_drawdown(db_session, model.id, timeframe="1w")
+        assert daily_dd is not None
+        assert weekly_dd == 0.0  # single positive data point, no drawdown
+
+    def test_get_all_models_metrics_respects_timeframe(
+        self, db_session, sample_model, evaluated_prediction
+    ):
+        """get_all_models_metrics() must thread timeframe through every metric."""
+        model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
+
+        daily_metrics = get_all_models_metrics(db_session, timeframe="1d")
+        weekly_metrics = get_all_models_metrics(db_session, timeframe="1w")
+
+        m1_daily = next(m for m in daily_metrics if m["id"] == model.id)
+        m1_weekly = next(m for m in weekly_metrics if m["id"] == model.id)
+
+        assert m1_daily["predictions_count"] == 4
+        assert m1_daily["total_pnl"] == 250.0
+
+        assert m1_weekly["predictions_count"] == 1
+        assert m1_weekly["total_pnl"] == 1000.0

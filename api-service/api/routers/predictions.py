@@ -17,6 +17,7 @@ from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 from shared.db.models import Prediction
+from shared.utils import DEFAULT_TIMEFRAME
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 
@@ -92,16 +93,24 @@ async def get_prediction_history(
 
 @router.get("/pnl", response_model=PnlResponse)
 async def get_total_pnl(
+    timeframe: str = Query(
+        default=DEFAULT_TIMEFRAME,
+        description="Timeframe filter: '1h', '1d', or '1w'",
+        pattern="^(1h|1d|1w)$",
+    ),
     db: Session = Depends(get_db),
 ) -> PnlResponse:
     """
-    Get total accumulated profit/loss across all evaluated predictions.
+    Get total accumulated profit/loss across all evaluated predictions for
+    one timeframe.
 
     This endpoint aggregates the simulated PnL from all predictions that have
     been evaluated (actual_price IS NOT NULL). Useful for assessing overall
-    model profitability.
+    model profitability. Defaults to DEFAULT_TIMEFRAME so daily and weekly
+    PnL are never silently summed into one misleading figure.
 
     Args:
+        timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
         db: Database session (injected)
 
     Returns:
@@ -112,6 +121,7 @@ async def get_total_pnl(
     Examples:
         - GET /api/predictions/pnl
           Response: {"total_pnl": 12345.67, "evaluated_predictions": 30}
+        - GET /api/predictions/pnl?timeframe=1w
     """
     # Query for SUM(pnl_simulated) and COUNT(*) where pnl_simulated IS NOT NULL
     result = (
@@ -119,7 +129,10 @@ async def get_total_pnl(
             func.sum(Prediction.pnl_simulated),
             func.count(Prediction.id),
         )
-        .filter(Prediction.pnl_simulated.isnot(None))
+        .filter(
+            Prediction.pnl_simulated.isnot(None),
+            Prediction.timeframe == timeframe,
+        )
         .first()
     )
 
@@ -135,16 +148,23 @@ async def get_total_pnl(
 
 @router.get("/strategies", response_model=StrategiesResponse)
 async def get_strategies_comparison(
+    timeframe: str = Query(
+        default=DEFAULT_TIMEFRAME,
+        description="Timeframe filter: '1h', '1d', or '1w'",
+        pattern="^(1h|1d|1w)$",
+    ),
     db: Session = Depends(get_db),
 ) -> StrategiesResponse:
     """
-    Get performance metrics for all trading strategies.
+    Get performance metrics for all trading strategies, for one timeframe.
 
     Returns aggregate metrics (Total PnL, Win Rate, Sharpe Ratio, etc.) and
     cumulative PnL time series for all 4 strategies: Simple, Long/Short,
-    Threshold, and Realistic.
+    Threshold, and Realistic. Defaults to DEFAULT_TIMEFRAME so daily and
+    weekly results are never silently combined.
 
     Args:
+        timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
         db: Database session (injected)
 
     Returns:
@@ -173,7 +193,7 @@ async def get_strategies_comparison(
               ]
           }
     """
-    strategies_data = get_all_strategies_metrics(db)
+    strategies_data = get_all_strategies_metrics(db, timeframe=timeframe)
 
     # Convert to Pydantic models
     strategies = [
