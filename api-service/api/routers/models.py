@@ -88,7 +88,11 @@ async def models_dashboard(
 async def models_metrics_api(
     start_date: date | None = Query(None, description="Start date filter (YYYY-MM-DD)"),
     end_date: date | None = Query(None, description="End date filter (YYYY-MM-DD)"),
-    pnl_column: str = Query("pnl_simulated", description="PnL column to use"),
+    pnl_column: str = Query(
+        "pnl_simulated",
+        description="PnL column to use",
+        pattern="^(pnl_simulated|pnl_long_short|pnl_threshold|pnl_realistic)$",
+    ),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """

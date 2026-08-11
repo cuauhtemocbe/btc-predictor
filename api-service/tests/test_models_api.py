@@ -420,6 +420,23 @@ async def test_models_metrics_api_returns_json(
 
 
 @pytest.mark.asyncio
+async def test_models_metrics_api_rejects_unsupported_pnl_column(
+    client: AsyncClient, db_session: Session, sample_models_with_predictions
+):
+    """
+    Scenario: Unsupported metric columns are rejected
+
+    Given a request to /models/metrics contains an unsupported pnl_column value
+    When the endpoint processes the request
+    Then it returns a validation error
+    And it does not query or aggregate predictions
+    """
+    response = await client.get("/models/metrics?pnl_column=artifact")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_models_metrics_api_with_date_filter(
     client: AsyncClient, db_session: Session, sample_models_with_predictions
 ):

@@ -1,8 +1,10 @@
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.routers import router
@@ -83,5 +85,19 @@ async def dashboard(
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(db: Session = Depends(get_db)):
+    """
+    Report API and database health.
+
+    Returns 200 when the database is reachable, 503 otherwise. Railway's
+    container HEALTHCHECK (see Dockerfile) probes this endpoint, so a
+    non-2xx response here can trigger a container restart.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "database": "unreachable"},
+        )
+    return {"status": "ok", "database": "reachable"}
