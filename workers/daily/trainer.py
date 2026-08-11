@@ -31,7 +31,7 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shared.db.crud import activate_model as crud_activate_model
@@ -246,33 +246,6 @@ def create_sliding_windows(
     return X, y
 
 
-def deactivate_existing_models(session: Session, model_name: str) -> int:
-    """
-    Deactivate all existing models with the given name.
-
-    Args:
-        session: Database session
-        model_name: Name of models to deactivate
-
-    Returns:
-        Number of models deactivated
-    """
-    stmt = (
-        update(Model)
-        .where(Model.name == model_name)
-        .where(Model.is_active == True)  # noqa: E712
-        .values(is_active=False)
-    )
-    result = session.execute(stmt)
-    count = result.rowcount
-    session.commit()
-
-    if count > 0:
-        logger.info(f"Deactivated {count} existing model(s) named '{model_name}'")
-
-    return count
-
-
 def save_model(
     session: Session,
     model_instance: LinearRegressionModel,
@@ -297,13 +270,13 @@ def save_model(
     Returns:
         Created Model record
     """
-    # Deactivate existing models with same name
-    deactivate_existing_models(session, model_name)
-
     # Serialize model
     model_artifact = model_instance.serialize()
 
-    # Create model record
+    # Create model record inactive first, then activate it atomically via
+    # crud.activate_model() -- the single mechanism that deactivates any
+    # other active "1d" model and activates this one in one transaction,
+    # guarded by ix_models_one_active_per_timeframe.
     model_record = Model(
         name=model_name,
         version=version,
@@ -312,12 +285,15 @@ def save_model(
         trained_at=datetime.now(UTC),
         train_from=train_from,
         train_to=train_to,
-        is_active=True,
+        timeframe="1d",
+        is_active=False,
     )
 
     session.add(model_record)
     session.commit()
     session.refresh(model_record)
+
+    crud_activate_model(session, model_record.id)
 
     logger.info(
         f"Saved model {model_name} v{version} as active "
@@ -625,6 +601,7 @@ def train_all_models(
             trained_at=datetime.now(UTC),
             train_from=train_from,
             train_to=train_to,
+            timeframe="1d",
             is_active=False,  # All start inactive
         )
 
@@ -647,9 +624,8 @@ def train_all_models(
         f"Best model: {best_model.name} with {best_error:.2f}% validation error"
     )
 
-    # Activate best model
+    # Activate best model (commits internally, scoped to its own timeframe)
     crud_activate_model(session, best_model.id)
-    session.commit()
 
     logger.info(f"✓ Activated {best_model.name}")
 

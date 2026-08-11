@@ -63,9 +63,8 @@ def main() -> int:
     session = SessionLocal()
 
     try:
-        # Activate the model
+        # Activate the model (commits internally, scoped to its timeframe)
         activated_model = activate_model(session, model_id)
-        session.commit()
 
         logger.info("=" * 70)
         logger.info("✓ SUCCESS")

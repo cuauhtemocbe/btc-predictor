@@ -536,9 +536,13 @@ def test_deactivate_all_models(db_session, sample_model_artifact):
 
 
 def test_activate_model_success(db_session, sample_model_artifact):
-    """Test that activate_model activates the target and deactivates others."""
-    # Create 3 models, one active
-    model1 = Model(
+    """
+    Test that activate_model activates the target and deactivates the
+    previous active version of the SAME name -- but leaves a different-
+    named active model untouched (multi-model mode, US-025).
+    """
+    # Two versions of "linear_v1", the first one currently active
+    linear_v1 = Model(
         name="linear_v1",
         version="1.0.0",
         params={},
@@ -549,9 +553,9 @@ def test_activate_model_success(db_session, sample_model_artifact):
         is_active=True,  # Currently active
     )
 
-    model2 = Model(
-        name="lstm_v1",
-        version="1.0.0",
+    linear_v2 = Model(
+        name="linear_v1",
+        version="2.0.0",
         params={},
         artifact=sample_model_artifact,
         trained_at=datetime.now(UTC),
@@ -560,7 +564,8 @@ def test_activate_model_success(db_session, sample_model_artifact):
         is_active=False,
     )
 
-    model3 = Model(
+    # A different-named model, also active -- must not be touched
+    xgboost_v1 = Model(
         name="xgboost_v1",
         version="1.0.0",
         params={},
@@ -568,29 +573,86 @@ def test_activate_model_success(db_session, sample_model_artifact):
         trained_at=datetime.now(UTC),
         train_from=date(2024, 1, 1),
         train_to=date(2024, 5, 1),
+        is_active=True,
+    )
+
+    db_session.add_all([linear_v1, linear_v2, xgboost_v1])
+    db_session.commit()
+    db_session.refresh(linear_v2)  # Get the ID
+
+    # Activate the newer "linear_v1" version
+    activated = activate_model(db_session, linear_v2.id)
+
+    # Verify the new version is activated
+    assert activated.id == linear_v2.id
+    assert activated.is_active is True
+
+    # Verify the previous "linear_v1" version was deactivated
+    db_session.refresh(linear_v1)
+    assert linear_v1.is_active is False
+
+    # Verify the different-named model is still active (multi-model mode)
+    db_session.refresh(xgboost_v1)
+    assert xgboost_v1.is_active is True
+
+    # Exactly one active version of "linear_v1", plus the untouched xgboost
+    all_models = get_all_models(db_session)
+    active_models = [m for m in all_models if m.is_active]
+    assert len(active_models) == 2
+    assert {m.name for m in active_models} == {"linear_v1", "xgboost_v1"}
+
+
+def test_activate_model_rolls_back_on_commit_failure(
+    db_session, sample_model_artifact, monkeypatch
+):
+    """
+    If the commit inside activate_model() fails, the previous active model
+    must remain active -- no partial state (issue #66 atomicity guarantee).
+    """
+    old_active = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,
+    )
+    new_version = Model(
+        name="linear_v1",
+        version="2.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
         is_active=False,
     )
 
-    db_session.add_all([model1, model2, model3])
+    db_session.add_all([old_active, new_version])
     db_session.commit()
-    db_session.refresh(model2)  # Get the ID
+    db_session.refresh(new_version)
 
-    # Activate model2
-    activated = activate_model(db_session, model2.id)
-    db_session.commit()
+    def failing_commit():
+        raise RuntimeError("simulated persistence failure")
 
-    # Verify model2 is activated
-    assert activated.id == model2.id
-    assert activated.is_active is True
+    monkeypatch.setattr(db_session, "commit", failing_commit)
 
-    # Verify only model2 is active
-    active = get_active_model(db_session)
-    assert active.id == model2.id
+    with pytest.raises(RuntimeError, match="simulated persistence failure"):
+        activate_model(db_session, new_version.id)
 
-    # Verify model1 and model3 are deactivated
-    all_models = get_all_models(db_session)
-    active_count = sum(1 for m in all_models if m.is_active)
-    assert active_count == 1, "Only one model should be active"
+    # Restore real commit so the assertions below (and the fixture teardown)
+    # can talk to the database again. activate_model() already rolled back
+    # internally on failure; the conftest savepoint listener re-establishes
+    # a fresh savepoint automatically once that rollback completes.
+    monkeypatch.undo()
+
+    db_session.refresh(old_active)
+    db_session.refresh(new_version)
+
+    assert old_active.is_active is True, "Previous active model must remain active"
+    assert new_version.is_active is False, "Failed activation must not persist"
 
 
 def test_activate_model_raises_error_for_nonexistent_id(
@@ -617,13 +679,15 @@ def test_activate_model_raises_error_for_nonexistent_id(
         activate_model(db_session, model_id=9999)
 
 
-def test_activate_model_only_one_active_at_a_time(db_session, sample_model_artifact):
+def test_activate_model_keeps_different_names_independently_active(
+    db_session, sample_model_artifact
+):
     """
-    CRITICAL TEST: Verify only ONE model is active after activation.
-
-    This is the core requirement of US-024.
+    Activating models with different names accumulates active models --
+    this is what powers multi-model prediction mode (US-025). Only
+    activating a NEW VERSION of the SAME name replaces the previous one.
     """
-    # Create 4 models (all 4 types)
+    # Create 4 models (all different types/names)
     models = []
     for name in ["linear", "lstm", "xgboost", "arima"]:
         model = Model(
@@ -641,15 +705,55 @@ def test_activate_model_only_one_active_at_a_time(db_session, sample_model_artif
     db_session.add_all(models)
     db_session.commit()
 
-    # Activate each model sequentially, verify only one active each time
-    for target_model in models:
+    # Activate each model sequentially; since all four have different
+    # names, each activation must NOT deactivate the previously activated
+    # ones.
+    for i, target_model in enumerate(models, start=1):
         db_session.refresh(target_model)
         activate_model(db_session, target_model.id)
-        db_session.commit()
 
-        # Count active models
         all_models = get_all_models(db_session)
         active_models = [m for m in all_models if m.is_active]
 
-        assert len(active_models) == 1, "Only ONE model should be active"
-        assert active_models[0].id == target_model.id
+        assert len(active_models) == i
+        assert target_model.id in {m.id for m in active_models}
+
+
+def test_activate_model_only_one_active_version_per_name(
+    db_session, sample_model_artifact
+):
+    """
+    CRITICAL TEST: activating a new version of the SAME model name leaves
+    exactly one active version of that name (the atomicity guarantee
+    behind issue #66), even though other model names may also be active.
+    """
+    versions = []
+    for version in ["1.0.0", "2.0.0", "3.0.0"]:
+        model = Model(
+            name="linear_v1",
+            version=version,
+            params={},
+            artifact=sample_model_artifact,
+            trained_at=datetime.now(UTC),
+            train_from=date(2024, 1, 1),
+            train_to=date(2024, 5, 1),
+            is_active=False,
+        )
+        versions.append(model)
+
+    db_session.add_all(versions)
+    db_session.commit()
+
+    for target_model in versions:
+        db_session.refresh(target_model)
+        activate_model(db_session, target_model.id)
+
+        all_models = get_all_models(db_session)
+        active_linear_versions = [
+            m for m in all_models if m.name == "linear_v1" and m.is_active
+        ]
+
+        assert len(active_linear_versions) == 1, (
+            "Only one version of linear_v1 should be active"
+        )
+        assert active_linear_versions[0].id == target_model.id

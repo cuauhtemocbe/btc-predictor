@@ -329,6 +329,102 @@ def test_check_constraint_violation(db_session, sample_model_artifact):
     assert "valid_training_period" in str(exc_info.value)
 
 
+def test_one_active_version_per_name_timeframe_constraint(
+    db_session, sample_model_artifact
+):
+    """
+    Test partial unique index ix_models_one_active_version_per_name_timeframe:
+    two active rows with the same (name, timeframe) must be rejected at the
+    database level, not just by application code (issue #66).
+    """
+    model1 = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        timeframe="1d",
+        is_active=True,
+    )
+
+    db_session.add(model1)
+    db_session.commit()
+
+    # A second "linear_v1"/"1d" version, also marked active, bypassing
+    # activate_model() entirely -- the constraint alone must reject this.
+    model2 = Model(
+        name="linear_v1",
+        version="2.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        timeframe="1d",
+        is_active=True,
+    )
+
+    db_session.add(model2)
+
+    with pytest.raises(IntegrityError) as exc_info:
+        db_session.commit()
+
+    assert "ix_models_one_active_version_per_name_timeframe" in str(exc_info.value)
+
+
+def test_active_version_constraint_allows_different_name_or_timeframe(
+    db_session, sample_model_artifact
+):
+    """
+    The partial unique index only blocks duplicates of the SAME
+    (name, timeframe). A different name (multi-model mode) or a different
+    timeframe (e.g. a '1w' model alongside a '1d' model) must both be
+    allowed active at the same time.
+    """
+    linear_1d = Model(
+        name="linear_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        timeframe="1d",
+        is_active=True,
+    )
+    xgboost_1d = Model(
+        name="xgboost_v1",
+        version="1.0.0",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        timeframe="1d",
+        is_active=True,
+    )
+    linear_1w = Model(
+        name="linear_v1",
+        version="1.0.0-weekly",
+        params={},
+        artifact=sample_model_artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        timeframe="1w",
+        is_active=True,
+    )
+
+    db_session.add_all([linear_1d, xgboost_1d, linear_1w])
+    db_session.commit()  # Must not raise
+
+    assert linear_1d.is_active is True
+    assert xgboost_1d.is_active is True
+    assert linear_1w.is_active is True
+
+
 def test_trained_at_not_null_constraint(db_session, sample_model_artifact):
     """
     MUTATION TEST: Verify trained_at is NOT NULL.
