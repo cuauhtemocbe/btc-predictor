@@ -37,7 +37,7 @@ class TestGetActiveModel:
 
     def test_no_active_model(self, db_session: Session) -> None:
         """Should raise ValueError when no active model exists."""
-        with pytest.raises(ValueError, match="No active model found"):
+        with pytest.raises(ValueError, match="No active weekly model found"):
             predictor.get_active_model(db_session)
 
 

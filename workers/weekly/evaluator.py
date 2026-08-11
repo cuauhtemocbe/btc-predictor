@@ -14,7 +14,7 @@ Runs: Every Monday (as part of weekly job orchestration)
 
 import logging
 import sys
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -71,7 +71,12 @@ def find_unevaluated_weekly_prediction(
 
 def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
     """
-    Fetch the 7am BTC close price for the given date.
+    Fetch the BTC close price for the given date at or after 7am UTC.
+
+    Uses the same range query as workers/daily/evaluator.py:fetch_actual_price()
+    for consistency: with 4-hour candles (0am, 4am, 8am, ...) this returns the
+    8am candle, since an exact-equality match against 7:00:00 almost never
+    exists in 4-hour data.
 
     Args:
         session: Database session
@@ -82,18 +87,31 @@ def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
     """
     # Construct 7am timestamp in UTC
     target_datetime = datetime.combine(target_date, time(7, 0), tzinfo=UTC)
+    # Next day at midnight (to exclude candles from the next day)
+    next_day = datetime.combine(target_date + timedelta(days=1), time(0, 0), tzinfo=UTC)
 
-    stmt = select(BtcPrice.close).where(BtcPrice.timestamp == target_datetime)
-    price = session.execute(stmt).scalar_one_or_none()
+    # Find first candle at or after 7am on target_date
+    stmt = (
+        select(BtcPrice.close, BtcPrice.timestamp)
+        .where(BtcPrice.timestamp >= target_datetime)
+        .where(BtcPrice.timestamp < next_day)
+        .order_by(BtcPrice.timestamp.asc())
+        .limit(1)
+    )
+    result = session.execute(stmt).first()
 
-    if price:
-        logger.info(f"Fetched actual price for {target_date} 7am: ${price}")
+    if result:
+        price, timestamp = result
+        logger.info(
+            f"Fetched actual price for {target_date}: ${price} (timestamp: {timestamp})"
+        )
+        return price
     else:
         logger.warning(
-            f"No price data available for {target_date} 7am (will retry next Monday)"
+            f"No price data available for {target_date} at/after 7am "
+            f"(will retry next Monday)"
         )
-
-    return price
+        return None
 
 
 def calculate_direction_correct(

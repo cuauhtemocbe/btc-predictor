@@ -377,3 +377,57 @@ class TestCreateSlidingWindows:
         assert X[-1, 0] == 52900
         assert X[-1, -1] == 53800
         assert y[-1] == 53900
+
+    def test_create_sliding_windows_horizon_days_default_matches_1_day_ahead(self):
+        """horizon_days defaults to 1, reproducing the original daily behavior."""
+        prices = [Decimal(50000 + i * 100) for i in range(40)]
+
+        X_default, y_default = create_sliding_windows(prices, window_days=10)
+        X_explicit, y_explicit = create_sliding_windows(
+            prices, window_days=10, horizon_days=1
+        )
+
+        assert X_default.shape == X_explicit.shape
+        assert (X_default == X_explicit).all()
+        assert (y_default == y_explicit).all()
+
+    def test_create_sliding_windows_seven_day_horizon(self):
+        """
+        Scenario: Training creates a seven-day-ahead target (issue #61)
+
+        Given chronological daily prices
+        When sliding windows are created with horizon_days=7
+        Then each target is 7 days past the end of its window, not 1
+        """
+        prices = [Decimal(50000 + i * 100) for i in range(40)]
+
+        X, y = create_sliding_windows(prices, window_days=10, horizon_days=7)
+
+        # 40 - 10 - 7 + 1 = 24 samples
+        assert X.shape == (24, 10)
+        assert y.shape == (24,)
+
+        # First sample: window is days 0-9 (prices 50000..50900), target is
+        # 7 days after day 9 -> day 16 (index 16, price 51600)
+        assert X[0, 0] == 50000
+        assert X[0, -1] == 50900
+        assert y[0] == 51600
+
+        # Last sample: window is days 23-32, target is day 39 (index 39,
+        # last price in the series)
+        assert X[-1, 0] == 52300
+        assert X[-1, -1] == 53200
+        assert y[-1] == 53900
+
+    def test_create_sliding_windows_minimum_data_for_one_sample(self):
+        """Exactly window_days + horizon_days prices yields exactly one sample."""
+        window_days, horizon_days = 10, 7
+        prices = [Decimal(50000 + i * 100) for i in range(window_days + horizon_days)]
+
+        X, y = create_sliding_windows(
+            prices, window_days=window_days, horizon_days=horizon_days
+        )
+
+        assert X.shape == (1, window_days)
+        assert y.shape == (1,)
+        assert y[0] == prices[-1]  # target is the very last (17th) price
