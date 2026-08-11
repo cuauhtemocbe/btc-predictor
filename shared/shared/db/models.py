@@ -20,9 +20,11 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     LargeBinary,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -89,13 +91,28 @@ class Model(Base):
 
     Stores serialized model artifacts (pickled scikit-learn models), training
     parameters, and metadata. Supports model versioning and rollback.
-    Only one model per name can be active at a time (enforced by application logic).
+    At most one active version per (name, timeframe) is allowed at a time,
+    enforced by the partial unique index
+    ix_models_one_active_version_per_name_timeframe -- not just application
+    logic. Different model names (e.g. "linear_v1" and "xgboost_v1") can be
+    active at the same time within the same timeframe; that's what powers
+    multi-model prediction mode (US-025).
     """
 
     __tablename__ = "models"
     __table_args__ = (
         UniqueConstraint("name", "version", name="unique_model_version"),
         CheckConstraint("train_to >= train_from", name="valid_training_period"),
+        CheckConstraint(
+            "timeframe IN ('1h', '1d', '1w')", name="valid_model_timeframe_values"
+        ),
+        Index(
+            "ix_models_one_active_version_per_name_timeframe",
+            "name",
+            "timeframe",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -133,11 +150,24 @@ class Model(Base):
         default=False,
         comment="Whether this model is currently active for predictions",
     )
+    timeframe: Mapped[str] = mapped_column(
+        String(2),
+        nullable=False,
+        default="1d",
+        comment=(
+            "Prediction horizon this model was trained for: '1h' (hourly), "
+            "'1d' (daily), '1w' (weekly). At most one active version per "
+            "(name, timeframe) is allowed at a time (enforced by "
+            "ix_models_one_active_version_per_name_timeframe); different "
+            "names can be active concurrently (multi-model mode)."
+        ),
+    )
 
     def __repr__(self) -> str:
         return (
             f"<Model(name={self.name}, version={self.version}, "
-            f"is_active={self.is_active}, trained_at={self.trained_at})>"
+            f"timeframe={self.timeframe}, is_active={self.is_active}, "
+            f"trained_at={self.trained_at})>"
         )
 
 

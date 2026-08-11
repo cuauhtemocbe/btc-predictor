@@ -98,7 +98,11 @@ def get_active_models(
     session: Session, multi_model: bool = False
 ) -> list[tuple[Model, BaseModel]]:
     """
-    Load active model(s) from the database.
+    Load active daily (timeframe='1d') model(s) from the database.
+
+    Scoped to timeframe='1d' so this never picks up the active weekly
+    model -- a '1d' and a '1w' model can be active at the same time (see
+    ix_models_one_active_per_timeframe).
 
     Args:
         session: Database session
@@ -110,7 +114,10 @@ def get_active_models(
     Raises:
         ValueError: If no active models found
     """
-    stmt = select(Model).where(Model.is_active == True)  # noqa: E712
+    stmt = select(Model).where(
+        Model.is_active == True,  # noqa: E712
+        Model.timeframe == "1d",
+    )
 
     if multi_model:
         # Fetch all active models
