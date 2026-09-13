@@ -87,4 +87,4 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser &&
 
 USER appuser
 # Default to daily worker (can be overridden in Railway)
-CMD ["python", "-m", "daily.main"]
+CMD ["python", "-m", "workers.daily"]

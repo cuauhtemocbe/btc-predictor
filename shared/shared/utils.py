@@ -14,8 +14,9 @@ Model Metrics Functions (for dashboard):
 - calculate_model_mape: Calculate MAPE from database predictions for a model
 - calculate_total_pnl: Calculate total PnL for a model
 - calculate_win_rate: Calculate % of positive PnL predictions for a model
-- calculate_sharpe_ratio: Calculate Sharpe ratio for a model
-- calculate_max_drawdown: Calculate maximum drawdown for a model
+- calculate_sharpe_ratio: Calculate Sharpe ratio, normalized by DEFAULT_CAPITAL
+- calculate_max_drawdown: Calculate maximum drawdown for a model, in dollars
+- calculate_max_drawdown_pct: Same, as a % of a capital-based equity curve
 - get_cumulative_pnl: Get daily cumulative PnL time series for a model
 - get_all_models_metrics: Get metrics for all models in one call
 """
@@ -27,6 +28,23 @@ from typing import Any
 import numpy as np
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+# Prediction.timeframe values, and the one used when a caller doesn't name
+# one explicitly. Applied consistently across every metric function below
+# and every API endpoint that doesn't require an explicit timeframe query
+# param -- see issue #67.
+SUPPORTED_TIMEFRAMES = ("1h", "1d", "1w")
+DEFAULT_TIMEFRAME = "1d"
+
+# Reference capital (in USDT) that risk-adjusted metrics (Sharpe ratio,
+# percentage drawdown) are normalized against. The stored pnl_* columns
+# stay as raw dollar deltas on an effective 1-BTC position -- changing
+# that would silently rescale every future prediction's stored PnL
+# relative to historical rows already in the database. Normalizing only
+# the *derived*, recomputed-on-read metrics below avoids that, while
+# still making returns/drawdown comparable across different BTC price
+# regimes instead of scaling with the trade's spot price -- see issue #72.
+DEFAULT_CAPITAL = 10_000.0
 
 
 def calculate_pnl(
@@ -304,6 +322,7 @@ def calculate_accuracy(
     model_id: int,
     start_date: date | None = None,
     end_date: date | None = None,
+    timeframe: str | None = None,
 ) -> float | None:
     """
     Calculate prediction accuracy for a model (% of correct direction predictions).
@@ -315,12 +334,16 @@ def calculate_accuracy(
         model_id: Model ID to calculate accuracy for
         start_date: Optional start date filter
         end_date: Optional end date filter
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            predictions across every timeframe are mixed together --
+            callers that want daily/weekly separated must pass this
+            explicitly (see DEFAULT_TIMEFRAME for the API-level default).
 
     Returns:
         Accuracy as decimal (0.0-1.0), or None if no evaluated predictions
 
     Examples:
-        >>> calculate_accuracy(db, model_id=1)
+        >>> calculate_accuracy(db, model_id=1, timeframe="1d")
         0.65  # 65% accuracy
     """
     from shared.db.models import Prediction
@@ -335,6 +358,8 @@ def calculate_accuracy(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Count total and correct predictions
     total_count = query.count()
@@ -352,6 +377,7 @@ def calculate_model_mape(
     model_id: int,
     start_date: date | None = None,
     end_date: date | None = None,
+    timeframe: str | None = None,
 ) -> float | None:
     """
     Calculate Mean Absolute Percentage Error (MAPE) for a model from database.
@@ -363,12 +389,14 @@ def calculate_model_mape(
         model_id: Model ID to calculate MAPE for
         start_date: Optional start date filter
         end_date: Optional end date filter
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together.
 
     Returns:
         MAPE as percentage (0-100 scale), or None if no evaluated predictions
 
     Examples:
-        >>> calculate_model_mape(db, model_id=1)
+        >>> calculate_model_mape(db, model_id=1, timeframe="1d")
         2.5  # 2.5% average error
     """
     from shared.db.models import Prediction
@@ -383,6 +411,8 @@ def calculate_model_mape(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Get all predictions
     predictions = query.all()
@@ -409,6 +439,7 @@ def calculate_total_pnl(
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
 ) -> float | None:
     """
     Calculate total PnL for a model (sum of all PnL values).
@@ -421,12 +452,14 @@ def calculate_total_pnl(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to sum (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together.
 
     Returns:
         Total PnL in USDT, or None if no evaluated predictions
 
     Examples:
-        >>> calculate_total_pnl(db, model_id=1)
+        >>> calculate_total_pnl(db, model_id=1, timeframe="1d")
         1200.50  # Total profit of $1,200.50
     """
     from shared.db.models import Prediction
@@ -441,6 +474,8 @@ def calculate_total_pnl(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Execute query
     result = query.scalar()
@@ -456,6 +491,7 @@ def calculate_win_rate(
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
 ) -> float | None:
     """
     Calculate win rate for a model (% of predictions with positive PnL).
@@ -468,12 +504,14 @@ def calculate_win_rate(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together.
 
     Returns:
         Win rate as decimal (0.0-1.0), or None if no evaluated predictions
 
     Examples:
-        >>> calculate_win_rate(db, model_id=1)
+        >>> calculate_win_rate(db, model_id=1, timeframe="1d")
         0.60  # 60% win rate
     """
     from shared.db.models import Prediction
@@ -488,6 +526,8 @@ def calculate_win_rate(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Count total and winning predictions
     total_count = query.count()
@@ -507,6 +547,8 @@ def calculate_sharpe_ratio(
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
     risk_free_rate: float = 0.0,
+    timeframe: str | None = None,
+    capital: float = DEFAULT_CAPITAL,
 ) -> float | None:
     """
     Calculate annualized Sharpe ratio for a model.
@@ -514,7 +556,13 @@ def calculate_sharpe_ratio(
     Sharpe Ratio = (MEAN(daily_returns) - risk_free_rate)
                    / STDEV(daily_returns) * sqrt(365)
 
-    Daily returns = pnl / price_at_prediction
+    Daily returns = pnl / capital
+
+    Returns are normalized by a fixed reference capital, not by each
+    trade's own price_at_prediction -- normalizing by spot price means
+    the same dollar PnL produces a smaller "return" as BTC's price rises
+    over time, distorting comparisons across trades made months apart
+    (issue #72).
 
     Args:
         db: Database session
@@ -523,14 +571,25 @@ def calculate_sharpe_ratio(
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
         risk_free_rate: Annual risk-free rate (default: 0.0)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together -- combining daily and
+            weekly returns would distort both the mean and the stdev.
+        capital: Reference capital each pnl value is normalized against
+            (default: DEFAULT_CAPITAL). Must be positive.
 
     Returns:
         Annualized Sharpe ratio, or None if insufficient data
 
+    Raises:
+        ValueError: If capital is zero or negative
+
     Examples:
-        >>> calculate_sharpe_ratio(db, model_id=1)
+        >>> calculate_sharpe_ratio(db, model_id=1, timeframe="1d")
         1.25  # Sharpe ratio of 1.25
     """
+    if capital <= 0:
+        raise ValueError(f"capital must be positive, got {capital}")
+
     from shared.db.models import Prediction
 
     # Base query
@@ -543,19 +602,20 @@ def calculate_sharpe_ratio(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Get all predictions
     predictions = query.order_by(Prediction.predicted_for).all()
     if len(predictions) < 2:
         return None  # Need at least 2 data points for stdev
 
-    # Calculate daily returns
+    # Calculate returns, normalized by the reference capital
     returns = []
     for pred in predictions:
         pnl = getattr(pred, pnl_column)
-        if pnl is not None and pred.price_at_prediction > 0:
-            daily_return = float(pnl) / float(pred.price_at_prediction)
-            returns.append(daily_return)
+        if pnl is not None:
+            returns.append(float(pnl) / capital)
 
     if len(returns) < 2:
         return None
@@ -579,6 +639,7 @@ def calculate_max_drawdown(
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
 ) -> float | None:
     """
     Calculate maximum drawdown for a model (largest cumulative loss).
@@ -591,12 +652,14 @@ def calculate_max_drawdown(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together in one cumulative series.
 
     Returns:
         Maximum drawdown in USDT (negative value), or None if no data
 
     Examples:
-        >>> calculate_max_drawdown(db, model_id=1)
+        >>> calculate_max_drawdown(db, model_id=1, timeframe="1d")
         -450.0  # Max drawdown of -$450
     """
     from shared.db.models import Prediction
@@ -611,6 +674,8 @@ def calculate_max_drawdown(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Get all predictions ordered by date
     predictions = query.order_by(Prediction.predicted_for).all()
@@ -639,12 +704,98 @@ def calculate_max_drawdown(
     return max_drawdown
 
 
+def calculate_max_drawdown_pct(
+    db: Session,
+    model_id: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
+    capital: float = DEFAULT_CAPITAL,
+) -> float | None:
+    """
+    Calculate maximum drawdown for a model as a percentage of an equity
+    curve, alongside (not replacing) calculate_max_drawdown()'s dollar
+    figure.
+
+    The equity curve starts at `capital` and accumulates pnl_column, so a
+    $500 drawdown means something very different depending on how much
+    capital was actually at risk -- calculate_max_drawdown() alone can't
+    express that (issue #72).
+
+    Max Drawdown % = MIN((equity - running_max(equity)) / running_max(equity)) * 100
+
+    Args:
+        db: Database session
+        model_id: Model ID to calculate max drawdown for
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together in one equity curve.
+        capital: Starting capital the equity curve is built from
+            (default: DEFAULT_CAPITAL). Must be positive.
+
+    Returns:
+        Maximum drawdown as a negative percentage (e.g. -4.5 for a 4.5%
+        drawdown), or None if no data
+
+    Raises:
+        ValueError: If capital is zero or negative
+
+    Examples:
+        >>> calculate_max_drawdown_pct(db, model_id=1, timeframe="1d")
+        -4.5  # 4.5% drawdown from peak equity
+    """
+    if capital <= 0:
+        raise ValueError(f"capital must be positive, got {capital}")
+
+    from shared.db.models import Prediction
+
+    # Base query
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    # Apply date filters
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
+
+    # Get all predictions ordered by date
+    predictions = query.order_by(Prediction.predicted_for).all()
+    if not predictions:
+        return None
+
+    # Build the equity curve, starting from the reference capital
+    equity_curve = []
+    equity = capital
+    for pred in predictions:
+        pnl = getattr(pred, pnl_column)
+        if pnl is not None:
+            equity += float(pnl)
+            equity_curve.append(equity)
+
+    if not equity_curve:
+        return None
+
+    equity_arr = np.array(equity_curve)
+    running_max = np.maximum.accumulate(equity_arr)
+    drawdown_pct = (equity_arr - running_max) / running_max * 100
+
+    return float(np.min(drawdown_pct))
+
+
 def get_cumulative_pnl(
     db: Session,
     model_id: int,
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Get daily cumulative PnL time series for a model (for chart visualization).
@@ -657,12 +808,14 @@ def get_cumulative_pnl(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            daily and weekly records are combined into one series.
 
     Returns:
         List of {"date": "YYYY-MM-DD", "cumulative_pnl": float} dictionaries
 
     Examples:
-        >>> get_cumulative_pnl(db, model_id=1)
+        >>> get_cumulative_pnl(db, model_id=1, timeframe="1d")
         [
             {"date": "2024-05-01", "cumulative_pnl": 100.0},
             {"date": "2024-05-02", "cumulative_pnl": 250.0},
@@ -681,6 +834,8 @@ def get_cumulative_pnl(
         query = query.filter(Prediction.predicted_for >= start_date)
     if end_date:
         query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
 
     # Get all predictions ordered by date
     predictions = query.order_by(Prediction.predicted_for).all()
@@ -707,6 +862,8 @@ def get_all_models_metrics(
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
+    capital: float = DEFAULT_CAPITAL,
 ) -> list[dict[str, Any]]:
     """
     Get performance metrics for all models in one call.
@@ -718,6 +875,10 @@ def get_all_models_metrics(
         start_date: Optional start date filter for metrics calculation
         end_date: Optional end date filter for metrics calculation
         pnl_column: Which PnL column to use (default: pnl_simulated)
+        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+            every timeframe is mixed together for every metric below.
+        capital: Reference capital that sharpe_ratio and max_drawdown_pct
+            are normalized against (default: DEFAULT_CAPITAL)
 
     Returns:
         List of dictionaries with structure:
@@ -734,6 +895,7 @@ def get_all_models_metrics(
             "win_rate": float | None,
             "sharpe_ratio": float | None,
             "max_drawdown": float | None,
+            "max_drawdown_pct": float | None,
         }
 
     Examples:
@@ -766,24 +928,41 @@ def get_all_models_metrics(
             query = query.filter(Prediction.predicted_for >= start_date)
         if end_date:
             query = query.filter(Prediction.predicted_for <= end_date)
+        if timeframe:
+            query = query.filter(Prediction.timeframe == timeframe)
 
         predictions_count = query.count()
 
         # Calculate metrics (only if there are predictions)
         if predictions_count > 0:
-            accuracy = calculate_accuracy(db, model.id, start_date, end_date)
-            mape = calculate_model_mape(db, model.id, start_date, end_date)
+            accuracy = calculate_accuracy(db, model.id, start_date, end_date, timeframe)
+            mape = calculate_model_mape(db, model.id, start_date, end_date, timeframe)
             total_pnl = calculate_total_pnl(
-                db, model.id, start_date, end_date, pnl_column
+                db, model.id, start_date, end_date, pnl_column, timeframe
             )
             win_rate = calculate_win_rate(
-                db, model.id, start_date, end_date, pnl_column
+                db, model.id, start_date, end_date, pnl_column, timeframe
             )
             sharpe = calculate_sharpe_ratio(
-                db, model.id, start_date, end_date, pnl_column
+                db,
+                model.id,
+                start_date,
+                end_date,
+                pnl_column,
+                timeframe=timeframe,
+                capital=capital,
             )
             max_dd = calculate_max_drawdown(
-                db, model.id, start_date, end_date, pnl_column
+                db, model.id, start_date, end_date, pnl_column, timeframe
+            )
+            max_dd_pct = calculate_max_drawdown_pct(
+                db,
+                model.id,
+                start_date,
+                end_date,
+                pnl_column,
+                timeframe,
+                capital=capital,
             )
         else:
             accuracy = None
@@ -792,6 +971,7 @@ def get_all_models_metrics(
             win_rate = None
             sharpe = None
             max_dd = None
+            max_dd_pct = None
 
         results.append(
             {
@@ -807,6 +987,9 @@ def get_all_models_metrics(
                 "win_rate": round(win_rate, 4) if win_rate is not None else None,
                 "sharpe_ratio": round(sharpe, 2) if sharpe is not None else None,
                 "max_drawdown": round(max_dd, 2) if max_dd is not None else None,
+                "max_drawdown_pct": (
+                    round(max_dd_pct, 2) if max_dd_pct is not None else None
+                ),
             }
         )
 

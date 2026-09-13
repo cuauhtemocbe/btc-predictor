@@ -162,6 +162,19 @@ docker compose exec api pytest -n auto
 
 **Aislamiento de datos:** Los tests usan fixtures de pytest (`conftest.py`) que crean datos de entrada y los eliminan automáticamente al final de cada test (patrón `yield`).
 
+### CI/CD
+
+GitHub Actions ejecuta la misma validación dentro de Docker en cada push y pull request:
+
+- Ruff lint y formato
+- mypy estricto sobre `shared/`
+- pytest con cobertura mínima del proyecto
+- Reporte de cobertura como artefacto del workflow
+
+El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
+
+La protección de `main` y la exigencia de checks obligatorios se configura por separado en la issue [#49](https://github.com/cuauhtemocbe/btc-predictor/issues/49).
+
 ### Backfill de Precios Históricos (US-019)
 
 Para cargar datos históricos de BTC desde CoinGecko y acelerar el desarrollo sin esperar meses de datos:

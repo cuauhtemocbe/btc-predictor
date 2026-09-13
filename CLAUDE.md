@@ -358,10 +358,10 @@ docker compose exec api sh -c "cd shared && alembic history"
 
 ```bash
 # Manually run fetch_price job
-docker compose exec api python -m fetch_price.main
+docker compose exec api python -m workers.fetch_price.main
 
 # Manually run daily job
-docker compose exec api python -m daily.main
+docker compose exec api python -m workers.daily
 ```
 
 ### Shell Access (for debugging)
@@ -388,6 +388,15 @@ railway logs --service api
 railway logs --service fetch-price
 railway logs --service daily
 ```
+
+### Main Branch Protection
+
+The `main` branch is protected in GitHub with force-pushes and branch deletion
+disabled. `enforce_admins` is intentionally `false`, allowing the repository
+owner to push directly when necessary; this is an explicit solo-maintainer
+exception, not an omission. Pull-request and required status-check enforcement
+will be added when the repository adopts hosted CI checks that GitHub can
+require.
 
 **Claude Code Automation:**
 - After successfully pushing to `main` branch, ALWAYS execute `./scripts/hooks/monitor-railway.sh`

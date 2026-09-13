@@ -39,7 +39,7 @@ test-v: ## Run the test suite in Docker, verbose (waits for postgres to be healt
 lint: ## Lint shared/api-service/workers with ruff in Docker
 	docker compose run --rm api ruff check shared api workers
 
-validate: ## Run the full local quality gate: lint + format check + tests with coverage
+validate: ## Run the full local quality gate: lockfile + lint + format + tests
 	./scripts/validate.sh
 
 ##@ Local, no Docker, best-effort (requires Python 3.13 + Poetry active)

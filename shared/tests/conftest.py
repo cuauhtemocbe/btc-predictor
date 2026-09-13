@@ -236,6 +236,7 @@ def evaluated_prediction(db_session, sample_model):
         error_pct: Decimal = Decimal("0.74"),
         direction_correct: bool = True,
         pnl_simulated: Decimal = Decimal("500.00"),
+        timeframe: str = "1d",
     ) -> Prediction:
         if model_id is None:
             # Create a default model if not provided
@@ -261,6 +262,7 @@ def evaluated_prediction(db_session, sample_model):
             error_pct=error_pct,
             direction_correct=direction_correct,
             pnl_simulated=pnl_simulated,
+            timeframe=timeframe,
         )
         db_session.add(prediction)
         db_session.commit()
