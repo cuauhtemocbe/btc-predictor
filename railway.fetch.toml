@@ -1,7 +1,6 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-target = "fetch"
+dockerfilePath = "Dockerfile.fetch"
 
 [deploy]
 startCommand = "python -m fetch_price.main"

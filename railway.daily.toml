@@ -1,9 +1,8 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-target = "ml-worker"
+dockerfilePath = "Dockerfile.ml"
 
 [deploy]
-startCommand = "python -m daily.main"
+startCommand = "python -m workers.daily"
 restartPolicyType = "never"
 cronSchedule = "0 7 * * *"

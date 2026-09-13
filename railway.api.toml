@@ -1,7 +1,6 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "Dockerfile"
-target = "api"
+dockerfilePath = "Dockerfile.api"
 
 [deploy]
 startCommand = "/app/entrypoint.sh"

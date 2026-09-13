@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 
 def get_active_model(session: Session) -> tuple[Model, BaseModel]:
     """
-    Load the active model from the database.
+    Load the active weekly (timeframe='1w') model from the database.
+
+    Scoped to timeframe='1w' so this never picks up the active daily
+    model -- a '1d' and a '1w' model can be active at the same time (see
+    ix_models_one_active_version_per_name_timeframe).
 
     Args:
         session: Database session
@@ -44,14 +48,17 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
         Tuple of (Model record, deserialized BaseModel instance)
 
     Raises:
-        ValueError: If no active model found
+        ValueError: If no active weekly model found
         RuntimeError: If deserialization fails
     """
-    stmt = select(Model).where(Model.is_active == True)  # noqa: E712
-    model_record = session.execute(stmt).scalar_one_or_none()
+    stmt = select(Model).where(
+        Model.is_active == True,  # noqa: E712
+        Model.timeframe == "1w",
+    )
+    model_record = session.execute(stmt).scalars().first()
 
     if model_record is None:
-        raise ValueError("No active model found in database")
+        raise ValueError("No active weekly model found in database")
 
     # Deserialize based on model name
     try:

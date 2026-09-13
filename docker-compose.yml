@@ -33,6 +33,7 @@ services:
       - ./LICENSE:/app/LICENSE
       - ./CHANGELOG.md:/app/CHANGELOG.md
       - ./.pre-commit-config.yaml:/app/.pre-commit-config.yaml
+      - ./.github:/app/.github
       - ./Makefile:/app/Makefile
       - ./Dockerfile:/app/Dockerfile
       - ./Dockerfile.dev:/app/Dockerfile.dev
