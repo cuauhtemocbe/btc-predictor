@@ -1,7 +1,20 @@
-async def test_health(client):
+async def test_health(client, db_session):
     response = await client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "database": "reachable"}
+
+
+async def test_health_reports_database_outage(client, db_session, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    def broken_execute(*args, **kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+
+    monkeypatch.setattr(db_session, "execute", broken_execute)
+
+    response = await client.get("/health")
+    assert response.status_code == 503
+    assert response.json() == {"status": "unhealthy", "database": "unreachable"}
 
 
 async def test_hello_default(client):

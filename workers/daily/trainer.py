@@ -31,7 +31,7 @@ from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shared.db.crud import activate_model as crud_activate_model
@@ -208,20 +208,28 @@ def fetch_training_data(
 
 
 def create_sliding_windows(
-    prices: list[Decimal], window_days: int = 30
+    prices: list[Decimal], window_days: int = 30, horizon_days: int = 1
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """
     Create sliding window features and labels from price history.
 
-    For 60 days of prices with a 30-day window:
+    For 60 days of prices with a 30-day window and the default 1-day
+    horizon:
     - Sample 1: days 1-30 → predict day 31
     - Sample 2: days 2-31 → predict day 32
     - ...
     - Sample 30: days 30-59 → predict day 60
 
+    With horizon_days=7 (weekly training), each sample's target shifts 7
+    days past the end of its window instead of 1 -- e.g. days 1-30 predict
+    day 37. horizon_days=1 reproduces the original daily behavior exactly.
+
     Args:
         prices: List of close prices (oldest to newest)
         window_days: Size of sliding window
+        horizon_days: How many days past the end of the window the target
+            is. 1 = predict the very next day (daily). 7 = predict 7
+            calendar days after the window's last observed day (weekly).
 
     Returns:
         Tuple (X, y) where:
@@ -229,48 +237,22 @@ def create_sliding_windows(
         - y: Target vector of shape (n_samples,)
     """
     prices_float = [float(p) for p in prices]
-    n_samples = len(prices_float) - window_days
+    n_samples = len(prices_float) - window_days - horizon_days + 1
 
     X = np.zeros((n_samples, window_days))
     y = np.zeros(n_samples)
 
     for i in range(n_samples):
         X[i] = prices_float[i : i + window_days]
-        y[i] = prices_float[i + window_days]
+        y[i] = prices_float[i + window_days + horizon_days - 1]
 
     logger.info(
         f"Created {n_samples} training samples "
-        f"(feature shape: {X.shape}, target shape: {y.shape})"
+        f"(feature shape: {X.shape}, target shape: {y.shape}, "
+        f"horizon_days={horizon_days})"
     )
 
     return X, y
-
-
-def deactivate_existing_models(session: Session, model_name: str) -> int:
-    """
-    Deactivate all existing models with the given name.
-
-    Args:
-        session: Database session
-        model_name: Name of models to deactivate
-
-    Returns:
-        Number of models deactivated
-    """
-    stmt = (
-        update(Model)
-        .where(Model.name == model_name)
-        .where(Model.is_active == True)  # noqa: E712
-        .values(is_active=False)
-    )
-    result = session.execute(stmt)
-    count = result.rowcount
-    session.commit()
-
-    if count > 0:
-        logger.info(f"Deactivated {count} existing model(s) named '{model_name}'")
-
-    return count
 
 
 def save_model(
@@ -297,13 +279,13 @@ def save_model(
     Returns:
         Created Model record
     """
-    # Deactivate existing models with same name
-    deactivate_existing_models(session, model_name)
-
     # Serialize model
     model_artifact = model_instance.serialize()
 
-    # Create model record
+    # Create model record inactive first, then activate it atomically via
+    # crud.activate_model() -- the single mechanism that deactivates any
+    # other active "1d" model and activates this one in one transaction,
+    # guarded by ix_models_one_active_per_timeframe.
     model_record = Model(
         name=model_name,
         version=version,
@@ -312,12 +294,15 @@ def save_model(
         trained_at=datetime.now(UTC),
         train_from=train_from,
         train_to=train_to,
-        is_active=True,
+        timeframe="1d",
+        is_active=False,
     )
 
     session.add(model_record)
     session.commit()
     session.refresh(model_record)
+
+    crud_activate_model(session, model_record.id)
 
     logger.info(
         f"Saved model {model_name} v{version} as active "
@@ -625,6 +610,7 @@ def train_all_models(
             trained_at=datetime.now(UTC),
             train_from=train_from,
             train_to=train_to,
+            timeframe="1d",
             is_active=False,  # All start inactive
         )
 
@@ -647,9 +633,8 @@ def train_all_models(
         f"Best model: {best_model.name} with {best_error:.2f}% validation error"
     )
 
-    # Activate best model
+    # Activate best model (commits internally, scoped to its own timeframe)
     crud_activate_model(session, best_model.id)
-    session.commit()
 
     logger.info(f"✓ Activated {best_model.name}")
 
