@@ -32,6 +32,14 @@ repos:
   # Pytest with Docker (runs on pre-push)
   - repo: local
     hooks:
+      - id: trivy-cve-gate
+        name: Trivy fail-closed CVE gate
+        entry: scripts/hooks/trivy-scan.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: pytest-docker
         name: Run tests in Docker
         entry: scripts/hooks/run-tests.sh

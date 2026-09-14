@@ -22,6 +22,7 @@ pre-commit install --hook-type pre-push
 - ✅ **Ruff format** - Ensures consistent code style
 
 ### Pre-push (before pushing to remote)
+- ✅ **Trivy CVE gate** - Fails closed on CRITICAL, fixable vulnerabilities (runs before tests, fast-fail)
 - ✅ **Pytest** - Runs all tests with 90% coverage requirement
 - ✅ **Docker aware** - Automatically starts Docker Compose if needed
 
