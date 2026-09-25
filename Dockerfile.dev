@@ -2,7 +2,7 @@
 # dev images are rebuilt often and should always pick up the latest
 # 3.13-slim patch release. See CLAUDE.md "Docker image hardening" for the
 # pin/no-pin rationale.
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
