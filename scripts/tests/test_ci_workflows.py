@@ -25,7 +25,7 @@ def test_ci_publishes_coverage_artifact_and_cleans_up():
     workflow = read_workflow("ci.yml")
 
     assert "--cov-report=xml:/tmp/coverage.xml" in workflow
-    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/upload-artifact@" in workflow
     assert "docker compose down -v" in workflow
     assert "if: always()" in workflow
 

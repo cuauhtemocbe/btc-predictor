@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: btcpredictor
       POSTGRES_DB: btcpredictor
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,24 +20,14 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "8000:8000"
+      - "8010:8000"
     volumes:
+      # Devcontainer-style: the whole workspace is bind-mounted, so every host
+      # edit is visible in the container immediately. (Single-file mounts go
+      # stale when an editor replaces the file, since they pin the old inode.)
+      - .:/app
+      # The package is named `api` inside the container (tests, imports).
       - ./api-service:/app/api
-      - ./shared:/app/shared
-      - ./workers:/app/workers
-      - ./scripts:/app/scripts
-      - ./conftest.py:/app/conftest.py
-      - ./poetry.lock:/app/poetry.lock
-      - ./pyproject.toml:/app/pyproject.toml
-      - ./cosmic-ray.toml:/app/cosmic-ray.toml
-      - ./LICENSE:/app/LICENSE
-      - ./CHANGELOG.md:/app/CHANGELOG.md
-      - ./.pre-commit-config.yaml:/app/.pre-commit-config.yaml
-      - ./.github:/app/.github
-      - ./Makefile:/app/Makefile
-      - ./Dockerfile:/app/Dockerfile
-      - ./Dockerfile.dev:/app/Dockerfile.dev
-      - ./docker-compose.yml:/app/docker-compose.yml
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
@@ -47,12 +37,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    # Watch only the code the API imports: with the whole workspace mounted,
+    # the default (/app) would also reload on .git, caches and test artifacts.
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/api --reload-dir /app/shared
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 30s
       timeout: 5s
-      start_period: 15s
+      start_period: 60s
       retries: 3
 
 volumes:

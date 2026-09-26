@@ -121,8 +121,8 @@ cp .env.example .env
 docker compose up
 
 # 4. Acceder al API
-open http://localhost:8000/docs  # Swagger UI
-open http://localhost:8000/health  # Health check
+open http://localhost:8010/docs  # Swagger UI
+open http://localhost:8010/health  # Health check
 ```
 
 El comando `docker compose up` levanta:
