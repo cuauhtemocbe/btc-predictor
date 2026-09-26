@@ -1,0 +1,107 @@
+name: Dependabot Socket Firewall
+
+# Gatea los PRs que abre Dependabot (issue #93): antes de que alguien los revise a mano,
+# reinstala las dependencias del PR a través de Socket Firewall Free (sfw) y cierra el PR
+# si esa instalación falla. Importa aquí porque un merge a main despliega a Railway.
+# Parte de cuauhtemocbe/meta-projects#47; enfoque validado en DataScience-Docker#38.
+#
+# Por qué `poetry export` + `sfw pip install` y no `sfw poetry install`: sfw no soporta Poetry
+# (solo npm/yarn/pnpm/pip/uv/cargo). Verificado con sfw 1.15.2: `sfw poetry install` falla con
+# CERTIFICATE_VERIFY_FAILED porque requests/certifi no confía en la CA del proxy de sfw (sfw exporta
+# SSL_CERT_FILE y PIP_CERT, pero no REQUESTS_CA_BUNDLE). Ese fallo no es un bloqueo del firewall y
+# cerraría todos los PRs. pip sí es un gestor soportado, así que el lock se exporta y se instala con pip.
+#
+# Dos proyectos Poetry: la raíz (pyproject.toml + poetry.lock) y shared/ (los suyos), y
+# dependabot.yml abre PRs para ambos directorios. La raíz se revisa siempre; shared/ solo cuando
+# el PR modifica archivos de shared/ (ver "Detectar si el PR toca shared/").
+# Se instalan por separado y no con un único `-r a -r b`: pin de pytest ^8 (raíz) contra ^7.4
+# (shared) → pip no podría resolverlos juntos y el PR se cerraría siempre.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  socket-check:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    # Desde 2021-10, los workflows disparados por PRs de Dependabot respetan este bloque
+    # (antes corrían siempre con GITHUB_TOKEN de solo lectura) — sin esto, "gh pr close" abajo
+    # fallaría por falta de permisos.
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Misma versión que Dockerfile/Dockerfile.dev (con el bump de #91) y que generó poetry.lock.
+      # pyproject.toml exige python ^3.12 (Dockerfile y mypy usan 3.13): con un intérprete fuera de
+      # ese rango `poetry export` emitiría marcadores que pip ignoraría y sfw no vería ningún paquete.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # Poetry 2.4.1 + poetry-plugin-export (2.x ya no trae `export`). No sirve el 1.8.4 de otros
+      # repos: poetry.lock es lock-version 2.1 (generado por Poetry 2.4.1) y Poetry 1.8.4 solo avisa
+      # "The lock file might not be compatible" y lo lee a ciegas; Poetry 2.4.1 sí lee también
+      # shared/poetry.lock (generado por 1.8.4). Se instala antes de SocketDev/action, por lo que
+      # Poetry en sí no pasa por el firewall.
+      - name: Exportar los locks a requirements
+        run: |
+          pip install poetry==2.4.1 poetry-plugin-export==1.10.1
+          # --with api,fetch,ml,dev: los grupos api/fetch/ml son optional y `export` omite también
+          # dev por defecto; sin esto los bumps de fastapi/tensorflow/ruff/pytest (la mayoría de
+          # los PRs) no pasarían por sfw.
+          poetry export -f requirements.txt --without-hashes --with api,fetch,ml,dev -o /tmp/req-root.txt
+          # Quita `-e file:///.../shared` (dependencia path de la raíz): es código local, no
+          # viene de un registro, y sus dependencias ya están exportadas como paquetes normales.
+          sed -i '/^-e /d' /tmp/req-root.txt
+
+      - name: Detectar si el PR toca shared/
+        id: scope
+        # El token solo se expone en este paso y en el de cerrar el PR, no en los de instalación
+        # (que ejecutan código de terceros, p. ej. el setup.py de un paquete malicioso).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')
+          if grep -q '^shared/' <<< "$files"; then
+            echo "shared=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "shared=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Si este export falla (lock inconsistente con pyproject.toml) el job queda en rojo pero el
+      # PR no se cierra, igual que con el export de la raíz. OJO: shared/poetry.lock en main está
+      # desactualizado hoy (le faltan alembic y mako, agregados a shared/pyproject.toml después),
+      # así que hasta regenerarlo (`poetry lock` en shared/) los PRs de shared/ quedarán en rojo
+      # sin revisar en vez de pasar el check en falso.
+      - name: Exportar shared/poetry.lock
+        if: steps.scope.outputs.shared == 'true'
+        working-directory: shared
+        run: poetry export -f requirements.txt --without-hashes --with dev -o /tmp/req-shared.txt
+
+      - uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
+        with:
+          mode: firewall-free
+
+      # Solo estos pasos de instalación son continue-on-error. Un fallo aquí puede ser un bloqueo
+      # del firewall o cualquier otro error de instalación (red, PyPI caído, wheel que no compila);
+      # el paso de abajo no los distingue.
+      - name: Instalar la raíz con firewall
+        id: install_root
+        run: sfw pip install -r /tmp/req-root.txt
+        continue-on-error: true
+
+      - name: Instalar shared/ con firewall
+        id: install_shared
+        if: steps.scope.outputs.shared == 'true'
+        run: sfw pip install -r /tmp/req-shared.txt
+        continue-on-error: true
+
+      - name: Cerrar PR si el firewall bloqueó algo
+        if: steps.install_root.outcome == 'failure' || steps.install_shared.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr close ${{ github.event.pull_request.number }} \
+            --comment "🚫 La instalación con Socket Firewall (\`sfw pip install -r\`) falló: puede ser un bloqueo por comportamiento malicioso/sospechoso o un error de instalación no relacionado (red, PyPI, build). Cerrado automáticamente — revisar el log del job y reabrir manualmente si es un falso positivo."
