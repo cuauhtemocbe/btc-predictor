@@ -143,6 +143,26 @@ def test_pytest_pre_push_hook_skips_docs_and_config_only_changes(path):
     assert not re.search(hook["files"], path)
 
 
+def test_dev_api_container_mounts_whole_workspace():
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    volumes = compose["services"]["api"]["volumes"]
+
+    assert ".:/app" in volumes
+    # api-service/ is exposed as the `api` package inside the container
+    assert "./api-service:/app/api" in volumes
+
+
+def test_dev_api_container_has_no_single_file_mounts():
+    # A single-file bind mount pins the inode: editing the file on the host
+    # (editors replace it) leaves the container with a stale copy.
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    volumes = compose["services"]["api"]["volumes"]
+
+    for volume in volumes:
+        host_path = volume.split(":")[0]
+        assert not (REPO_ROOT / host_path).is_file(), f"single-file mount: {volume}"
+
+
 def test_trivy_pre_push_hook_always_runs():
     hook = _pre_push_hook("trivy-cve-gate")
 
