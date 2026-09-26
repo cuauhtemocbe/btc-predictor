@@ -20,6 +20,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # tensorflow-cpu has no stable cp314 wheel, so the ml image cannot build.
+      - dependency-name: "python"
+        versions: [">=3.14"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
