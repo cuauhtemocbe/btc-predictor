@@ -163,6 +163,27 @@ def test_trivy_pre_push_hook_always_runs():
     assert hook["always_run"] is True
 
 
+def test_ci_runs_once_per_change():
+    # push on every branch plus pull_request ran the same job twice per commit
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    triggers = workflow.get("on") or workflow[True]  # PyYAML parses `on` as True
+
+    assert triggers["push"]["branches"] == ["main"]
+    assert "pull_request" in triggers
+
+
+def test_ci_builds_api_image_with_layer_cache_before_compose_up():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    steps = workflow["jobs"]["quality"]["steps"]
+    uses = [s.get("uses", "") for s in steps]
+    run_up = next(i for i, s in enumerate(steps) if "compose up" in s.get("run", ""))
+    bake = next(i for i, u in enumerate(uses) if u.startswith("docker/bake-action"))
+
+    assert bake < run_up
+    assert "type=gha" in steps[bake]["with"]["set"]
+    assert "--no-build" in steps[run_up]["run"]
+
+
 def test_coverage_fail_under_90_configured():
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
