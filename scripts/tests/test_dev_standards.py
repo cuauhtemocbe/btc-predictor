@@ -163,6 +163,15 @@ def test_trivy_pre_push_hook_always_runs():
     assert hook["always_run"] is True
 
 
+def test_ci_runs_once_per_change():
+    # push on every branch plus pull_request ran the same job twice per commit
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    triggers = workflow.get("on") or workflow[True]  # PyYAML parses `on` as True
+
+    assert triggers["push"]["branches"] == ["main"]
+    assert "pull_request" in triggers
+
+
 def test_coverage_fail_under_90_configured():
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
