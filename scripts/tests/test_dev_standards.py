@@ -19,6 +19,9 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -36,9 +39,7 @@ def test_changelog_has_unreleased_and_versioned_sections():
 
     assert "## [Unreleased]" in changelog
 
-    version_sections = re.findall(
-        r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE
-    )
+    version_sections = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
     assert version_sections, "CHANGELOG must have at least one versioned section"
 
     # The most recent versioned section must expose the standard
@@ -58,9 +59,7 @@ def test_changelog_version_matches_pyproject():
     manifest_version = pyproject["tool"]["poetry"]["version"]
 
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text()
-    version_sections = re.findall(
-        r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE
-    )
+    version_sections = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
 
     assert version_sections[0] == manifest_version, (
         f"CHANGELOG's latest version ({version_sections[0]}) is out of sync "
@@ -87,9 +86,7 @@ def test_mypy_strict_configured_for_shared():
     ]
 
     test_overrides = [
-        o
-        for o in pyproject["tool"]["mypy"]["overrides"]
-        if o["module"] == "tests.*"
+        o for o in pyproject["tool"]["mypy"]["overrides"] if o["module"] == "tests.*"
     ]
     assert test_overrides, "Expected a relaxed [[tool.mypy.overrides]] for tests.*"
     assert test_overrides[0]["disallow_untyped_defs"] is False
@@ -100,6 +97,70 @@ def test_mypy_hook_configured_in_pre_commit():
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text()
 
     assert "id: mypy-docker" in config
+
+
+def _pre_push_hook(hook_id: str) -> dict:
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = [h for repo in config["repos"] for h in repo["hooks"]]
+    return next(h for h in hooks if h["id"] == hook_id)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "shared/btc_shared/config.py",
+        "api-service/api/main.py",
+        "workers/daily/trainer.py",
+        "scripts/validate.sh",
+        "conftest.py",
+        "pyproject.toml",
+        "poetry.lock",
+        "docker-compose.yml",
+        "Dockerfile",
+        "Dockerfile.dev",
+    ],
+)
+def test_pytest_pre_push_hook_runs_when_code_or_infra_changes(path):
+    hook = _pre_push_hook("pytest-docker")
+
+    assert "always_run" not in hook
+    assert re.search(hook["files"], path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["README.md", "CLAUDE.md", "CHANGELOG.md", ".engram/config.json", "docs/a.md"],
+)
+def test_pytest_pre_push_hook_skips_docs_and_config_only_changes(path):
+    hook = _pre_push_hook("pytest-docker")
+
+    assert not re.search(hook["files"], path)
+
+
+def test_dev_api_container_mounts_whole_workspace():
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    volumes = compose["services"]["api"]["volumes"]
+
+    assert ".:/app" in volumes
+    # api-service/ is exposed as the `api` package inside the container
+    assert "./api-service:/app/api" in volumes
+
+
+def test_dev_api_container_has_no_single_file_mounts():
+    # A single-file bind mount pins the inode: editing the file on the host
+    # (editors replace it) leaves the container with a stale copy.
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+    volumes = compose["services"]["api"]["volumes"]
+
+    for volume in volumes:
+        host_path = volume.split(":")[0]
+        assert not (REPO_ROOT / host_path).is_file(), f"single-file mount: {volume}"
+
+
+def test_trivy_pre_push_hook_always_runs():
+    hook = _pre_push_hook("trivy-cve-gate")
+
+    assert hook["always_run"] is True
 
 
 def test_coverage_fail_under_90_configured():
@@ -192,7 +253,7 @@ def test_validate_script_stops_before_pytest_when_lockfile_is_stale(tmp_path):
     fake_docker.write_text(
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$*\" >> '{calls}'\n"
-        "case \"$*\" in\n"
+        'case "$*" in\n'
         "  'compose ps') printf 'api running\\n' ;;\n"
         "  *'poetry check --lock'*) exit 1 ;;\n"
         "  *) exit 0 ;;\n"
@@ -222,6 +283,16 @@ def test_production_dockerfile_base_pinned_by_digest():
         dockerfile,
         re.MULTILINE,
     ), "Production Dockerfile base stage must be pinned by a sha256 digest"
+
+
+def test_api_service_caps_sqlalchemy_below_2_1():
+    # api-service has no lock, so a clean dev build re-resolves it. SQLAlchemy
+    # 2.1 defaults to psycopg v3 (we ship psycopg2) and the API fails to boot.
+    pyproject = tomllib.loads(
+        (REPO_ROOT / "api-service" / "pyproject.toml").read_text()
+    )
+
+    assert pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"] == ">=2.0,<2.1"
 
 
 def test_dev_dockerfile_keeps_floating_tag():

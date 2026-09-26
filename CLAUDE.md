@@ -451,3 +451,11 @@ require.
 - All 16 User Stories (US-001 to US-016) are complete and deployed to Railway
 - User is comfortable with command-line tools (gh, docker, poetry)
 - User has engram memory plugin active (save important decisions to engram)
+
+### Engram Memory
+
+- **Project name:** `btc-predictor`, pinned in `.engram/config.json` (committed) so memory writes always target this project, whatever the cwd.
+- **Setup:** the `engram@engram` Claude Code plugin plus the `engram` binary (v2.2.0), with the MCP server registered globally as `engram mcp --tools=agent`. Nothing repo-specific to install.
+- **Recovery:** after a context reset or compaction, call `mem_context` before continuing.
+- **Save proactively** with `mem_save` after decisions, bug fixes, discoveries and established patterns; call `mem_session_summary` before closing a session.
+- **Diagnostics:** `engram doctor` (read-only) if memory behaves oddly.
