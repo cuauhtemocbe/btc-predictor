@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: btcpredictor
       POSTGRES_DB: btcpredictor
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "8000:8000"
+      - "8010:8000"
     volumes:
       - ./api-service:/app/api
       - ./shared:/app/shared
