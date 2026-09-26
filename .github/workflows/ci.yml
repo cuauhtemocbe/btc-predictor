@@ -1,9 +1,12 @@
 name: CI
 
+# One run per change: PRs are checked on `pull_request`, and `push` only covers
+# main. Triggering on every branch push as well ran the same job twice per
+# commit (the two events never share a concurrency group).
 on:
   push:
     branches:
-      - '**'
+      - main
   pull_request:
 
 permissions:

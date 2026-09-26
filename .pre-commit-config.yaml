@@ -45,5 +45,7 @@ repos:
         entry: scripts/hooks/run-tests.sh
         language: system
         pass_filenames: false
-        always_run: true
+        # Skip the full suite when the push touches no code, test
+        # infrastructure or dependency files (docs/config-only pushes).
+        files: ^((shared|api-service|workers|scripts)/|conftest\.py$|pyproject\.toml$|poetry\.lock$|docker-compose\.yml$|Dockerfile)
         stages: [pre-push]

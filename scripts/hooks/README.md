@@ -25,6 +25,7 @@ pre-commit install --hook-type pre-push
 - ✅ **Trivy CVE gate** - Fails closed on CRITICAL, fixable vulnerabilities (runs before tests, fast-fail)
 - ✅ **Pytest** - Runs all tests with 90% coverage requirement
 - ✅ **Docker aware** - Automatically starts Docker Compose if needed
+- ⏭️ **Pytest skips docs/config-only pushes** - It runs only when the push touches code (`shared/`, `api-service/`, `workers/`, `scripts/`), `conftest.py`, `pyproject.toml`, `poetry.lock`, `docker-compose.yml` or a `Dockerfile*`. The Trivy gate always runs (it takes under a second)
 
 ## Manual Execution
 
