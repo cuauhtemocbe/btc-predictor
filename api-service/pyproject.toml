@@ -13,6 +13,9 @@ fastapi = "^0.115.0"
 uvicorn = {extras = ["standard"], version = "^0.34.0"}
 jinja2 = "^3.1.0"
 httpx = "^0.28.0"
+# api-service has no lock: without this cap a clean build resolves
+# SQLAlchemy 2.1, whose default driver is psycopg v3 (we ship psycopg2).
+sqlalchemy = ">=2.0,<2.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
