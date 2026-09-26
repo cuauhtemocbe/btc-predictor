@@ -19,6 +19,9 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -100,6 +103,50 @@ def test_mypy_hook_configured_in_pre_commit():
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text()
 
     assert "id: mypy-docker" in config
+
+
+def _pre_push_hook(hook_id: str) -> dict:
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = [h for repo in config["repos"] for h in repo["hooks"]]
+    return next(h for h in hooks if h["id"] == hook_id)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "shared/btc_shared/config.py",
+        "api-service/api/main.py",
+        "workers/daily/trainer.py",
+        "scripts/validate.sh",
+        "conftest.py",
+        "pyproject.toml",
+        "poetry.lock",
+        "docker-compose.yml",
+        "Dockerfile",
+        "Dockerfile.dev",
+    ],
+)
+def test_pytest_pre_push_hook_runs_when_code_or_infra_changes(path):
+    hook = _pre_push_hook("pytest-docker")
+
+    assert "always_run" not in hook
+    assert re.search(hook["files"], path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["README.md", "CLAUDE.md", "CHANGELOG.md", ".engram/config.json", "docs/a.md"],
+)
+def test_pytest_pre_push_hook_skips_docs_and_config_only_changes(path):
+    hook = _pre_push_hook("pytest-docker")
+
+    assert not re.search(hook["files"], path)
+
+
+def test_trivy_pre_push_hook_always_runs():
+    hook = _pre_push_hook("trivy-cve-gate")
+
+    assert hook["always_run"] is True
 
 
 def test_coverage_fail_under_90_configured():
