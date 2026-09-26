@@ -1,0 +1,169 @@
+name: Container security
+
+# Image CVE scan + Dockerfile misconfig scan (meta-projects#56). The lockfile
+# scan in the pre-push hook cannot see base-image OS packages; this can.
+# Scheduled weekly because base-image CVEs land without any code change.
+
+on:
+  # No `paths:` filter: trivy-image and trivy-config are meant to become
+  # required checks in branch protection, and a required check filtered out by
+  # paths never reports on PRs that don't touch those files, blocking the merge.
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # One job (stable check name) with one build+scan pair per production image.
+  # Every step after checkout runs even if an earlier scan failed, so a single
+  # run reports every vulnerable image; the job still fails if any step fails.
+  # Images are built the way Railway builds them (`docker build -f <path> .`,
+  # no build args or secrets) and are never pushed. Each image is removed after
+  # its scan to keep the runner's disk free for the next (TensorFlow) build.
+  trivy-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Deployed via railway.api.toml
+      - name: Build Dockerfile.api
+        run: docker build -f Dockerfile.api -t btc-predictor-api:scan .
+      - name: Trivy scan Dockerfile.api
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-api:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile.api image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-api:scan || true
+
+      # Deployed via railway.fetch.toml
+      - name: Build Dockerfile.fetch
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile.fetch -t btc-predictor-fetch:scan .
+      - name: Trivy scan Dockerfile.fetch
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-fetch:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile.fetch image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-fetch:scan || true
+
+      # Deployed via railway.daily.toml and railway.weekly.toml (same image)
+      - name: Build Dockerfile.ml
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile.ml -t btc-predictor-ml:scan .
+      - name: Trivy scan Dockerfile.ml
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-ml:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile.ml image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-ml:scan || true
+
+      # Monthly backtest worker (documented in RAILWAY_MULTISTAGE_CONFIG.md)
+      - name: Build Dockerfile.backtest
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile.backtest -t btc-predictor-backtest:scan .
+      - name: Trivy scan Dockerfile.backtest
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-backtest:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile.backtest image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-backtest:scan || true
+
+      # Legacy multi-stage Dockerfile (targets api / fetch / ml-worker): not
+      # referenced by any railway*.toml but still the hardened, digest-pinned
+      # reference image (see CLAUDE.md), so its targets are scanned too.
+      - name: Build Dockerfile target api
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile --target api -t btc-predictor-ms-api:scan .
+      - name: Trivy scan Dockerfile target api
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-ms-api:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile target api image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-ms-api:scan || true
+
+      - name: Build Dockerfile target fetch
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile --target fetch -t btc-predictor-ms-fetch:scan .
+      - name: Trivy scan Dockerfile target fetch
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-ms-fetch:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Remove Dockerfile target fetch image
+        if: ${{ !cancelled() }}
+        run: docker image rm -f btc-predictor-ms-fetch:scan || true
+
+      - name: Build Dockerfile target ml-worker
+        if: ${{ !cancelled() }}
+        run: docker build -f Dockerfile --target ml-worker -t btc-predictor-ms-ml:scan .
+      - name: Trivy scan Dockerfile target ml-worker
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: btc-predictor-ms-ml:scan
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trivy Dockerfile misconfig scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          # Dockerfile.dev is local-only tooling, not a production image.
+          skip-files: Dockerfile.dev
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
