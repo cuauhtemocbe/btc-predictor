@@ -181,6 +181,9 @@ def test_ci_builds_api_image_with_layer_cache_before_compose_up():
 
     assert bake < run_up
     assert "type=gha" in steps[bake]["with"]["set"]
+    # compose looks for <project>-api:latest: project name and tag stay pinned
+    assert workflow["jobs"]["quality"]["env"]["COMPOSE_PROJECT_NAME"] == "btc-predictor"
+    assert "api.tags=btc-predictor-api:latest" in steps[bake]["with"]["set"]
     assert "--no-build" in steps[run_up]["run"]
 
 

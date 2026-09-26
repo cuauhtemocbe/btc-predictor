@@ -21,6 +21,8 @@ jobs:
     name: Docker quality gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: btc-predictor
 
     steps:
       - name: Check out repository
@@ -30,17 +32,18 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # Build the api image through the GitHub Actions layer cache, then start
-      # compose without rebuilding. Compose derives the image name
-      # (btc-predictor-api) from the checkout directory, the same name bake
-      # tags it with; --no-build makes a mismatch fail loudly instead of
-      # silently rebuilding from scratch.
+      # compose without rebuilding. Compose looks for <project>-api:latest, so
+      # the project name and the tag are pinned together; --no-build makes a
+      # mismatch fail loudly instead of silently rebuilding from scratch.
       - name: Build api image (layer cache)
         uses: docker/bake-action@v7
         with:
+          source: .
           files: docker-compose.yml
           targets: api
           load: true
           set: |
+            api.tags=btc-predictor-api:latest
             *.cache-from=type=gha,scope=quality-gate
             *.cache-to=type=gha,scope=quality-gate,mode=max
 
