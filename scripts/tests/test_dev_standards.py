@@ -39,9 +39,7 @@ def test_changelog_has_unreleased_and_versioned_sections():
 
     assert "## [Unreleased]" in changelog
 
-    version_sections = re.findall(
-        r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE
-    )
+    version_sections = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
     assert version_sections, "CHANGELOG must have at least one versioned section"
 
     # The most recent versioned section must expose the standard
@@ -61,9 +59,7 @@ def test_changelog_version_matches_pyproject():
     manifest_version = pyproject["tool"]["poetry"]["version"]
 
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text()
-    version_sections = re.findall(
-        r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE
-    )
+    version_sections = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
 
     assert version_sections[0] == manifest_version, (
         f"CHANGELOG's latest version ({version_sections[0]}) is out of sync "
@@ -90,9 +86,7 @@ def test_mypy_strict_configured_for_shared():
     ]
 
     test_overrides = [
-        o
-        for o in pyproject["tool"]["mypy"]["overrides"]
-        if o["module"] == "tests.*"
+        o for o in pyproject["tool"]["mypy"]["overrides"] if o["module"] == "tests.*"
     ]
     assert test_overrides, "Expected a relaxed [[tool.mypy.overrides]] for tests.*"
     assert test_overrides[0]["disallow_untyped_defs"] is False
@@ -259,7 +253,7 @@ def test_validate_script_stops_before_pytest_when_lockfile_is_stale(tmp_path):
     fake_docker.write_text(
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$*\" >> '{calls}'\n"
-        "case \"$*\" in\n"
+        'case "$*" in\n'
         "  'compose ps') printf 'api running\\n' ;;\n"
         "  *'poetry check --lock'*) exit 1 ;;\n"
         "  *) exit 0 ;;\n"
@@ -289,6 +283,16 @@ def test_production_dockerfile_base_pinned_by_digest():
         dockerfile,
         re.MULTILINE,
     ), "Production Dockerfile base stage must be pinned by a sha256 digest"
+
+
+def test_api_service_caps_sqlalchemy_below_2_1():
+    # api-service has no lock, so a clean dev build re-resolves it. SQLAlchemy
+    # 2.1 defaults to psycopg v3 (we ship psycopg2) and the API fails to boot.
+    pyproject = tomllib.loads(
+        (REPO_ROOT / "api-service" / "pyproject.toml").read_text()
+    )
+
+    assert pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"] == ">=2.0,<2.1"
 
 
 def test_dev_dockerfile_keeps_floating_tag():
