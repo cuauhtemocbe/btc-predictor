@@ -42,6 +42,7 @@ finally:
 # FastAPI dependency injection
 from fastapi import Depends
 
+
 @app.get("/")
 def endpoint(db: Session = Depends(get_db)):
     # db session automatically managed
