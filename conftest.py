@@ -57,6 +57,18 @@ NON_LINEAR_SKIP_REASON = (
 )
 
 
+# These modules import TensorFlow/XGBoost/statsmodels at the top, so merely
+# collecting them costs ~20 s even when every test in them is skipped.
+NON_LINEAR_MODULES = frozenset(
+    {
+        "test_lstm_model.py",
+        "test_xgboost_model.py",
+        "test_arima_model.py",
+        "test_all_models.py",
+    }
+)
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--run-non-linear",
@@ -64,6 +76,13 @@ def pytest_addoption(parser):
         default=False,
         help="Run the LSTM/XGBoost/ARIMA tests disabled during the reboot (#124)",
     )
+
+
+def pytest_ignore_collect(collection_path, config):
+    """Do not even import the non-linear test modules unless asked to."""
+    if config.getoption("--run-non-linear"):
+        return None
+    return collection_path.name in NON_LINEAR_MODULES or None
 
 
 def pytest_collection_modifyitems(config, items):

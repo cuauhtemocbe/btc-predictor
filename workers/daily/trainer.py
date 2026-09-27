@@ -38,13 +38,7 @@ from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import Model, Price
 from shared.utils import calculate_mape, split_train_validation
-from workers.daily.models import (
-    ARIMAModel,
-    BaseModel,
-    LinearRegressionModel,
-    LSTMModel,
-    XGBoostModel,
-)
+from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
 logging.basicConfig(
@@ -447,6 +441,31 @@ def train_single_model(
         return None
 
 
+def model_registry(days_available: int) -> dict[str, type[BaseModel]]:
+    """
+    Model classes to train for the amount of data available.
+
+    ARIMA requires at least 60 days of data. The LSTM, XGBoost and ARIMA
+    classes are imported here, not at module level, because importing them
+    loads TensorFlow, XGBoost and statsmodels.
+    """
+    from workers.daily.models import ARIMAModel, LSTMModel, XGBoostModel
+
+    registry: dict[str, type[BaseModel]] = {
+        "linear": LinearRegressionModel,
+        "lstm": LSTMModel,
+        "xgboost": XGBoostModel,
+    }
+
+    if days_available >= 60:
+        registry["arima"] = ARIMAModel
+        logger.info("ARIMA model included (sufficient data: 60+ days)")
+    else:
+        logger.info(f"ARIMA model excluded (need 60+ days, have {days_available} days)")
+
+    return registry
+
+
 def train_all_models(
     session: Session,
     window_days: int | None = None,
@@ -496,18 +515,7 @@ def train_all_models(
         days_available = count_available_days(session)
 
     # Model registry - adapt based on available data
-    # ARIMA requires at least 60 days of data
-    MODEL_CLASSES = {
-        "linear": LinearRegressionModel,
-        "lstm": LSTMModel,
-        "xgboost": XGBoostModel,
-    }
-
-    if days_available >= 60:
-        MODEL_CLASSES["arima"] = ARIMAModel
-        logger.info("ARIMA model included (sufficient data: 60+ days)")
-    else:
-        logger.info(f"ARIMA model excluded (need 60+ days, have {days_available} days)")
+    MODEL_CLASSES = model_registry(days_available)
 
     # Fetch training data
     logger.info(f"Fetching last {min_days} days of historical prices...")

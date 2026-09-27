@@ -27,13 +27,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import Model, Prediction, Price
-from workers.daily.models import (
-    ARIMAModel,
-    BaseModel,
-    LinearRegressionModel,
-    LSTMModel,
-    XGBoostModel,
-)
+from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
 logging.basicConfig(
@@ -77,14 +71,21 @@ def deserialize_model(model_record: Model) -> BaseModel:
         RuntimeError: If deserialization fails
     """
     try:
-        # Map model name prefixes to their classes
+        # Map model name prefixes to their classes. The heavy ones are imported
+        # on demand: loading them pulls in TensorFlow/XGBoost/statsmodels.
         if model_record.name.startswith("linear"):
             return LinearRegressionModel.deserialize(model_record.artifact)
         elif model_record.name.startswith("xgboost"):
+            from workers.daily.models import XGBoostModel
+
             return XGBoostModel.deserialize(model_record.artifact)
         elif model_record.name.startswith("lstm"):
+            from workers.daily.models import LSTMModel
+
             return LSTMModel.deserialize(model_record.artifact)
         elif model_record.name.startswith("arima"):
+            from workers.daily.models import ARIMAModel
+
             return ARIMAModel.deserialize(model_record.artifact)
         else:
             raise ValueError(f"Unknown model type: {model_record.name}")

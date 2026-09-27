@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
-from workers.daily.models import LinearRegressionModel, LSTMModel, XGBoostModel
+from workers.daily.models import LinearRegressionModel
 
 
 @pytest.fixture
@@ -165,6 +165,8 @@ def cached_xgboost_artifact() -> bytes:
         y[i] = prices[i + window_days]
 
     # Train model ONCE
+    from workers.daily.models import XGBoostModel  # heavy import, only if used
+
     xgb_model = XGBoostModel(window_days=30)
     xgb_model.train(X, y)
 
@@ -195,6 +197,8 @@ def cached_lstm_artifact() -> bytes:
         y[i] = prices[i + window_days]
 
     # Train model ONCE
+    from workers.daily.models import LSTMModel  # heavy import, only if used
+
     lstm_model = LSTMModel(window_days=30, epochs=10)
     lstm_model.train(X, y)
 
