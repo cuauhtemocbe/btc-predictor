@@ -77,7 +77,19 @@ markers = [
     "integration: marks tests that require full DB setup",
     "unit: marks tests that use mocks/stubs only",
     "db: marks tests that use database fixtures",
+    "non_linear: LSTM/XGBoost/ARIMA tests, skipped during the Linear-only reboot (see #124)",
     "asyncio: marks async tests (automatically detected)"
+]
+
+[tool.coverage.run]
+# Test modules skipped during the Linear-only reboot (#124) are not code under
+# test: their unexecuted bodies would only drag the 90% gate down. Remove these
+# entries as each suite is re-enabled.
+omit = [
+    "*/tests/test_lstm_model.py",
+    "*/tests/test_xgboost_model.py",
+    "*/tests/test_arima_model.py",
+    "*/tests/test_all_models.py",
 ]
 
 [tool.mypy]

@@ -134,6 +134,7 @@ class TestTrainSingleModel:
 class TestTrainAllModels:
     """Test train_all_models function."""
 
+    @pytest.mark.non_linear
     def test_train_all_models_success(self, db_session, sample_prices):
         """Test successful training of all models with dynamic window."""
         # Train all models (200 days -> Phase 5 Optimal: window=30, min=60)
@@ -233,6 +234,7 @@ class TestTrainAllModels:
         with pytest.raises(ValueError, match="Insufficient data for training"):
             train_all_models(db_session)
 
+    @pytest.mark.non_linear
     def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
         """Test that ARIMA is excluded when less than 60 days available."""
         # Create 55 days of data (Phase 2: enough for training but not for ARIMA)
