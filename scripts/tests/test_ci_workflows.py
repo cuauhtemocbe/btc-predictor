@@ -21,6 +21,12 @@ def test_ci_runs_docker_quality_gate_on_push_and_pull_request():
     assert "pytest --cov" in workflow
 
 
+def test_ci_builds_with_the_default_docker_builder():
+    # setup-buildx makes the 4.5 GB api image go through a tarball export and
+    # import (~130 s per run); the default builder does not
+    assert "setup-buildx-action" not in read_workflow("ci.yml")
+
+
 def test_ci_publishes_coverage_artifact_and_cleans_up():
     workflow = read_workflow("ci.yml")
 
