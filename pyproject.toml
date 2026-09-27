@@ -6,7 +6,7 @@ authors = []
 packages = [{include = "app", from = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.13"
 # Base dependencies (required by all services)
 sqlalchemy = "^2.0"
 psycopg2-binary = "^2.9"
