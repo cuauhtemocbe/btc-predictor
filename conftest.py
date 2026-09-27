@@ -5,12 +5,82 @@ Provides centralized DB fixtures with session-scoped schema creation
 to eliminate race conditions and reduce DDL overhead.
 """
 
+import os
+
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from shared.config import settings
-from shared.db.models import Base, BtcPrice, Model, Prediction
+
+from testdb import database_name_for_tests, ensure_database
+
+
+def _limit_threads_per_xdist_worker() -> None:
+    """Keep numeric libraries to one thread per xdist worker.
+
+    TensorFlow, XGBoost and BLAS each default to one thread per core. With N
+    workers that oversubscribes the CPU and makes the parallel run slower than
+    the serial one. Must run before those libraries are imported.
+    """
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        for variable in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "TF_NUM_INTRAOP_THREADS",
+            "TF_NUM_INTEROP_THREADS",
+        ):
+            os.environ.setdefault(variable, "1")
+
+
+def _point_tests_at_test_database() -> None:
+    """Redirect DATABASE_URL to the test database before anything reads it.
+
+    Must run before ``shared.config`` is imported: ``settings`` and the
+    module-level engine in ``shared.db.database`` are built at import time,
+    and every test module inherits them.
+    """
+    dev_url = make_url(os.environ["DATABASE_URL"])
+    url = dev_url.set(
+        database=database_name_for_tests(
+            dev_url.database, os.environ.get("PYTEST_XDIST_WORKER")
+        )
+    )
+    ensure_database(url)
+    os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
+
+
+NON_LINEAR_SKIP_REASON = (
+    "Out of scope for the Linear-only reboot; re-enable with "
+    "--run-non-linear (tracked in #124)"
+)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-non-linear",
+        action="store_true",
+        default=False,
+        help="Run the LSTM/XGBoost/ARIMA tests disabled during the reboot (#124)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests marked ``non_linear`` unless --run-non-linear is given."""
+    if config.getoption("--run-non-linear"):
+        return
+    skip = pytest.mark.skip(reason=NON_LINEAR_SKIP_REASON)
+    for item in items:
+        if "non_linear" in item.keywords:
+            item.add_marker(skip)
+
+
+_limit_threads_per_xdist_worker()
+_point_tests_at_test_database()
+
+from shared.config import settings  # noqa: E402
+from shared.db.models import Base, BtcPrice, Model, Prediction  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -25,6 +95,10 @@ def db_engine_session():
     Uses StaticPool for thread safety with pytest-xdist.
     """
     print("\n🔧 [SETUP] Creating test database schema...")
+    # drop_all below wipes the schema: never let it run against a dev database
+    assert "_test" in make_url(settings.database_url).database, (
+        "tests must run against a *_test database"
+    )
     engine = create_engine(
         settings.database_url,
         echo=False,

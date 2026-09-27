@@ -324,8 +324,16 @@ docker compose exec api pytest
 # Run tests with coverage
 docker compose exec api pytest --cov --cov-report=term-missing
 
-# Run tests in parallel (faster)
-docker compose exec api pytest -n auto
+# Run tests in parallel with pytest-xdist. Each worker gets its own database
+# (btcpredictor_test_gw0, _gw1, ...); serial runs use btcpredictor_test.
+# The dev database (btcpredictor) is never touched by the suite.
+# NOTE: with the Linear-only scope this is NOT faster than serial (~60 s both):
+# every worker pays ~20 s importing TensorFlow/XGBoost while collecting.
+# Use COVERAGE_CORE=sysmon if you combine -n with --cov.
+docker compose exec api pytest -n 4 --dist loadscope
+
+# Run the LSTM/XGBoost/ARIMA tests disabled during the Linear-only reboot (#124)
+docker compose exec api pytest --run-non-linear
 ```
 
 ### Code Quality (inside container)
