@@ -267,7 +267,7 @@ def main() -> int:
         predicted_price = model_instance.predict(X)
         logger.info(f"Model predicted price (7 days ahead): ${predicted_price:.2f}")
 
-        # Get current price (latest from btc_prices)
+        # Get current price (latest from prices)
         current_price_stmt = (
             select(Price.close).order_by(Price.timestamp.desc()).limit(1)
         )
