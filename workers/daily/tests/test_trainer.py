@@ -14,6 +14,7 @@ import pytest
 
 from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import Price
+from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
     calculate_dynamic_window,
@@ -51,6 +52,33 @@ def sample_prices(db_session):
     db_session.commit()
 
     return prices
+
+
+class _BiasedModel(LinearRegressionModel):
+    """Linear model that is always 10% off, so it validates worse."""
+
+    def predict(self, X):
+        return super().predict(X) * 1.1
+
+
+class _BrokenModel(LinearRegressionModel):
+    """Model whose training always fails."""
+
+    def train(self, X, y):
+        raise RuntimeError("cannot converge")
+
+
+@pytest.fixture
+def model_registry(monkeypatch):
+    """Replace the trained models with cheap ones (no TensorFlow/XGBoost).
+
+    The real LSTM/XGBoost/ARIMA are covered by their own tests
+    (``--run-non-linear``, #124); these tests are about the orchestration.
+    Returns the registry dict so a test can add models to it.
+    """
+    registry = {"linear": LinearRegressionModel, "biased": _BiasedModel}
+    monkeypatch.setattr(trainer, "model_registry", lambda days_available: registry)
+    return registry
 
 
 class TestTrainSingleModel:
@@ -164,6 +192,7 @@ class TestTrainAllModels:
         model_names = [m.name for m in models]
         assert any("arima" in name for name in model_names)
 
+    @pytest.mark.usefixtures("model_registry")
     def test_train_all_models_activates_best(self, db_session, sample_prices):
         """
         Test that train_all_models activates the model with lowest error.
@@ -175,18 +204,18 @@ class TestTrainAllModels:
         # Get active model
         active = get_active_model(db_session)
         assert active is not None
+        assert active.name.startswith("linear")
 
         # Verify active model has lowest validation error among trained models
         active_error = active.params["validation_error_pct"]
 
+        assert len(models) == 2
         for model in models:
             if model.id != active.id:
                 # Other models should have equal or higher error
-                assert (
-                    model.params["validation_error_pct"] >= active_error
-                    or abs(model.params["validation_error_pct"] - active_error) < 0.01
-                )
+                assert model.params["validation_error_pct"] > active_error
 
+    @pytest.mark.usefixtures("model_registry")
     def test_train_all_models_uses_same_data(self, db_session, sample_prices):
         """Test that all models are trained on the same training data."""
         models = train_all_models(db_session)
@@ -195,23 +224,23 @@ class TestTrainAllModels:
         training_samples = models[0].params["training_samples"]
         validation_samples = models[0].params["validation_samples"]
 
+        assert len(models) == 2
         for model in models:
             assert model.params["training_samples"] == training_samples
             assert model.params["validation_samples"] == validation_samples
 
-    def test_train_all_models_handles_partial_failures(self, db_session, sample_prices):
-        """
-        Test that train_all_models continues if one model fails.
+    def test_train_all_models_handles_partial_failures(
+        self, db_session, sample_prices, model_registry
+    ):
+        """Test that train_all_models continues if one model fails."""
+        model_registry["broken"] = _BrokenModel
 
-        Note: This is a conceptual test. In practice, all models should succeed
-        with valid data. Actual failure testing would require mocking.
-        """
-        # Train with valid data - all should succeed
         models = train_all_models(db_session)
 
-        # At minimum, Linear Regression should always work
         model_names = [m.name for m in models]
         assert any("linear" in name for name in model_names)
+        assert not any("broken" in name for name in model_names)
+        assert get_active_model(db_session) is not None
 
     def test_train_all_models_insufficient_data_raises_error(self, db_session):
         """Test that train_all_models raises ValueError with insufficient data."""
