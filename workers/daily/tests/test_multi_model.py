@@ -22,7 +22,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -238,7 +238,7 @@ class TestMultiModelPrediction:
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """Should generate predictions from all active models."""
         # Ensure both models are active
@@ -269,7 +269,7 @@ class TestMultiModelPrediction:
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """Should generate only one prediction in single-model mode."""
         # Ensure both models are active
@@ -296,7 +296,7 @@ class TestMultiModelPrediction:
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """Should not duplicate predictions when re-running in multi-model mode."""
         # Ensure both models are active
@@ -333,7 +333,7 @@ class TestMultiModelPrediction:
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """Should use same current price for all models (fair comparison)."""
         # Ensure both models are active

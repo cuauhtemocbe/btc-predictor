@@ -18,9 +18,9 @@
 
 set -e
 
-# Configuration
-TIMEOUT_SECONDS=420  # 7 minutes max
-CHECK_INTERVAL=5     # Check every 5 seconds
+# Configuration (env overrides exist so the script can be tested with a stub)
+TIMEOUT_SECONDS=${MONITOR_TIMEOUT_SECONDS:-420}  # 7 minutes max
+CHECK_INTERVAL=${MONITOR_CHECK_INTERVAL:-5}      # Check every 5 seconds
 SERVICES=("btc-predictor" "weekly-predictor" "daily" "fetch-price")
 
 # Colors
@@ -41,6 +41,37 @@ log() {
     fi
 }
 
+# Print one field of a service's block from `railway service list` output.
+#
+# A block starts at a line equal to the service name and runs until the next
+# unindented line. Each block has a different number of optional fields
+# (url, replicas, volume...), so the field is found by its label, never by a
+# line offset from the service name.
+#
+# Usage: service_field <service> <label> <snapshot>
+service_field() {
+    local service="$1" label="$2" snapshot="$3"
+    awk -v service="$service" -v label="$label" '
+        /^[^[:space:]]/ { in_block = ($0 == service); next }
+        in_block {
+            line = $0
+            sub(/^[[:space:]]+/, "", line)
+            prefix = label ":"
+            if (index(line, prefix) == 1) {
+                value = substr(line, length(prefix) + 1)
+                sub(/^[[:space:]]+/, "", value)
+                print value
+                exit
+            }
+        }
+    ' <<< "$snapshot"
+}
+
+# Allow tests to source the helpers without running the monitor
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 # Check if Railway CLI is available
 if ! command -v railway &> /dev/null; then
     log "${RED}❌ Railway CLI not found${NC}"
@@ -59,8 +90,9 @@ log "${BLUE}🚀 Monitoring Railway deployment...${NC}\n"
 
 # Get initial deployment IDs
 declare -A INITIAL_DEPLOYMENTS
+snapshot=$(railway service list 2>/dev/null || true)
 for service in "${SERVICES[@]}"; do
-    deployment_id=$(railway service list 2>/dev/null | grep -A3 "^$service$" | grep "deployment ID:" | awk '{print $3}')
+    deployment_id=$(service_field "$service" "deployment ID" "$snapshot")
     INITIAL_DEPLOYMENTS[$service]=$deployment_id
     log "📦 $service: ${deployment_id:0:8}..."
 done
@@ -77,11 +109,11 @@ while [[ $elapsed -lt $TIMEOUT_SECONDS ]]; do
 
     all_online=true
     status_changed=false
+    snapshot=$(railway service list 2>/dev/null || true)
 
     for service in "${SERVICES[@]}"; do
-        # Get current status
-        status=$(railway service list 2>/dev/null | grep -A1 "^$service$" | grep "status:" | sed 's/.*status:[[:space:]]*//')
-        deployment_id=$(railway service list 2>/dev/null | grep -A3 "^$service$" | grep "deployment ID:" | awk '{print $3}')
+        status=$(service_field "$service" "status" "$snapshot")
+        deployment_id=$(service_field "$service" "deployment ID" "$snapshot")
 
         # Check if deployment changed
         if [[ "${INITIAL_DEPLOYMENTS[$service]}" != "$deployment_id" ]]; then
@@ -89,8 +121,14 @@ while [[ $elapsed -lt $TIMEOUT_SECONDS ]]; do
         fi
 
         # Check if still building/deploying
-        if echo "$status" | grep -qE "Building|Deploying|Queued"; then
+        if echo "$status" | grep -qE "Building|Deploying|Queued|Initializing|Waiting"; then
             all_online=false
+        fi
+
+        # A failed deployment will never come online: stop waiting
+        if echo "$status" | grep -qE "Failed|Crashed"; then
+            log "\n${RED}❌ $service deployment failed: $status${NC}"
+            exit 1
         fi
     done
 
@@ -112,8 +150,9 @@ if [[ "$all_deployed" == "true" ]]; then
 
     # Show final status
     log "${BLUE}📊 Final Status:${NC}"
+    snapshot=$(railway service list 2>/dev/null || true)
     for service in "${SERVICES[@]}"; do
-        status=$(railway service list 2>/dev/null | grep -A1 "^$service$" | grep "status:" | sed 's/.*status:[[:space:]]*//' | cut -d' ' -f1-2)
+        status=$(service_field "$service" "status" "$snapshot" | cut -d' ' -f1-2)
         log "  ${GREEN}●${NC} $service: $status"
     done
 
@@ -125,7 +164,7 @@ if [[ "$all_deployed" == "true" ]]; then
 
     # Show dashboard URL
     log "\n${BLUE}🌐 Dashboard:${NC}"
-    url=$(railway status 2>/dev/null | grep "btc-predictor:" | grep -oP 'https://[^\s]+')
+    url=$(railway status 2>/dev/null | grep "btc-predictor:" | grep -oP 'https://[^\s]+' || true)
     if [[ -n "$url" ]]; then
         log "  $url"
     fi

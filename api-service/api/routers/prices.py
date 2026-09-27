@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from api.models.responses import BtcPriceResponse
 from shared.db.database import get_db
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 router = APIRouter(prefix="/api")
 
@@ -36,5 +36,5 @@ async def get_prices(
     Example:
         GET /api/prices?limit=24
     """
-    prices = db.query(BtcPrice).order_by(BtcPrice.timestamp.desc()).limit(limit).all()
+    prices = db.query(Price).order_by(Price.timestamp.desc()).limit(limit).all()
     return [BtcPriceResponse.model_validate(price) for price in prices]

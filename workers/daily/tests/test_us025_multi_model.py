@@ -23,7 +23,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.daily import evaluator, predictor
 
 # ============================================================================
@@ -112,7 +112,7 @@ class TestMultiModelPredictions:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Predictor generates predictions from all active models
@@ -184,7 +184,7 @@ class TestCLIFlag:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Single-model mode uses only the "best" active model
@@ -225,7 +225,7 @@ class TestCLIFlag:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: CLI flag to enable multi-model mode
@@ -272,7 +272,7 @@ class TestEvaluatorMultiModel:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_actual_price_for_today: BtcPrice,
+        sample_actual_price_for_today: Price,
         monkeypatch,
     ) -> None:
         """
@@ -369,7 +369,7 @@ class TestMultiModelFailureHandling:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Handle prediction failure for one model
@@ -435,7 +435,7 @@ class TestMultiModelIdempotency:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Idempotency - re-running predictor doesn't

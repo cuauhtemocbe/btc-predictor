@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from shared.config import settings
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ def apply_migrations():
 @pytest.fixture
 def sample_btc_price(db_session):
     """
-    Factory fixture for creating sample BtcPrice records.
+    Factory fixture for creating sample Price records.
     Automatically cleans up after test (via db_session rollback).
     """
 
@@ -101,11 +101,11 @@ def sample_btc_price(db_session):
         close: Decimal = Decimal("50500.0"),
         volume: Decimal = Decimal("123.45"),
         source: str = "binance",
-    ) -> BtcPrice:
+    ) -> Price:
         if timestamp is None:
             timestamp = datetime.now(UTC)
 
-        price = BtcPrice(
+        price = Price(
             timestamp=timestamp,
             open=open,
             high=high,

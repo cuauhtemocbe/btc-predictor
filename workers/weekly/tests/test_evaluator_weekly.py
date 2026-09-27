@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.weekly import evaluator
 
 # ============================================================================
@@ -129,7 +129,7 @@ class TestFetchActualPrice:
     """Test the fetch_actual_price() function."""
 
     def test_fetches_7am_price(
-        self, db_session: Session, sample_actual_price_for_today_7am: BtcPrice
+        self, db_session: Session, sample_actual_price_for_today_7am: Price
     ) -> None:
         """
         Gherkin: Weekly evaluator fetches 7am BTC price.
@@ -182,7 +182,7 @@ class TestFetchActualPrice:
         for i, timestamp in enumerate(candles):
             price = Decimal("95000.00") + Decimal(i * 100)
             db_session.add(
-                BtcPrice(
+                Price(
                     timestamp=timestamp,
                     open=price,
                     high=price,
@@ -466,7 +466,7 @@ class TestMainWeeklyEvaluator:
         self,
         db_session: Session,
         sample_unevaluated_weekly_prediction_for_today: Prediction,
-        sample_actual_price_for_today_7am: BtcPrice,
+        sample_actual_price_for_today_7am: Price,
     ) -> None:
         """
         Gherkin: Weekly evaluator evaluates predictions 7 days later.

@@ -180,7 +180,6 @@ files = [
 
 [package.dependencies]
 frozenlist = ">=1.1.0"
-typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "alembic"
@@ -255,7 +254,6 @@ files = [
 
 [package.dependencies]
 idna = ">=2.8"
-typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 
 [package.extras]
 trio = ["trio (>=0.32.0)"]
@@ -846,10 +844,7 @@ numpy = ">=1.20.0"
 pandas = ">=1.3"
 scipy = ">=1.6"
 typing-extensions = ">=4.2.0"
-wrapt = [
-    {version = ">=1.0", markers = "python_version < \"3.13\""},
-    {version = ">=1.17.0rc1", markers = "python_version >= \"3.13\""},
-]
+wrapt = {version = ">=1.17.0rc1", markers = "python_version >= \"3.13\""}
 
 [package.extras]
 arrow = ["pyarrow (>=1)"]
@@ -1786,10 +1781,7 @@ files = [
 ]
 
 [package.dependencies]
-numpy = [
-    {version = ">=1.26.0", markers = "python_version == \"3.12\""},
-    {version = ">=2.1.0", markers = "python_version >= \"3.13\""},
-]
+numpy = {version = ">=2.1.0", markers = "python_version >= \"3.13\""}
 
 [package.extras]
 dev = ["absl-py", "pyink", "pylint (>=2.6.0)", "pytest", "pytest-xdist"]
@@ -2289,10 +2281,7 @@ files = [
 ]
 
 [package.dependencies]
-typing-extensions = [
-    {version = ">=4.6.0"},
-    {version = ">=4.12.0", markers = "python_version >= \"3.13\""},
-]
+typing-extensions = {version = ">=4.12.0", markers = "python_version >= \"3.13\""}
 
 [package.extras]
 attrs = ["attrs"]
@@ -2930,7 +2919,6 @@ files = [
 
 [package.dependencies]
 pytest = ">=8.4,<10"
-typing-extensions = {version = ">=4.12", markers = "python_version < \"3.13\""}
 
 [package.extras]
 docs = ["sphinx (>=5.3)", "sphinx-rtd-theme (>=1)", "sphinx-tabs (>=3.5)"]
@@ -3324,7 +3312,7 @@ name = "shared"
 version = "0.1.0"
 description = "Shared package with database configuration and utilities for BTC Predictor"
 optional = false
-python-versions = "^3.12"
+python-versions = "^3.13"
 groups = ["main"]
 files = []
 develop = true
@@ -3332,7 +3320,7 @@ develop = true
 [package.dependencies]
 alembic = "^1.13"
 psycopg2-binary = "^2.9"
-pydantic-settings = "^2.0"
+pydantic-settings = "^2.15"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -3474,7 +3462,6 @@ files = [
 
 [package.dependencies]
 anyio = ">=4.0.0,<5"
-typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""}
 
 [package.extras]
 full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2", "opentelemetry-api", "python-multipart (>=0.0.18)", "pyyaml"]
@@ -3659,12 +3646,11 @@ version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
 optional = false
 python-versions = ">=3.9"
-groups = ["main", "api", "dev", "fetch", "ml"]
+groups = ["main", "api", "dev", "ml"]
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
 ]
-markers = {fetch = "python_version == \"3.12\""}
 
 [[package]]
 name = "typing-inspection"
@@ -4306,5 +4292,5 @@ files = [
 
 [metadata]
 lock-version = "2.1"
-python-versions = "^3.12"
-content-hash = "4a20dbab2762fd15e1bb8f544f6a2a3e72239f2246e08ede362c62e0ab5f601a"
+python-versions = "^3.13"
+content-hash = "02e0289b75a0410188c411edb721d36387d10b788ff6a487a9ae0b092c640a71"

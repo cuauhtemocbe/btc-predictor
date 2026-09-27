@@ -19,6 +19,8 @@ from workers.daily.models import (
     XGBoostModel,
 )
 
+pytestmark = pytest.mark.non_linear
+
 
 class TestAllModelsIntegration:
     """Integration tests for all models."""

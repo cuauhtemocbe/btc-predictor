@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from api.main import app
 from shared.db.database import get_db
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 
 # Note: db_engine_session is provided by root conftest.py (session-scoped)
 # Note: Database schema is created by autouse fixture in root conftest.py
@@ -54,7 +54,7 @@ def db_session(db_session):
 @pytest.fixture
 def sample_prices(db_session):
     """
-    Factory fixture for creating multiple sample BtcPrice records.
+    Factory fixture for creating multiple sample Price records.
     Automatically cleans up after test (via db_session rollback).
 
     Usage:
@@ -67,13 +67,13 @@ def sample_prices(db_session):
         base_price: float = 42000.0,
         base_time: datetime = None,
         source: str = "test",
-    ) -> list[BtcPrice]:
+    ) -> list[Price]:
         if base_time is None:
             base_time = datetime.now(UTC)
 
         prices = []
         for i in range(count):
-            price = BtcPrice(
+            price = Price(
                 timestamp=base_time - timedelta(hours=i),
                 open=Decimal(str(base_price + i * 100)),
                 high=Decimal(str(base_price + i * 100 + 200)),

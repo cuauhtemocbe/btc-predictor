@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -57,7 +57,7 @@ class TestGetRecentPrices:
     """Test the get_recent_prices() function."""
 
     def test_success_30_days(
-        self, db_session: Session, sample_btc_prices_30_days: list[BtcPrice]
+        self, db_session: Session, sample_btc_prices_30_days: list[Price]
     ) -> None:
         """Should fetch 30 recent prices in chronological order."""
         prices = predictor.get_recent_prices(db_session, window_days=30)
@@ -69,7 +69,7 @@ class TestGetRecentPrices:
         assert all(isinstance(p, Decimal) for p in prices)
 
     def test_insufficient_data(
-        self, db_session: Session, sample_btc_prices_10_days: list[BtcPrice]
+        self, db_session: Session, sample_btc_prices_10_days: list[Price]
     ) -> None:
         """Should raise ValueError when insufficient data."""
         with pytest.raises(
@@ -199,7 +199,7 @@ class TestPredictorGherkinScenarios:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario 1: Predict next day price
@@ -258,7 +258,7 @@ class TestPredictorGherkinScenarios:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_10_days: list[BtcPrice],
+        sample_btc_prices_10_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario 2: Insufficient historical data
@@ -299,7 +299,7 @@ class TestPredictorGherkinScenarios:
             predictor.parse_args = original_parse_args
 
     def test_scenario_3_no_active_model(
-        self, db_session: Session, sample_btc_prices_30_days: list[BtcPrice]
+        self, db_session: Session, sample_btc_prices_30_days: list[Price]
     ) -> None:
         """
         Gherkin Scenario 3: No active model
@@ -342,7 +342,7 @@ class TestPredictorGherkinScenarios:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_30_days: list[BtcPrice],
+        sample_btc_prices_30_days: list[Price],
         sample_prediction_for_tomorrow: Prediction,
     ) -> None:
         """

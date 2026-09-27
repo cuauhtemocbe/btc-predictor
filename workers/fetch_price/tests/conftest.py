@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def sample_price_data():
 def existing_btc_prices(db_session):
     """Pre-populate database with 2 existing prices."""
     prices = [
-        BtcPrice(
+        Price(
             timestamp=datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
             open=Decimal("63200.00"),
             high=Decimal("63450.00"),
@@ -134,7 +134,7 @@ def existing_btc_prices(db_session):
             volume=Decimal("950.98765432"),
             source="binance",
         ),
-        BtcPrice(
+        Price(
             timestamp=datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
             open=Decimal("63000.50"),
             high=Decimal("63500.75"),

@@ -17,6 +17,8 @@ import pytest
 
 from workers.daily.models import BaseModel, XGBoostModel
 
+pytestmark = pytest.mark.non_linear
+
 
 class TestXGBoostModel:
     """Tests for XGBoostModel implementation."""

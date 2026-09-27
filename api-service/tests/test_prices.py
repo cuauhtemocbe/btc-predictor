@@ -86,9 +86,9 @@ async def test_get_prices_empty_table(client, db_session):
     And the response body is an empty JSON array []
     """
     # Given: Empty table - explicitly clean to ensure isolation
-    from shared.db.models import BtcPrice
+    from shared.db.models import Price
 
-    db_session.query(BtcPrice).delete()
+    db_session.query(Price).delete()
     db_session.commit()
 
     # When: GET /api/prices

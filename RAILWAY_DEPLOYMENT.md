@@ -83,7 +83,7 @@ Railway will automatically use this from the Dockerfile.
 
 ✅ **Ready to deploy!** This service will:
 - Fetch daily BTC/USD prices from CoinGecko API (~6 candles with 4-hour granularity)
-- Store OHLCV data in `btc_prices` table
+- Store OHLCV data in `prices` table
 - Handle idempotency (skips duplicate timestamps)
 - Implement rate limiting and error handling
 
@@ -227,7 +227,7 @@ COPY shared/btc_shared/ ./shared/btc_shared/
 ### What it does:
 - Runs every hour (`0 * * * *`)
 - Fetches latest BTC/USDT price from Binance API
-- Stores OHLCV data (Open, High, Low, Close, Volume) in `btc_prices` table
+- Stores OHLCV data (Open, High, Low, Close, Volume) in `prices` table
 - Implements idempotency: skips if data for that hour already exists
 
 ### API endpoint used:
@@ -239,7 +239,7 @@ GET https://api.binance.com/api/v3/klines
 ```
 
 ### Expected behavior:
-- **First run:** Inserts 1 row into `btc_prices`
+- **First run:** Inserts 1 row into `prices`
 - **Subsequent runs (same hour):** Skips insertion (UNIQUE constraint on timestamp)
 - **Next hour:** Inserts new row
 
@@ -267,7 +267,7 @@ from shared.db.database import get_engine
 from sqlalchemy import text
 engine = get_engine()
 with engine.connect() as conn:
-    result = conn.execute(text('SELECT COUNT(*) FROM btc_prices'))
+    result = conn.execute(text('SELECT COUNT(*) FROM prices'))
     print(f'Total prices: {result.scalar()}')
 "
 ```

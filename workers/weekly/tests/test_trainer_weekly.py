@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.crud import get_active_model
-from shared.db.models import BtcPrice, Model
+from shared.db.models import Model, Price
 from workers.weekly import trainer
 
 # ============================================================================
@@ -25,13 +25,13 @@ from workers.weekly import trainer
 
 
 @pytest.fixture
-def sample_prices_200_days(db_session: Session) -> list[BtcPrice]:
+def sample_prices_200_days(db_session: Session) -> list[Price]:
     """200 days of daily-spaced BTC prices -- enough for Phase 5 + a 7-day horizon."""
     base_price = 50000
     prices = []
 
     for i in range(200):
-        price_record = BtcPrice(
+        price_record = Price(
             timestamp=datetime.now(UTC) - timedelta(days=200 - i),
             open=Decimal(base_price + i * 100),
             high=Decimal(base_price + i * 100 + 500),
@@ -48,7 +48,7 @@ def sample_prices_200_days(db_session: Session) -> list[BtcPrice]:
 
 
 @pytest.fixture
-def sample_prices_35_days(db_session: Session) -> list[BtcPrice]:
+def sample_prices_35_days(db_session: Session) -> list[Price]:
     """
     35 days: enough for calculate_dynamic_window()'s Phase 1 floor (min=30)
     but NOT enough once the 7-day horizon is added on top (needs 36).
@@ -57,7 +57,7 @@ def sample_prices_35_days(db_session: Session) -> list[BtcPrice]:
     prices = []
 
     for i in range(35):
-        price_record = BtcPrice(
+        price_record = Price(
             timestamp=datetime.now(UTC) - timedelta(days=35 - i),
             open=Decimal(base_price + i * 100),
             high=Decimal(base_price + i * 100 + 500),
@@ -129,7 +129,7 @@ class TestMainWeeklyTrainer:
         trainer.SessionLocal = original
 
     def test_success_trains_and_activates_seven_day_model(
-        self, db_session: Session, sample_prices_200_days: list[BtcPrice]
+        self, db_session: Session, sample_prices_200_days: list[Price]
     ) -> None:
         """
         Given 200 days of historical prices
@@ -151,7 +151,7 @@ class TestMainWeeklyTrainer:
     def test_does_not_touch_active_daily_model(
         self,
         db_session: Session,
-        sample_prices_200_days: list[BtcPrice],
+        sample_prices_200_days: list[Price],
         active_daily_model: Model,
     ) -> None:
         """
@@ -169,7 +169,7 @@ class TestMainWeeklyTrainer:
         assert reloaded.is_active is True
 
     def test_insufficient_history_prevents_training(
-        self, db_session: Session, sample_prices_35_days: list[BtcPrice]
+        self, db_session: Session, sample_prices_35_days: list[Price]
     ) -> None:
         """
         Scenario: Insufficient history prevents invalid training
