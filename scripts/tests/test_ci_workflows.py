@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import yaml
 
 WORKFLOWS = Path(__file__).parents[2] / ".github" / "workflows"
 
@@ -24,7 +25,10 @@ def test_ci_runs_docker_quality_gate_on_push_and_pull_request():
 def test_ci_builds_with_the_default_docker_builder():
     # setup-buildx makes the 4.5 GB api image go through a tarball export and
     # import (~130 s per run); the default builder does not
-    assert "setup-buildx-action" not in read_workflow("ci.yml")
+    workflow = yaml.safe_load(read_workflow("ci.yml"))
+    actions = [step.get("uses", "") for step in workflow["jobs"]["quality"]["steps"]]
+
+    assert not any("setup-buildx-action" in action for action in actions)
 
 
 def test_ci_publishes_coverage_artifact_and_cleans_up():
