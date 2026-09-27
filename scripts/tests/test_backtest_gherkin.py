@@ -12,7 +12,7 @@ from scripts.backtest import run_backtest
 from scripts.backtest_utils import (
     fetch_training_data,
 )
-from shared.db.models import BacktestResult, BtcPrice
+from shared.db.models import BacktestResult, Price
 
 
 class TestBacktestResultsTableSchema:
@@ -265,7 +265,7 @@ class TestInsufficientData:
             current_date = start_date + timedelta(days=day)
             # Create 1 record per day at 12:00 PM (daily frequency)
             timestamp = datetime.combine(current_date, time(12, 0))
-            price = BtcPrice(
+            price = Price(
                 timestamp=timestamp,
                 open=Decimal("66000.00"),
                 high=Decimal("66100.00"),
@@ -320,7 +320,7 @@ class TestDataGaps:
                 timestamp = datetime.combine(
                     current_date, datetime.min.time()
                 ) + timedelta(hours=hour)
-                price = BtcPrice(
+                price = Price(
                     timestamp=timestamp,
                     open=Decimal("66000.00"),
                     high=Decimal("66100.00"),

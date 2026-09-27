@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Direct test runner for btc_prices tests (bypasses pytest).
+Direct test runner for prices tests (bypasses pytest).
 
 Run with: docker compose exec api python shared/tests/run_btc_prices_tests.py
 """
@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 
 def run_test(name, test_func):
@@ -38,12 +38,13 @@ def test_scenario_1_table_exists():
 
     # Assert: Table exists
     tables = inspector.get_table_names()
-    assert "btc_prices" in tables, "btc_prices table should exist"
+    assert "prices" in tables, "prices table should exist"
 
     # Assert: All columns exist
-    columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
+    columns = {col["name"]: col for col in inspector.get_columns("prices")}
     expected_cols = [
         "id",
+        "symbol",
         "timestamp",
         "open",
         "high",
@@ -56,11 +57,13 @@ def test_scenario_1_table_exists():
     for col_name in expected_cols:
         assert col_name in columns, f"Column '{col_name}' should exist"
 
-    # Assert: UNIQUE index on timestamp
-    indexes = inspector.get_indexes("btc_prices")
-    timestamp_idx = [idx for idx in indexes if "timestamp" in idx["column_names"]]
-    assert len(timestamp_idx) > 0, "Should have index on timestamp"
-    assert timestamp_idx[0]["unique"], "timestamp index should be UNIQUE"
+    # Assert: a timestamp is unique per symbol
+    unique_columns = [
+        uc["column_names"] for uc in inspector.get_unique_constraints("prices")
+    ]
+    assert ["symbol", "timestamp"] in unique_columns, (
+        "(symbol, timestamp) should be UNIQUE"
+    )
 
     engine.dispose()
 
@@ -76,7 +79,7 @@ def test_scenario_2_insert_valid_record():
     try:
         test_time = datetime(2026, 5, 16, 20, 30, 0, tzinfo=UTC)
 
-        price = BtcPrice(
+        price = Price(
             timestamp=test_time,
             open=Decimal("67000.00"),
             high=Decimal("67500.00"),
@@ -91,7 +94,7 @@ def test_scenario_2_insert_valid_record():
         assert price.id is not None, "Should have ID after commit"
 
         # Query back
-        found = session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).first()
+        found = session.query(Price).filter(Price.timestamp == test_time).first()
         assert found is not None, "Should find record by timestamp"
         assert found.close == Decimal("67432.50"), "Close price should match"
         assert found.source == "binance", "Source should match"
@@ -115,7 +118,7 @@ def test_scenario_3_duplicate_timestamp():
         test_time = datetime(2026, 5, 16, 20, 31, 0, tzinfo=UTC)
 
         # Insert first record
-        first = BtcPrice(
+        first = Price(
             timestamp=test_time,
             open=Decimal("50000.00"),
             high=Decimal("51000.00"),
@@ -128,7 +131,7 @@ def test_scenario_3_duplicate_timestamp():
         session.commit()
 
         # Try to insert duplicate
-        duplicate = BtcPrice(
+        duplicate = Price(
             timestamp=test_time,  # Same timestamp
             open=Decimal("51000.00"),
             high=Decimal("52000.00"),
@@ -164,7 +167,7 @@ def test_edge_case_zero_volume():
     session = Session()
 
     try:
-        price = BtcPrice(
+        price = Price(
             timestamp=datetime(2026, 5, 16, 20, 32, 0, tzinfo=UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),

@@ -2,7 +2,7 @@
 SQLAlchemy models for BTC Predictor.
 
 Models:
-- BtcPrice: Historical Bitcoin OHLCV price data
+- Price: Historical OHLCV price data, one series per asset symbol
 - Model: Trained ML models with versioning
 - Prediction: Daily price predictions with evaluation metrics
 - BacktestResult: Walk-forward backtesting simulation results
@@ -31,6 +31,9 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import NUMERIC
 
+# Asset every row belongs to unless told otherwise (the original BTC pipeline).
+DEFAULT_SYMBOL = "BTCUSDT"
+
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
@@ -38,20 +41,29 @@ class Base(DeclarativeBase):
     pass
 
 
-class BtcPrice(Base):
+class Price(Base):
     """
-    Historical Bitcoin OHLCV (Open, High, Low, Close, Volume) price data.
+    Historical OHLCV (Open, High, Low, Close, Volume) price data per asset.
 
-    Data is populated hourly by the fetch-price cron job from Binance API.
-    Used for model training, evaluation, and historical analysis.
+    Each row belongs to one asset, identified by ``symbol`` (e.g. 'BTCUSDT',
+    'PAXGUSDT'); a timestamp is unique per symbol, so several assets share the
+    table. Used for model training, evaluation, and historical analysis.
     """
 
-    __tablename__ = "btc_prices"
+    __tablename__ = "prices"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timestamp", name="unique_price_per_symbol"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DEFAULT_SYMBOL,
+        comment="Asset symbol (e.g., 'BTCUSDT', 'PAXGUSDT')",
+    )
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        unique=True,
         nullable=False,
         index=True,
         comment="Price timestamp in UTC",
@@ -69,7 +81,7 @@ class BtcPrice(Base):
         NUMERIC(18, 8), nullable=False, comment="Closing price in USDT"
     )
     volume: Mapped[Decimal] = mapped_column(
-        NUMERIC(18, 8), nullable=False, comment="Trading volume in BTC"
+        NUMERIC(18, 8), nullable=False, comment="Trading volume in the base asset"
     )
     source: Mapped[str] = mapped_column(
         String(50),
@@ -80,7 +92,7 @@ class BtcPrice(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<BtcPrice(timestamp={self.timestamp}, "
+            f"<Price(symbol={self.symbol}, timestamp={self.timestamp}, "
             f"close={self.close}, source={self.source})>"
         )
 
@@ -91,23 +103,26 @@ class Model(Base):
 
     Stores serialized model artifacts (pickled scikit-learn models), training
     parameters, and metadata. Supports model versioning and rollback.
-    At most one active version per (name, timeframe) is allowed at a time,
-    enforced by the partial unique index
-    ix_models_one_active_version_per_name_timeframe -- not just application
-    logic. Different model names (e.g. "linear_v1" and "xgboost_v1") can be
-    active at the same time within the same timeframe; that's what powers
-    multi-model prediction mode (US-025).
+    Each model is trained for one asset (``symbol``); predictions get their
+    asset through ``model_id``. At most one active version per
+    (symbol, name, timeframe) is allowed at a time, enforced by the partial
+    unique index ix_models_one_active_version_per_name_timeframe -- not just
+    application logic. Different model names (e.g. "linear_v1" and
+    "xgboost_v1") can be active at the same time within the same timeframe;
+    that's what powers multi-model prediction mode (US-025). The same model
+    name can be trained once per asset.
     """
 
     __tablename__ = "models"
     __table_args__ = (
-        UniqueConstraint("name", "version", name="unique_model_version"),
+        UniqueConstraint("symbol", "name", "version", name="unique_model_version"),
         CheckConstraint("train_to >= train_from", name="valid_training_period"),
         CheckConstraint(
             "timeframe IN ('1h', '1d', '1w')", name="valid_model_timeframe_values"
         ),
         Index(
             "ix_models_one_active_version_per_name_timeframe",
+            "symbol",
             "name",
             "timeframe",
             unique=True,
@@ -116,6 +131,12 @@ class Model(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DEFAULT_SYMBOL,
+        comment="Asset this model predicts (e.g., 'BTCUSDT', 'PAXGUSDT')",
+    )
     name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
@@ -165,7 +186,8 @@ class Model(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Model(name={self.name}, version={self.version}, "
+            f"<Model(symbol={self.symbol}, name={self.name}, "
+            f"version={self.version}, "
             f"timeframe={self.timeframe}, is_active={self.is_active}, "
             f"trained_at={self.trained_at})>"
         )

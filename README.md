@@ -84,7 +84,7 @@ btc-predictor/
 
 ### Tablas principales
 
-1. **`btc_prices`** — Precios horarios OHLCV desde CoinGecko
+1. **`prices`** — Precios horarios OHLCV desde CoinGecko
    - Constraint UNIQUE en `timestamp` (idempotencia)
 
 2. **`models`** — Modelos ML entrenados (serializados con pickle)
@@ -288,11 +288,11 @@ alembic upgrade head
 ### Cada hora: `fetch-price` (cron)
 
 ```
-CoinGecko API → fetch-price job → btc_prices table
+CoinGecko API → fetch-price job → prices table
 ```
 
 1. Consulta CoinGecko API: `GET /api/v3/coins/bitcoin/market_chart`
-2. Inserta nuevo precio en `btc_prices` (skip si ya existe, idempotente)
+2. Inserta nuevo precio en `prices` (skip si ya existe, idempotente)
 
 ### Cada día (7am): `daily` (cron)
 

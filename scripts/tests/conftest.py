@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 # Note: db_session is provided by root conftest.py
 # Note: Database schema is created by autouse fixture in root conftest.py
@@ -55,7 +55,7 @@ def sample_btc_prices(db_session, cached_sample_price_data):
     prices = []
 
     for timestamp, open_p, high, low, close, volume in cached_sample_price_data:
-        price = BtcPrice(
+        price = Price(
             timestamp=timestamp,
             open=open_p,
             high=high,
@@ -108,7 +108,7 @@ def historical_data_60_days(db_session, cached_historical_60_days):
     prices = []
 
     for timestamp, open_p, high, low, close, volume in cached_historical_60_days:
-        price = BtcPrice(
+        price = Price(
             timestamp=timestamp,
             open=open_p,
             high=high,
@@ -161,7 +161,7 @@ def historical_90_days(db_session, cached_historical_90_days):
     prices = []
 
     for timestamp, open_p, high, low, close, volume in cached_historical_90_days:
-        price = BtcPrice(
+        price = Price(
             timestamp=timestamp,
             open=open_p,
             high=high,

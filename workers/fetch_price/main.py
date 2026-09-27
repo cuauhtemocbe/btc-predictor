@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Dict, List
 
 from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice
+from shared.db.models import DEFAULT_SYMBOL, Price
 from sqlalchemy.orm import Session
 
 from fetch_price.coingecko_client import CoinGeckoClient
@@ -74,13 +74,19 @@ async def fetch_prices(days: int = 1) -> List[Dict]:
     return prices
 
 
-def filter_existing_timestamps(prices: List[Dict], session: Session) -> List[Dict]:
+def filter_existing_timestamps(
+    prices: List[Dict], session: Session, symbol: str = DEFAULT_SYMBOL
+) -> List[Dict]:
     """
-    Filter out prices with timestamps that already exist in the database.
+    Filter out prices with timestamps that already exist for a symbol.
+
+    A timestamp is unique per symbol, so the same timestamp stored for another
+    asset does not count as existing.
 
     Args:
         prices: List of price dictionaries
         session: Database session
+        symbol: Asset the prices belong to
 
     Returns:
         List of price dictionaries with only new timestamps
@@ -92,7 +98,11 @@ def filter_existing_timestamps(prices: List[Dict], session: Session) -> List[Dic
     timestamps = [p["timestamp"] for p in prices]
 
     # Query database for existing timestamps
-    existing = session.query(BtcPrice.timestamp).filter(BtcPrice.timestamp.in_(timestamps)).all()
+    existing = (
+        session.query(Price.timestamp)
+        .filter(Price.symbol == symbol, Price.timestamp.in_(timestamps))
+        .all()
+    )
 
     # Convert to set for O(1) lookup
     # Note: SQLite returns datetime without timezone, so we need to replace with UTC for comparison
@@ -124,8 +134,8 @@ def save_prices(prices: List[Dict], session: Session) -> int:
     if not prices:
         return 0
 
-    # Create BtcPrice objects
-    btc_prices = [BtcPrice(**price) for price in prices]
+    # Create Price objects
+    btc_prices = [Price(**price) for price in prices]
 
     # Bulk insert
     session.add_all(btc_prices)

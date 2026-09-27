@@ -34,25 +34,26 @@ Usage:
 import argparse
 import asyncio
 import logging
-import sys
-from datetime import timezone
-from decimal import Decimal
-from typing import List
-
-from sqlalchemy.orm import Session
 
 # Add workers directory to path for imports
 import os
+import sys
+from datetime import UTC
+from decimal import Decimal
+
+from sqlalchemy.orm import Session
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'workers'))
 
-from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice
 from fetch_price.coingecko_client import CoinGeckoClient
 from fetch_price.exceptions import (
     InvalidSymbolError,
     PriceAPIError,
     RateLimitError,
 )
+
+from shared.db.database import SessionLocal
+from shared.db.models import Price
 
 # Configure logging
 logging.basicConfig(
@@ -112,7 +113,7 @@ Notes:
     return parser.parse_args()
 
 
-async def fetch_historical_data(days: int) -> List[dict]:
+async def fetch_historical_data(days: int) -> list[dict]:
     """
     Fetch historical daily OHLCV data from CoinGecko.
 
@@ -169,7 +170,7 @@ async def fetch_historical_data(days: int) -> List[dict]:
     return prices
 
 
-def filter_existing_timestamps(prices: List[dict], session: Session) -> List[dict]:
+def filter_existing_timestamps(prices: list[dict], session: Session) -> list[dict]:
     """
     Filter out prices with timestamps that already exist in the database.
 
@@ -187,11 +188,11 @@ def filter_existing_timestamps(prices: List[dict], session: Session) -> List[dic
     timestamps = [p["timestamp"] for p in prices]
 
     # Query database for existing timestamps
-    existing = session.query(BtcPrice.timestamp).filter(BtcPrice.timestamp.in_(timestamps)).all()
+    existing = session.query(Price.timestamp).filter(Price.timestamp.in_(timestamps)).all()
 
     # Convert to set for O(1) lookup
     existing_set = {
-        t[0].replace(tzinfo=timezone.utc) if t[0].tzinfo is None else t[0] for t in existing
+        t[0].replace(tzinfo=UTC) if t[0].tzinfo is None else t[0] for t in existing
     }
 
     # Filter out existing timestamps
@@ -204,7 +205,7 @@ def filter_existing_timestamps(prices: List[dict], session: Session) -> List[dic
     return new_prices
 
 
-def save_prices_batch(prices: List[dict], session: Session, batch_size: int) -> int:
+def save_prices_batch(prices: list[dict], session: Session, batch_size: int) -> int:
     """
     Save prices to database in batches.
 
@@ -226,8 +227,8 @@ def save_prices_batch(prices: List[dict], session: Session, batch_size: int) -> 
         batch = prices[i:i + batch_size]
         batch_num = (i // batch_size) + 1
 
-        # Create BtcPrice objects
-        btc_prices = [BtcPrice(**price) for price in batch]
+        # Create Price objects
+        btc_prices = [Price(**price) for price in batch]
 
         # Bulk insert
         session.add_all(btc_prices)

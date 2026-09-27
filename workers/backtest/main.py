@@ -23,7 +23,7 @@ from sqlalchemy import func
 
 from backtest import main as run_backtest_main
 from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +39,7 @@ def calculate_adaptive_window(db) -> tuple[date, date, int] | None:
     Calculate optimal backtest window based on available data.
 
     Strategy:
-    - Query oldest and newest data in btc_prices table
+    - Query oldest and newest data in prices table
     - Calculate total days available
     - Set training window and backtest range adaptively:
       * >= 60 days: 30 days training, 30 days backtest
@@ -55,9 +55,9 @@ def calculate_adaptive_window(db) -> tuple[date, date, int] | None:
     """
     # Query oldest and newest prices
     result = db.query(
-        func.date(func.min(BtcPrice.timestamp)).label("oldest"),
-        func.date(func.max(BtcPrice.timestamp)).label("newest"),
-        func.count(func.distinct(func.date(BtcPrice.timestamp))).label("total_days"),
+        func.date(func.min(Price.timestamp)).label("oldest"),
+        func.date(func.max(Price.timestamp)).label("newest"),
+        func.count(func.distinct(func.date(Price.timestamp))).label("total_days"),
     ).first()
 
     if not result or not result.oldest or not result.newest:

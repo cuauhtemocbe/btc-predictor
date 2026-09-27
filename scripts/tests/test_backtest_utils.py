@@ -21,7 +21,7 @@ from scripts.backtest_utils import (
     get_actual_price_for_date,
     save_backtest_result,
 )
-from shared.db.models import BacktestResult, BtcPrice
+from shared.db.models import BacktestResult, Price
 
 
 class TestFetchTrainingData:
@@ -163,7 +163,7 @@ class TestGeneratePrediction:
             current_date = start_date + timedelta(days=day)
             # Create 1 record per day at 12:00 PM (daily frequency)
             timestamp = datetime.combine(current_date, time(12, 0))
-            price = BtcPrice(
+            price = Price(
                 timestamp=timestamp,
                 open=Decimal("66000.00"),
                 high=Decimal("66100.00"),
@@ -320,7 +320,7 @@ class TestGetActualPriceForDate:
                 hours=hour
             )
             # Each hour has different close price
-            price = BtcPrice(
+            price = Price(
                 timestamp=timestamp,
                 open=Decimal("66000.00"),
                 high=Decimal("66100.00"),

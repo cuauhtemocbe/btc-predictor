@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.weekly.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -100,21 +100,21 @@ def get_daily_close_prices(session: Session, window_days: int) -> list[Decimal]:
     # Subquery: Get the latest timestamp for each day
     latest_per_day = (
         select(
-            func.date_trunc("day", BtcPrice.timestamp).label("day"),
-            func.max(BtcPrice.timestamp).label("latest_timestamp"),
+            func.date_trunc("day", Price.timestamp).label("day"),
+            func.max(Price.timestamp).label("latest_timestamp"),
         )
         .group_by("day")
-        .order_by(func.date_trunc("day", BtcPrice.timestamp).desc())
+        .order_by(func.date_trunc("day", Price.timestamp).desc())
         .limit(window_days)
         .subquery()
     )
 
     # Main query: Join to get the close price for the latest timestamp each day
     stmt = (
-        select(BtcPrice.close)
+        select(Price.close)
         .join(
             latest_per_day,
-            BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+            Price.timestamp == latest_per_day.c.latest_timestamp,
         )
         .order_by(latest_per_day.c.day.desc())
     )
@@ -269,7 +269,7 @@ def main() -> int:
 
         # Get current price (latest from btc_prices)
         current_price_stmt = (
-            select(BtcPrice.close).order_by(BtcPrice.timestamp.desc()).limit(1)
+            select(Price.close).order_by(Price.timestamp.desc()).limit(1)
         )
         current_price = session.execute(current_price_stmt).scalar_one()
         logger.info(f"Current BTC price: ${current_price}")

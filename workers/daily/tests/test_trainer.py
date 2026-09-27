@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from shared.db.crud import get_active_model, get_all_models
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
     calculate_dynamic_window,
@@ -36,7 +36,7 @@ def sample_prices(db_session):
     prices = []
 
     for i in range(200):
-        price_record = BtcPrice(
+        price_record = Price(
             timestamp=datetime.now(UTC) - timedelta(days=200 - i),
             open=Decimal(base_price + i * 100),
             high=Decimal(base_price + i * 100 + 500),
@@ -217,7 +217,7 @@ class TestTrainAllModels:
         """Test that train_all_models raises ValueError with insufficient data."""
         # Create only 29 days of data (< 30 min for Phase 1)
         for i in range(29):
-            price_record = BtcPrice(
+            price_record = Price(
                 timestamp=datetime.now(UTC) - timedelta(days=29 - i),
                 open=Decimal(50000 + i * 100),
                 high=Decimal(50000 + i * 100 + 500),
@@ -239,7 +239,7 @@ class TestTrainAllModels:
         """Test that ARIMA is excluded when less than 60 days available."""
         # Create 55 days of data (Phase 2: enough for training but not for ARIMA)
         for i in range(55):
-            price_record = BtcPrice(
+            price_record = Price(
                 timestamp=datetime.now(UTC) - timedelta(days=55 - i),
                 open=Decimal(50000 + i * 100),
                 high=Decimal(50000 + i * 100 + 500),
@@ -328,7 +328,7 @@ class TestCountAvailableDays:
         base_time = dt(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
         for day in range(10):
             for hour in [0, 4, 8, 12, 16, 20]:  # 6 candles per day
-                price_record = BtcPrice(
+                price_record = Price(
                     timestamp=base_time + timedelta(days=day, hours=hour),
                     open=Decimal(50000),
                     high=Decimal(51000),

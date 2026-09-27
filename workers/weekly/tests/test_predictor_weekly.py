@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.weekly import predictor
 from workers.weekly.models import LinearRegressionModel
 
@@ -45,7 +45,7 @@ class TestGetDailyClosePrices:
     """Test the get_daily_close_prices() function."""
 
     def test_success_30_days(
-        self, db_session: Session, sample_daily_close_prices_30_days: list[BtcPrice]
+        self, db_session: Session, sample_daily_close_prices_30_days: list[Price]
     ) -> None:
         """Should fetch 30 DAILY close prices (not hourly)."""
         prices = predictor.get_daily_close_prices(db_session, window_days=30)
@@ -60,7 +60,7 @@ class TestGetDailyClosePrices:
         assert all(isinstance(p, Decimal) for p in prices)
 
     def test_insufficient_data(
-        self, db_session: Session, sample_daily_close_prices_10_days: list[BtcPrice]
+        self, db_session: Session, sample_daily_close_prices_10_days: list[Price]
     ) -> None:
         """Should raise ValueError when insufficient data (< 30 days)."""
         with pytest.raises(
@@ -74,7 +74,7 @@ class TestGetDailyClosePrices:
             predictor.get_daily_close_prices(db_session, window_days=30)
 
     def test_uses_daily_not_hourly(
-        self, db_session: Session, sample_daily_close_prices_30_days: list[BtcPrice]
+        self, db_session: Session, sample_daily_close_prices_30_days: list[Price]
     ) -> None:
         """
         Gherkin: Weekly predictor uses daily close prices (not hourly).
@@ -85,7 +85,7 @@ class TestGetDailyClosePrices:
         And not 720 prices (24 per day)
         """
         # We have 30 days * 24 hours = 720 records in DB
-        total_records = db_session.query(BtcPrice).count()
+        total_records = db_session.query(Price).count()
         assert total_records == 720
 
         # But get_daily_close_prices should return only 30 (daily)
@@ -233,7 +233,7 @@ class TestMainWeeklyPredictor:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_30_days: list[BtcPrice],
+        sample_daily_close_prices_30_days: list[Price],
     ) -> None:
         """
         Gherkin: Weekly predictor predicts 7 days ahead.
@@ -276,7 +276,7 @@ class TestMainWeeklyPredictor:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_30_days: list[BtcPrice],
+        sample_daily_close_prices_30_days: list[Price],
         sample_weekly_prediction_for_next_monday: Prediction,
     ) -> None:
         """
@@ -324,7 +324,7 @@ class TestMainWeeklyPredictor:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_10_days: list[BtcPrice],
+        sample_daily_close_prices_10_days: list[Price],
     ) -> None:
         """
         Gherkin: Weekly predictor fails gracefully if insufficient data.
@@ -360,7 +360,7 @@ class TestMainWeeklyPredictor:
     def test_no_active_model_fails(
         self,
         db_session: Session,
-        sample_daily_close_prices_30_days: list[BtcPrice],
+        sample_daily_close_prices_30_days: list[Price],
     ) -> None:
         """
         Should fail when no active model exists.

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.weekly.models import LinearRegressionModel
 
 # Note: db_session is provided by root conftest.py
@@ -135,17 +135,17 @@ def cached_daily_price_data_30_days():
 @pytest.fixture
 def sample_daily_close_prices_30_days(
     db_session: Session, cached_daily_price_data_30_days
-) -> list[BtcPrice]:
+) -> list[Price]:
     """
     Create 30 days of hourly prices using cached data.
 
     Returns:
-        List of 720 BtcPrice records (30 days * 24 hours)
+        List of 720 Price records (30 days * 24 hours)
     """
     prices = []
 
     for timestamp, open_p, high, low, close, volume in cached_daily_price_data_30_days:
-        price_record = BtcPrice(
+        price_record = Price(
             timestamp=timestamp,
             open=open_p,
             high=high,
@@ -191,17 +191,17 @@ def cached_daily_price_data_10_days():
 @pytest.fixture
 def sample_daily_close_prices_10_days(
     db_session: Session, cached_daily_price_data_10_days
-) -> list[BtcPrice]:
+) -> list[Price]:
     """
     Create 10 days of hourly prices using cached data (insufficient for 30-day window).
 
     Returns:
-        List of 240 BtcPrice records (10 days * 24 hours)
+        List of 240 Price records (10 days * 24 hours)
     """
     prices = []
 
     for timestamp, open_p, high, low, close, volume in cached_daily_price_data_10_days:
-        price_record = BtcPrice(
+        price_record = Price(
             timestamp=timestamp,
             open=open_p,
             high=high,
@@ -292,17 +292,17 @@ def sample_unevaluated_weekly_prediction_for_today(
 
 
 @pytest.fixture
-def sample_actual_price_for_today_7am(db_session: Session) -> BtcPrice:
+def sample_actual_price_for_today_7am(db_session: Session) -> Price:
     """
     Create today's 7am BTC price record.
 
     Returns:
-        BtcPrice record with timestamp=today 7am
+        Price record with timestamp=today 7am
     """
     today = date.today()
     timestamp_7am = datetime.combine(today, time(7, 0), tzinfo=UTC)
 
-    price_record = BtcPrice(
+    price_record = Price(
         timestamp=timestamp_7am,
         open=Decimal("67000.00"),
         high=Decimal("67800.00"),

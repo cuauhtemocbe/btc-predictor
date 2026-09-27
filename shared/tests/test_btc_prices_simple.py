@@ -1,5 +1,5 @@
 """
-Simple integration tests for BtcPrice model and btc_prices table.
+Simple integration tests for Price model and prices table.
 
 These tests assume migrations have been applied:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 
 @pytest.fixture(scope="module")
@@ -44,7 +44,7 @@ def test_insert_valid_ohlcv_record(session):
     """Gherkin Scenario 2: Insert valid OHLCV record."""
     test_timestamp = datetime(2026, 5, 16, 15, 0, 0, tzinfo=UTC)
 
-    price = BtcPrice(
+    price = Price(
         timestamp=test_timestamp,
         open=Decimal("67000.00"),
         high=Decimal("67500.00"),
@@ -59,9 +59,7 @@ def test_insert_valid_ohlcv_record(session):
 
     assert price.id is not None
 
-    retrieved = (
-        session.query(BtcPrice).filter(BtcPrice.timestamp == test_timestamp).first()
-    )
+    retrieved = session.query(Price).filter(Price.timestamp == test_timestamp).first()
     assert retrieved is not None
     assert retrieved.close == Decimal("67432.50")
     assert retrieved.source == "binance"
@@ -71,7 +69,7 @@ def test_duplicate_timestamp_rejected(session):
     """Gherkin Scenario 3: Duplicate timestamp is rejected."""
     test_timestamp = datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC)
 
-    first = BtcPrice(
+    first = Price(
         timestamp=test_timestamp,
         open=Decimal("50000.00"),
         high=Decimal("51000.00"),
@@ -83,7 +81,7 @@ def test_duplicate_timestamp_rejected(session):
     session.add(first)
     session.commit()
 
-    duplicate = BtcPrice(
+    duplicate = Price(
         timestamp=test_timestamp,  # Same timestamp
         open=Decimal("51000.00"),
         high=Decimal("52000.00"),
@@ -102,7 +100,7 @@ def test_duplicate_timestamp_rejected(session):
 
 def test_zero_volume_is_valid(session):
     """ZOMBIES edge case: Zero volume is valid."""
-    price = BtcPrice(
+    price = Price(
         timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),
         open=Decimal("50000.0"),
         high=Decimal("50000.0"),

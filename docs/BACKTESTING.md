@@ -34,7 +34,7 @@ Before running backtests, ensure you have:
 Check data availability:
 ```bash
 docker compose exec postgres psql -U btcpredictor -d btcpredictor \
-  -c "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM btc_prices;"
+  -c "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM prices;"
 ```
 
 ## Running a Backtest
@@ -262,7 +262,7 @@ WARNING: Skipping 2024-05-15: no actual price data
 **Solution**: The script automatically skips days with missing data. Check data quality:
 ```sql
 SELECT DATE(timestamp), COUNT(*) AS hourly_records
-FROM btc_prices
+FROM prices
 GROUP BY DATE(timestamp)
 HAVING COUNT(*) < 24
 ORDER BY DATE(timestamp);
@@ -278,7 +278,7 @@ WARNING: Skipping 2024-05-20: training failed - X contains NaN values
 
 **Solution**: Investigate data source and re-run backfill. Check for outliers:
 ```sql
-SELECT * FROM btc_prices
+SELECT * FROM prices
 WHERE close IS NULL 
    OR close = 0 
    OR close > 1000000

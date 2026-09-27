@@ -5,7 +5,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 from sqlalchemy.exc import OperationalError
 
 from fetch_price.exceptions import InvalidSymbolError, RateLimitError
@@ -108,11 +108,35 @@ class TestFilterExistingTimestamps:
         assert len(new_prices) == 3
         assert new_prices == sample_price_data
 
+    def test_filter_only_counts_existing_rows_of_the_same_symbol(
+        self, db_session, sample_price_data
+    ):
+        """A timestamp stored for another asset is not "existing" for this one."""
+        db_session.add(
+            Price(
+                symbol="PAXGUSDT",
+                timestamp=sample_price_data[0]["timestamp"],
+                open=Decimal("1"),
+                high=Decimal("1"),
+                low=Decimal("1"),
+                close=Decimal("1"),
+                volume=Decimal("1"),
+                source="binance",
+            )
+        )
+        db_session.commit()
+
+        assert filter_existing_timestamps(sample_price_data, db_session) == (sample_price_data)
+        assert (
+            filter_existing_timestamps(sample_price_data, db_session, "PAXGUSDT")
+            == sample_price_data[1:]
+        )
+
     def test_filter_with_existing(self, db_session, sample_price_data):
         """Test filtering when some records already exist."""
         # First, add 2 existing prices to DB
         existing = [
-            BtcPrice(
+            Price(
                 timestamp=datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
                 open=Decimal("63200.00"),
                 high=Decimal("63450.00"),
@@ -121,7 +145,7 @@ class TestFilterExistingTimestamps:
                 volume=Decimal("950.98765432"),
                 source="coingecko",
             ),
-            BtcPrice(
+            Price(
                 timestamp=datetime(2024, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
                 open=Decimal("63000.50"),
                 high=Decimal("63500.75"),
@@ -144,7 +168,7 @@ class TestFilterExistingTimestamps:
     def test_filter_all_existing(self, db_session):
         """Test filtering when all records already exist."""
         # Add existing record
-        existing = BtcPrice(
+        existing = Price(
             timestamp=datetime(2024, 5, 1, 1, 0, 0, tzinfo=timezone.utc),
             open=Decimal("63200.00"),
             high=Decimal("63450.00"),
@@ -190,7 +214,7 @@ class TestSavePrices:
         assert inserted == 3
 
         # Verify records in database
-        count = db_session.query(BtcPrice).count()
+        count = db_session.query(Price).count()
         assert count == 3
 
     def test_save_prices_empty(self, db_session):
@@ -216,7 +240,7 @@ class TestSavePrices:
         db_session.rollback()
 
         # Verify no records were inserted
-        count = db_session.query(BtcPrice).count()
+        count = db_session.query(Price).count()
         assert count == 0
 
 
@@ -228,10 +252,10 @@ class TestMain:
         """
         Gherkin Scenario: First run inserts new prices
 
-        Given the btc_prices table is empty
+        Given the prices table is empty
         And the CoinGecko API returns 24 candles (last 24 hours)
         When I run the job
-        Then 24 records are inserted into btc_prices
+        Then 24 records are inserted into prices
         And all records have source="coingecko"
         And no IntegrityError occurs
         """
@@ -283,7 +307,7 @@ class TestMain:
         """
         Gherkin Scenario: Second run skips existing prices
 
-        Given the btc_prices table already has records for timestamps T1, T2, T3
+        Given the prices table already has records for timestamps T1, T2, T3
         And the CoinGecko API returns candles for T1, T2, T3, T4 (T4 is new)
         When I run the job
         Then only 1 new record (T4) is inserted

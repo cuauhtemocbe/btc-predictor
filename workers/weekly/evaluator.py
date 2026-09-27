@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice, Prediction
+from shared.db.models import Prediction, Price
 from shared.utils import (
     calculate_pnl,
     calculate_pnl_long_short,
@@ -92,10 +92,10 @@ def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
 
     # Find first candle at or after 7am on target_date
     stmt = (
-        select(BtcPrice.close, BtcPrice.timestamp)
-        .where(BtcPrice.timestamp >= target_datetime)
-        .where(BtcPrice.timestamp < next_day)
-        .order_by(BtcPrice.timestamp.asc())
+        select(Price.close, Price.timestamp)
+        .where(Price.timestamp >= target_datetime)
+        .where(Price.timestamp < next_day)
+        .order_by(Price.timestamp.asc())
         .limit(1)
     )
     result = session.execute(stmt).first()

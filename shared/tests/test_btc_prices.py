@@ -1,8 +1,8 @@
 """
-Integration tests for BtcPrice model and btc_prices table.
+Integration tests for Price model and prices table.
 
 Covers all Gherkin scenarios from US-002:
-1. Create btc_prices table via migration
+1. Create prices table via migration
 2. Insert valid OHLCV record
 3. Duplicate timestamp rejected
 4. Downgrade migration removes table
@@ -18,34 +18,33 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from shared.config import settings
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 
 class TestBtcPricesTableMigration:
     """
-    Gherkin Scenario 1: Create btc_prices table via migration
+    Gherkin Scenario 1: Create prices table via migration
 
     Given Alembic is configured in shared/alembic/
     When I run "alembic upgrade head"
-    Then a table named "btc_prices" exists in PostgreSQL
+    Then a table named "prices" exists in PostgreSQL
     And it has columns: id, timestamp, open, high, low, close, volume, source
-    And timestamp has a UNIQUE constraint
+    And (symbol, timestamp) has a UNIQUE constraint
     """
 
-    def test_migration_creates_btc_prices_table(self, db_engine, apply_migrations):
-        """Test that Alembic migration creates btc_prices table with correct schema."""
+    def test_migration_creates_prices_table(self, db_engine, apply_migrations):
+        """Test that Alembic migration creates prices table with correct schema."""
         # Note: apply_migrations fixture ensures migrations are applied
 
         # Assert: Table exists
         inspector = inspect(db_engine)
-        assert "btc_prices" in inspector.get_table_names(), (
-            "btc_prices table should exist"
-        )
+        assert "prices" in inspector.get_table_names(), "prices table should exist"
 
         # Assert: Columns exist with correct types
-        columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
+        columns = {col["name"]: col for col in inspector.get_columns("prices")}
         expected_columns = [
             "id",
+            "symbol",
             "timestamp",
             "open",
             "high",
@@ -63,20 +62,20 @@ class TestBtcPricesTableMigration:
             "timestamp should be TIMESTAMP type"
         )
 
-        # Assert: UNIQUE constraint on timestamp exists
-        indexes = inspector.get_indexes("btc_prices")
-        timestamp_unique_index = next(
-            (idx for idx in indexes if "timestamp" in idx["column_names"]), None
+        # Assert: a timestamp is unique per symbol
+        unique_columns = [
+            uc["column_names"] for uc in inspector.get_unique_constraints("prices")
+        ]
+        assert ["symbol", "timestamp"] in unique_columns, (
+            "(symbol, timestamp) should be UNIQUE"
         )
-        assert timestamp_unique_index is not None, "Should have index on timestamp"
-        assert timestamp_unique_index["unique"], "timestamp index should be UNIQUE"
 
 
 class TestInsertValidRecord:
     """
     Gherkin Scenario 2: Insert valid OHLCV record
 
-    Given the btc_prices table exists
+    Given the prices table exists
     When I insert a record with timestamp "2026-05-16 14:00:00+00:00"
     And close=67432.50, volume=123.45, source="binance"
     Then the record is saved successfully
@@ -91,7 +90,7 @@ class TestInsertValidRecord:
         test_volume = Decimal("123.45")
 
         # Act: Insert record
-        price = BtcPrice(
+        price = Price(
             timestamp=test_timestamp,
             open=Decimal("67000.00"),
             high=Decimal("67500.00"),
@@ -109,9 +108,7 @@ class TestInsertValidRecord:
 
         # Assert: Query by timestamp returns the record
         retrieved = (
-            db_session.query(BtcPrice)
-            .filter(BtcPrice.timestamp == test_timestamp)
-            .first()
+            db_session.query(Price).filter(Price.timestamp == test_timestamp).first()
         )
         assert retrieved is not None, "Should be able to query record by timestamp"
         assert retrieved.close == test_close, "Close price should match"
@@ -151,7 +148,7 @@ class TestDuplicateTimestampRejected:
         try:
             # Arrange: Insert first record and commit it
             test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
-            first_price = BtcPrice(
+            first_price = Price(
                 timestamp=test_timestamp,
                 open=Decimal("50000.00"),
                 high=Decimal("51000.00"),
@@ -164,7 +161,7 @@ class TestDuplicateTimestampRejected:
             session.commit()
 
             # Act & Assert: Attempt to insert duplicate timestamp
-            duplicate_price = BtcPrice(
+            duplicate_price = Price(
                 timestamp=test_timestamp,  # Same timestamp
                 open=Decimal("51000.00"),  # Different prices
                 high=Decimal("52000.00"),
@@ -189,17 +186,13 @@ class TestDuplicateTimestampRejected:
 
             # Verify only one record exists (in a new transaction)
             count = (
-                session.query(BtcPrice)
-                .filter(BtcPrice.timestamp == test_timestamp)
-                .count()
+                session.query(Price).filter(Price.timestamp == test_timestamp).count()
             )
             assert count == 1, "Should have only one record with this timestamp"
 
         finally:
             # Clean up: delete test data
-            session.query(BtcPrice).filter(
-                BtcPrice.timestamp == test_timestamp
-            ).delete()
+            session.query(Price).filter(Price.timestamp == test_timestamp).delete()
             session.commit()
             session.close()
 
@@ -208,9 +201,9 @@ class TestDowngradeMigrationRemovesTable:
     """
     Gherkin Scenario 4: Downgrade migration removes table
 
-    Given the btc_prices table exists
+    Given the prices table exists
     When I run "alembic downgrade -1"
-    Then the btc_prices table no longer exists
+    Then the prices table no longer exists
     """
 
     @pytest.mark.skip(
@@ -219,8 +212,8 @@ class TestDowngradeMigrationRemovesTable:
             "Tested manually."
         )
     )
-    def test_downgrade_removes_btc_prices_table(self, db_engine, apply_migrations):
-        """Test that downgrading migration removes btc_prices table.
+    def test_downgrade_removes_prices_table(self, db_engine, apply_migrations):
+        """Test that downgrading migration removes prices table.
 
         NOTE: This test is skipped in automated runs because it would break
         other tests that depend on apply_migrations. It has been verified
@@ -232,7 +225,7 @@ class TestDowngradeMigrationRemovesTable:
 
         # Verify table exists
         inspector = inspect(db_engine)
-        assert "btc_prices" in inspector.get_table_names(), (
+        assert "prices" in inspector.get_table_names(), (
             "Table should exist before downgrade"
         )
 
@@ -241,7 +234,7 @@ class TestDowngradeMigrationRemovesTable:
 
         # Assert: Table no longer exists
         inspector = inspect(db_engine)
-        assert "btc_prices" not in inspector.get_table_names(), (
+        assert "prices" not in inspector.get_table_names(), (
             "Table should not exist after downgrade"
         )
 
@@ -254,7 +247,7 @@ class TestBtcPriceModelEdgeCases:
 
     def test_zero_volume_is_valid(self, db_session, apply_migrations):
         """Test that volume=0.0 is valid (ZOMBIES: Zero case)."""
-        price = BtcPrice(
+        price = Price(
             timestamp=datetime.now(UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
@@ -269,7 +262,7 @@ class TestBtcPriceModelEdgeCases:
 
     def test_null_timestamp_raises_error(self, db_session, apply_migrations):
         """Test that NULL timestamp violates NOT NULL constraint (ZOMBIES: Exceptions)."""  # noqa: E501
-        price = BtcPrice(
+        price = Price(
             timestamp=None,  # NULL timestamp should fail
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
@@ -289,7 +282,7 @@ class TestBtcPriceModelEdgeCases:
         """Test that source defaults to 'binance' if not specified."""
         # Note: SQLAlchemy requires explicit default in Python, not just DB default
         # So this test verifies the model definition includes default="binance"
-        price = BtcPrice(
+        price = Price(
             timestamp=datetime.now(UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),

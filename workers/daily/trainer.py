@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
-from shared.db.models import BtcPrice, Model
+from shared.db.models import Model, Price
 from shared.utils import calculate_mape, split_train_validation
 from workers.daily.models import (
     ARIMAModel,
@@ -118,7 +118,7 @@ def count_available_days(session: Session) -> int:
     Returns:
         Number of distinct days with price data
     """
-    stmt = select(func.count(func.distinct(func.date_trunc("day", BtcPrice.timestamp))))
+    stmt = select(func.count(func.distinct(func.date_trunc("day", Price.timestamp))))
     count = session.execute(stmt).scalar_one()
     return count
 
@@ -170,21 +170,21 @@ def fetch_training_data(
     # Subquery: Get the latest timestamp for each day
     latest_per_day = (
         select(
-            func.date_trunc("day", BtcPrice.timestamp).label("day"),
-            func.max(BtcPrice.timestamp).label("latest_timestamp"),
+            func.date_trunc("day", Price.timestamp).label("day"),
+            func.max(Price.timestamp).label("latest_timestamp"),
         )
         .group_by("day")
-        .order_by(func.date_trunc("day", BtcPrice.timestamp).desc())
+        .order_by(func.date_trunc("day", Price.timestamp).desc())
         .limit(min_days)
         .subquery()
     )
 
     # Main query: Join to get the close price for the latest timestamp each day
     stmt = (
-        select(BtcPrice.close)
+        select(Price.close)
         .join(
             latest_per_day,
-            BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+            Price.timestamp == latest_per_day.c.latest_timestamp,
         )
         .order_by(latest_per_day.c.day.desc())
     )

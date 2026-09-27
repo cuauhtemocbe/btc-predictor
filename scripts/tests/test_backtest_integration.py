@@ -15,7 +15,7 @@ from scripts.backtest import (
     run_backtest,
     validate_arguments,
 )
-from shared.db.models import BacktestResult, BtcPrice
+from shared.db.models import BacktestResult, Price
 
 
 class TestBacktestIntegration:
@@ -250,7 +250,7 @@ class TestBacktestWithDataGaps:
                 timestamp = datetime.combine(
                     current_date, datetime.min.time()
                 ) + timedelta(hours=hour)
-                price = BtcPrice(
+                price = Price(
                     timestamp=timestamp,
                     open=Decimal("66000.00"),
                     high=Decimal("66100.00"),

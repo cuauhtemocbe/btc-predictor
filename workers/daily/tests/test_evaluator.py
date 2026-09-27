@@ -18,7 +18,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.db.models import BtcPrice, Model, Prediction
+from shared.db.models import Model, Prediction, Price
 from workers.daily import evaluator
 
 # ============================================================================
@@ -265,7 +265,7 @@ class TestFetchActualPrice:
     """Test the fetch_actual_price() function."""
 
     def test_fetch_existing_price(
-        self, db_session: Session, sample_actual_price_for_today: BtcPrice
+        self, db_session: Session, sample_actual_price_for_today: Price
     ) -> None:
         """Should fetch 7am close price for today."""
         today = date.today()
@@ -300,7 +300,7 @@ class TestFetchActualPrice:
         for i, timestamp in enumerate(candles):
             price = Decimal("95000.00") + Decimal(i * 100)  # Incrementing prices
             db_session.add(
-                BtcPrice(
+                Price(
                     timestamp=timestamp,
                     open=price,
                     high=price,
@@ -330,7 +330,7 @@ class TestFetchActualPrice:
         for i, timestamp in enumerate(early_candles):
             price = Decimal("96000.00") + Decimal(i * 100)
             db_session.add(
-                BtcPrice(
+                Price(
                     timestamp=timestamp,
                     open=price,
                     high=price,
@@ -364,7 +364,7 @@ class TestFetchActualPrice:
 
         for timestamp, price in candles:
             db_session.add(
-                BtcPrice(
+                Price(
                     timestamp=timestamp,
                     open=price,
                     high=price,
@@ -429,7 +429,7 @@ class TestEvaluatorMain:
         self,
         db_session: Session,
         sample_unevaluated_prediction_for_today: Prediction,
-        sample_actual_price_for_today: BtcPrice,
+        sample_actual_price_for_today: Price,
         monkeypatch,
     ) -> None:
         """
@@ -545,7 +545,7 @@ class TestEvaluatorMain:
         self,
         db_session: Session,
         sample_unevaluated_prediction_for_today: Prediction,
-        sample_actual_price_for_today: BtcPrice,
+        sample_actual_price_for_today: Price,
         monkeypatch,
     ) -> None:
         """

@@ -7,7 +7,7 @@ Functions:
 - save_backtest_result: Save backtest result to database
 """
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import BacktestResult, BtcPrice
+from shared.db.models import BacktestResult, Price
 from workers.daily.models.linear import LinearRegressionModel
 
 
@@ -52,31 +52,32 @@ def fetch_training_data(
         start_date = end_date - timedelta(days=window_days)
 
         # Subquery: Get the latest timestamp for each day
-        from datetime import datetime, timezone as tz
+        from datetime import datetime
+
         from sqlalchemy import func
 
         # Convert dates to datetime with timezone for proper comparison
-        start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=tz.utc)
-        end_datetime = datetime.combine(end_date, datetime.min.time()).replace(tzinfo=tz.utc) + timedelta(days=1)
+        start_datetime = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=UTC)
+        end_datetime = datetime.combine(end_date, datetime.min.time()).replace(tzinfo=UTC) + timedelta(days=1)
 
         latest_per_day = (
             select(
-                func.date_trunc("day", BtcPrice.timestamp).label("day"),
-                func.max(BtcPrice.timestamp).label("latest_timestamp"),
+                func.date_trunc("day", Price.timestamp).label("day"),
+                func.max(Price.timestamp).label("latest_timestamp"),
             )
-            .where(BtcPrice.timestamp >= start_datetime)
-            .where(BtcPrice.timestamp < end_datetime)
+            .where(Price.timestamp >= start_datetime)
+            .where(Price.timestamp < end_datetime)
             .group_by("day")
-            .order_by(func.date_trunc("day", BtcPrice.timestamp))
+            .order_by(func.date_trunc("day", Price.timestamp))
             .subquery()
         )
 
         # Main query: Join to get all OHLCV data for the latest timestamp each day
         stmt = (
-            select(BtcPrice)
+            select(Price)
             .join(
                 latest_per_day,
-                BtcPrice.timestamp == latest_per_day.c.latest_timestamp,
+                Price.timestamp == latest_per_day.c.latest_timestamp,
             )
             .order_by(latest_per_day.c.day)
         )
@@ -291,18 +292,18 @@ def get_actual_price_for_date(
         close_db = True
 
     try:
-        from datetime import datetime, timezone as tz
+        from datetime import datetime
 
         # Convert date to datetime with UTC timezone for comparison
-        start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=tz.utc)
+        start_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=UTC)
         end_datetime = start_datetime + timedelta(days=1)
 
         # Get last price of the day
         stmt = (
-            select(BtcPrice)
-            .where(BtcPrice.timestamp >= start_datetime)
-            .where(BtcPrice.timestamp < end_datetime)
-            .order_by(BtcPrice.timestamp.desc())
+            select(Price)
+            .where(Price.timestamp >= start_datetime)
+            .where(Price.timestamp < end_datetime)
+            .order_by(Price.timestamp.desc())
             .limit(1)
         )
 

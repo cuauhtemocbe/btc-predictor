@@ -80,7 +80,7 @@ _limit_threads_per_xdist_worker()
 _point_tests_at_test_database()
 
 from shared.config import settings  # noqa: E402
-from shared.db.models import Base, BtcPrice, Model, Prediction  # noqa: E402
+from shared.db.models import Base, Model, Prediction, Price  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -141,7 +141,7 @@ def db_session(db_engine_session):
     # Clean existing data (not schema)
     session.execute(Prediction.__table__.delete())
     session.execute(Model.__table__.delete())
-    session.execute(BtcPrice.__table__.delete())
+    session.execute(Price.__table__.delete())
     session.commit()
 
     # Start a savepoint (nested transaction)

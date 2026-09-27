@@ -1,5 +1,5 @@
 """
-Integration tests for BtcPrice model - US-002 Gherkin scenarios.
+Integration tests for Price model - US-002 Gherkin scenarios.
 
 Prerequisites: Run migrations before tests:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from shared.config import settings
-from shared.db.models import BtcPrice
+from shared.db.models import Price
 
 
 # Module-level engine (shared across all tests)
@@ -47,27 +47,28 @@ def session(engine):
 
 class TestGherkinScenario1:
     """
-    Scenario 1: Create btc_prices table via migration
+    Scenario 1: Create prices table via migration
 
     Given Alembic is configured in shared/alembic/
     When I run "alembic upgrade head"
-    Then a table named "btc_prices" exists in PostgreSQL
+    Then a table named "prices" exists in PostgreSQL
     And it has columns: id, timestamp, open, high, low, close, volume, source
-    And timestamp has a UNIQUE constraint
+    And (symbol, timestamp) has a UNIQUE constraint
     """
 
     def test_table_exists_with_correct_schema(self, engine):
-        """Verify btc_prices table exists with correct structure."""
+        """Verify prices table exists with correct structure."""
         inspector = inspect(engine)
 
         # Assert: Table exists
         tables = inspector.get_table_names()
-        assert "btc_prices" in tables, "btc_prices table should exist"
+        assert "prices" in tables, "prices table should exist"
 
         # Assert: All columns exist
-        columns = {col["name"]: col for col in inspector.get_columns("btc_prices")}
+        columns = {col["name"]: col for col in inspector.get_columns("prices")}
         expected_cols = [
             "id",
+            "symbol",
             "timestamp",
             "open",
             "high",
@@ -86,18 +87,20 @@ class TestGherkinScenario1:
             "timestamp should be TIMESTAMP type"
         )
 
-        # Assert: UNIQUE index on timestamp
-        indexes = inspector.get_indexes("btc_prices")
-        timestamp_idx = [idx for idx in indexes if "timestamp" in idx["column_names"]]
-        assert len(timestamp_idx) > 0, "Should have index on timestamp"
-        assert timestamp_idx[0]["unique"], "timestamp index should be UNIQUE"
+        # Assert: a timestamp is unique per symbol
+        unique_columns = [
+            uc["column_names"] for uc in inspector.get_unique_constraints("prices")
+        ]
+        assert ["symbol", "timestamp"] in unique_columns, (
+            "(symbol, timestamp) should be UNIQUE"
+        )
 
 
 class TestGherkinScenario2:
     """
     Scenario 2: Insert valid OHLCV record
 
-    Given the btc_prices table exists
+    Given the prices table exists
     When I insert a record with timestamp "2026-05-16 14:00:00+00:00"
     And close=67432.50, volume=123.45, source="binance"
     Then the record is saved successfully
@@ -109,7 +112,7 @@ class TestGherkinScenario2:
         test_time = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
 
         # Act: Insert record
-        price = BtcPrice(
+        price = Price(
             timestamp=test_time,
             open=Decimal("67000.00"),
             high=Decimal("67500.00"),
@@ -126,7 +129,7 @@ class TestGherkinScenario2:
         assert price.id is not None, "Saved record should have an ID"
 
         # Assert: Can query by timestamp
-        found = session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).first()
+        found = session.query(Price).filter(Price.timestamp == test_time).first()
 
         assert found is not None, "Should find record by timestamp"
         assert found.close == Decimal("67432.50"), "Close price should match"
@@ -158,7 +161,7 @@ class TestGherkinScenario3:
             test_time = datetime(2026, 5, 16, 15, 0, 0, tzinfo=UTC)
 
             # Arrange: Insert first record and commit
-            first = BtcPrice(
+            first = Price(
                 timestamp=test_time,
                 open=Decimal("50000.00"),
                 high=Decimal("51000.00"),
@@ -171,7 +174,7 @@ class TestGherkinScenario3:
             session.commit()
 
             # Act & Assert: Try to insert duplicate
-            duplicate = BtcPrice(
+            duplicate = Price(
                 timestamp=test_time,  # Same timestamp!
                 open=Decimal("51000.00"),
                 high=Decimal("52000.00"),
@@ -195,14 +198,12 @@ class TestGherkinScenario3:
             session.rollback()
 
             # Verify only one record exists (in new transaction)
-            count = (
-                session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).count()
-            )
+            count = session.query(Price).filter(Price.timestamp == test_time).count()
             assert count == 1, "Should have exactly one record with this timestamp"
 
         finally:
             # Clean up: delete test data
-            session.query(BtcPrice).filter(BtcPrice.timestamp == test_time).delete()
+            session.query(Price).filter(Price.timestamp == test_time).delete()
             session.commit()
             session.close()
 
@@ -211,9 +212,9 @@ class TestGherkinScenario4:
     """
     Scenario 4: Downgrade migration removes table
 
-    Given the btc_prices table exists
+    Given the prices table exists
     When I run "alembic downgrade -1"
-    Then the btc_prices table no longer exists
+    Then the prices table no longer exists
 
     NOTE: This scenario was verified manually in Task 4.
     Skipping automated test to avoid breaking other tests.
@@ -230,7 +231,7 @@ class TestZombiesEdgeCases:
 
     def test_zero_volume_is_valid(self, session):
         """ZOMBIES Z: Zero volume should be accepted."""
-        price = BtcPrice(
+        price = Price(
             timestamp=datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC),
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
@@ -246,7 +247,7 @@ class TestZombiesEdgeCases:
 
     def test_null_timestamp_rejected(self, session):
         """ZOMBIES E: NULL timestamp should violate NOT NULL constraint."""
-        price = BtcPrice(
+        price = Price(
             timestamp=None,  # NULL should fail
             open=Decimal("50000.0"),
             high=Decimal("50000.0"),
@@ -267,7 +268,7 @@ class TestZombiesEdgeCases:
         # BTC could theoretically reach very high values
         large_price = Decimal("999999999.99999999")  # Within NUMERIC(18,8)
 
-        price = BtcPrice(
+        price = Price(
             timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),
             open=large_price,
             high=large_price,
