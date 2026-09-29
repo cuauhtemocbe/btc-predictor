@@ -27,7 +27,7 @@ The model never sees future data during training. For each prediction, it only u
 
 Before running backtests, ensure you have:
 
-1. ✅ **Historical BTC prices**: Run the backfill script (US-019) to load 90+ days of data
+1. ✅ **Historical BTC prices**: Run `scripts/load_binance_history.py` (#101) to load years of daily data
 2. ✅ **Database migration**: The `backtest_results` table must exist (automatic via Alembic)
 3. ✅ **Docker containers running**: `docker compose up -d`
 
@@ -248,7 +248,7 @@ ValueError: Insufficient data: need at least 30 days of data before 2024-05-01
 
 **Solution**: Run the backfill script to load more historical data:
 ```bash
-docker compose exec api python scripts/backfill_daily_prices.py --days=90
+docker compose exec api python scripts/load_binance_history.py
 ```
 
 ### Error: "No actual price data"
