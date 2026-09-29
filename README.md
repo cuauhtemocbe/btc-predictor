@@ -175,43 +175,31 @@ El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los desp
 
 La protección de `main` y la exigencia de checks obligatorios se configura por separado en la issue [#49](https://github.com/cuauhtemocbe/btc-predictor/issues/49).
 
-### Backfill de Precios Históricos (US-019)
+### Carga de Historial de Precios (#101)
 
-Para cargar datos históricos de BTC desde CoinGecko y acelerar el desarrollo sin esperar meses de datos:
+Para cargar años de precios diarios de BTC (`BTCUSDT`, desde 2017-08) y oro (`PAXGUSDT`, proxy desde 2020-08) desde [data.binance.vision](https://data.binance.vision) y entrenar/evaluar con miles de días:
 
 ```bash
-# Cargar últimos 30 días (RECOMENDADO: granularidad de 4 horas, ~180 candles)
-docker compose exec api python scripts/backfill_daily_prices.py --days=30
+# Cargar todo el historial de ambos símbolos hasta el último mes cerrado
+docker compose exec api python scripts/load_binance_history.py
 
-# Cargar últimos 7 días (testing)
-docker compose exec api python scripts/backfill_daily_prices.py --days=7
+# Un solo símbolo
+docker compose exec api python scripts/load_binance_history.py --symbols PAXGUSDT
 
-# Cargar 90 días con logs verbose (granularidad diaria)
-docker compose exec api python scripts/backfill_daily_prices.py --days=90 --verbose
+# Verificar que el host es alcanzable desde Railway (sin HTTP 451/403), sin escribir en la BD
+railway run -s api python scripts/load_binance_history.py --check
 
-# Production backfill (Railway)
-railway run -s api python scripts/backfill_daily_prices.py --days=30
+# Carga en producción (Railway)
+railway run -s api python scripts/load_binance_history.py
 ```
-
-**Granularidad de CoinGecko:**
-- ✅ **1-30 días:** Candles de 4 horas (~6/día) — **Mejor para ML**
-- ⚠️ **31-90 días:** Candles diarios (~1/día) — Menos precisión
-- ❌ **91+ días:** Candles de 4 días — Muy espaciado para ML
 
 **Características:**
-- ✅ **Idempotente:** Seguro ejecutar múltiples veces (UNIQUE constraint previene duplicados)
-- ✅ **Rate Limiting:** Maneja HTTP 429 automáticamente con exponential backoff
-- ✅ **Progress Logging:** Muestra progreso cada 100 registros
-- ✅ **Batch Insertion:** Inserta en chunks de 100 para performance
-
-**Ejemplo de salida:**
-```
-INFO - Fetching 30 days of data from CoinGecko API...
-INFO - Fetched 180 price points from CoinGecko (4-hour granularity)
-INFO - Processing batch 1/2 (0/180 records, 0%)
-INFO - Processing batch 2/2 (100/180 records, 55%)
-INFO - Backfill completed: 180 new prices inserted, 0 duplicates skipped
-```
+- ✅ **Idempotente:** volver a ejecutarlo no duplica filas (`ON CONFLICT DO NOTHING` sobre `unique_price_per_symbol`)
+- ✅ **Verificación SHA256:** cada zip se compara con su `.CHECKSUM`; si no coincide no se inserta nada de ese archivo y el error nombra el archivo
+- ✅ **Falla de forma clara:** un mes faltante (404) o un zip corrupto detiene la carga con un error explícito
+- ✅ **Validación de continuidad:** al terminar, reporta cualquier día faltante o con volumen 0
+- ✅ **Timestamps normalizados:** los CSV usan milisegundos hasta 2024 y microsegundos desde 2025-01-01; ambos se guardan como 00:00 UTC
+- El código vive en `shared/shared/binance_vision.py` (solo stdlib para HTTP)
 
 ### Backtesting Walk-Forward (US-020)
 
