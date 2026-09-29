@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
-from shared.db.models import Model, Price
+from shared.db.models import DEFAULT_SYMBOL, Model, Price
 from shared.utils import calculate_mape, split_train_validation
 from workers.daily.models import BaseModel, LinearRegressionModel
 
@@ -105,14 +105,16 @@ def calculate_dynamic_window(days_available: int) -> tuple[int, int]:
         return (21, 110)  # Phase 5: window=21 -> min = 22*5 = 110
 
 
-def count_available_days(session: Session) -> int:
+def count_available_days(session: Session, symbol: str = DEFAULT_SYMBOL) -> int:
     """
     Count how many distinct days of price data are available in the database.
 
     Returns:
         Number of distinct days with price data
     """
-    stmt = select(func.count(func.distinct(func.date_trunc("day", Price.timestamp))))
+    stmt = select(
+        func.count(func.distinct(func.date_trunc("day", Price.timestamp)))
+    ).where(Price.symbol == symbol)
     count = session.execute(stmt).scalar_one()
     return count
 
@@ -142,7 +144,10 @@ def _get_phase_name(days_available: int) -> str:
 
 
 def fetch_training_data(
-    session: Session, window_days: int = 30, min_days: int = 60
+    session: Session,
+    window_days: int = 30,
+    min_days: int = 60,
+    symbol: str = DEFAULT_SYMBOL,
 ) -> list[Decimal]:
     """
     Fetch historical DAILY BTC close prices for training.
@@ -167,6 +172,7 @@ def fetch_training_data(
             func.date_trunc("day", Price.timestamp).label("day"),
             func.max(Price.timestamp).label("latest_timestamp"),
         )
+        .where(Price.symbol == symbol)
         .group_by("day")
         .order_by(func.date_trunc("day", Price.timestamp).desc())
         .limit(min_days)
@@ -180,6 +186,7 @@ def fetch_training_data(
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
         )
+        .where(Price.symbol == symbol)
         .order_by(latest_per_day.c.day.desc())
     )
 

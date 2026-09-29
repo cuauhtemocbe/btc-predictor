@@ -23,7 +23,7 @@ from sqlalchemy import func
 
 from backtest import main as run_backtest_main
 from shared.db.database import SessionLocal
-from shared.db.models import Price
+from shared.db.models import DEFAULT_SYMBOL, Price
 
 # Configure logging
 logging.basicConfig(
@@ -54,11 +54,15 @@ def calculate_adaptive_window(db) -> tuple[date, date, int] | None:
         Tuple of (start_date, end_date, training_window) or None if insufficient data
     """
     # Query oldest and newest prices
-    result = db.query(
-        func.date(func.min(Price.timestamp)).label("oldest"),
-        func.date(func.max(Price.timestamp)).label("newest"),
-        func.count(func.distinct(func.date(Price.timestamp))).label("total_days"),
-    ).first()
+    result = (
+        db.query(
+            func.date(func.min(Price.timestamp)).label("oldest"),
+            func.date(func.max(Price.timestamp)).label("newest"),
+            func.count(func.distinct(func.date(Price.timestamp))).label("total_days"),
+        )
+        .filter(Price.symbol == DEFAULT_SYMBOL)
+        .first()
+    )
 
     if not result or not result.oldest or not result.newest:
         logger.error("No price data found in database")

@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import Model, Prediction, Price
+from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
 from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -178,7 +178,9 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
     return models[0]
 
 
-def get_recent_prices(session: Session, window_days: int) -> list[Decimal]:
+def get_recent_prices(
+    session: Session, window_days: int, symbol: str = DEFAULT_SYMBOL
+) -> list[Decimal]:
     """
     Fetch the most recent N DAYS of BTC close prices.
 
@@ -201,6 +203,7 @@ def get_recent_prices(session: Session, window_days: int) -> list[Decimal]:
             func.date_trunc("day", Price.timestamp).label("day"),
             func.max(Price.timestamp).label("latest_timestamp"),
         )
+        .where(Price.symbol == symbol)
         .group_by("day")
         .order_by(func.date_trunc("day", Price.timestamp).desc())
         .limit(window_days)
@@ -214,6 +217,7 @@ def get_recent_prices(session: Session, window_days: int) -> list[Decimal]:
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
         )
+        .where(Price.symbol == symbol)
         .order_by(latest_per_day.c.day.desc())
     )
 
@@ -358,7 +362,10 @@ def main(session: Session | None = None) -> int:
 
         # Get current price once (same for all models)
         current_price_stmt = (
-            select(Price.close).order_by(Price.timestamp.desc()).limit(1)
+            select(Price.close)
+            .where(Price.symbol == DEFAULT_SYMBOL)
+            .order_by(Price.timestamp.desc())
+            .limit(1)
         )
         current_price = session.execute(current_price_stmt).scalar_one()
         logger.info(f"Current BTC price: ${current_price}")

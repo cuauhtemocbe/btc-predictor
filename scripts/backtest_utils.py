@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import BacktestResult, Price
+from shared.db.models import DEFAULT_SYMBOL, BacktestResult, Price
 from workers.daily.models.linear import LinearRegressionModel
 
 
@@ -65,6 +65,7 @@ def fetch_training_data(
                 func.date_trunc("day", Price.timestamp).label("day"),
                 func.max(Price.timestamp).label("latest_timestamp"),
             )
+            .where(Price.symbol == DEFAULT_SYMBOL)
             .where(Price.timestamp >= start_datetime)
             .where(Price.timestamp < end_datetime)
             .group_by("day")
@@ -79,6 +80,7 @@ def fetch_training_data(
                 latest_per_day,
                 Price.timestamp == latest_per_day.c.latest_timestamp,
             )
+            .where(Price.symbol == DEFAULT_SYMBOL)
             .order_by(latest_per_day.c.day)
         )
 
@@ -301,6 +303,7 @@ def get_actual_price_for_date(
         # Get last price of the day
         stmt = (
             select(Price)
+            .where(Price.symbol == DEFAULT_SYMBOL)
             .where(Price.timestamp >= start_datetime)
             .where(Price.timestamp < end_datetime)
             .order_by(Price.timestamp.desc())
