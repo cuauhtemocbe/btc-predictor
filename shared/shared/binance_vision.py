@@ -258,7 +258,9 @@ def load_history(
 
     Months are committed one at a time and any error stops the load, so a bad
     file never leaves partial rows from that file. Running again is a no-op for
-    months already loaded.
+    months already loaded. Binance may publish the file of the month that just
+    closed a few days late, so a missing file for that last month is skipped with
+    a warning; a missing file in any earlier month is still an error.
 
     Returns the number of rows inserted.
     """
@@ -271,7 +273,15 @@ def load_history(
 
     inserted = 0
     for year, month in months_between(first, last):
-        rows = fetch_month(symbol, year, month, fetch)
+        try:
+            rows = fetch_month(symbol, year, month, fetch)
+        except MonthFileNotFoundError:
+            if (year, month) != last:
+                raise
+            logger.warning(
+                "%s %d-%02d: not published yet, skipping", symbol, year, month
+            )
+            continue
         added = insert_prices(session, rows)
         inserted += added
         logger.info(
@@ -283,12 +293,15 @@ def load_history(
 def validate_history(session: Session, symbol: str) -> None:
     """Fail if the loaded series has a missing day or a day without volume.
 
+    Only rows loaded from Binance Vision are checked; rows from other sources
+    for the same symbol are ignored.
+
     Raises:
         HistoryValidationError: listing every offending date.
     """
     records = session.execute(
         select(Price.timestamp, Price.volume)
-        .where(Price.symbol == symbol)
+        .where(Price.symbol == symbol, Price.source == SOURCE)
         .order_by(Price.timestamp)
     ).all()
     if not records:

@@ -217,15 +217,29 @@ class TestMissingAndCorruptFiles:
     """ZOMBIES: a missing month or a corrupt zip stops the load with a clear error."""
 
     def test_missing_month_file_raises_clear_error(self, db_session, vision):
+        vision.add_month("BTCUSDT", 2025, 2)  # January is missing, February is last
         with pytest.raises(MonthFileNotFoundError, match="BTCUSDT-1d-2025-01.zip"):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=date(2025, 3, 10),
                 fetch=vision,
                 start_month=(2025, 1),
             )
         assert _count(db_session) == 0
+
+    def test_last_closed_month_not_published_yet_is_skipped(self, db_session, vision):
+        vision.add_month("BTCUSDT", 2025, 1)  # February is not published yet
+
+        inserted = load_history(
+            db_session,
+            "BTCUSDT",
+            today=date(2025, 3, 2),
+            fetch=vision,
+            start_month=(2025, 1),
+        )
+
+        assert inserted == _count(db_session, "BTCUSDT") == 31
 
     def test_missing_checksum_file_raises_clear_error(self, vision):
         vision.add_month("BTCUSDT", 2025, 1)
@@ -361,6 +375,31 @@ class TestContinuityValidation:
 
     def test_empty_series_is_valid(self, db_session):
         validate_history(db_session, "BTCUSDT")
+
+    def test_rows_from_other_sources_are_ignored(self, db_session, vision):
+        vision.add_month("BTCUSDT", 2024, 3)
+        load_history(
+            db_session,
+            "BTCUSDT",
+            today=date(2024, 4, 5),
+            fetch=vision,
+            start_month=(2024, 3),
+        )
+        db_session.add(
+            Price(
+                symbol="BTCUSDT",
+                timestamp=datetime(2024, 3, 1, 4, tzinfo=UTC),
+                open=1,
+                high=1,
+                low=1,
+                close=1,
+                volume=0,
+                source="coingecko",
+            )
+        )
+        db_session.commit()
+
+        validate_history(db_session, "BTCUSDT")  # zero-volume foreign row ignored
 
     def test_validation_is_per_symbol(self, db_session):
         self._load_with_gap(db_session, date(2024, 3, 10))
