@@ -13,6 +13,7 @@ time is in microseconds instead of milliseconds.
 
 import hashlib
 import io
+import json
 import logging
 import time
 import urllib.error
@@ -33,7 +34,11 @@ from shared.db.models import Price
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://data.binance.vision/data/spot/monthly/klines"
+DAILY_BASE_URL = "https://data.binance.vision/data/spot/daily/klines"
+# Mirror of the public API that serves market data only and is not geo-blocked.
+REST_KLINES_URL = "https://data-api.binance.vision/api/v3/klines"
 SOURCE = "binance_vision"
+REST_SOURCE = "binance_api"
 
 # First month with a file on data.binance.vision, per supported symbol.
 # PAXGUSDT (a gold-backed token) is the gold proxy: 24/7 trading, no weekend gaps.
@@ -200,17 +205,8 @@ def _get_existing(fetch: Fetcher, url: str) -> bytes:
         raise
 
 
-def fetch_month(
-    symbol: str, year: int, month: int, fetch: Fetcher = http_get
-) -> list[dict[str, Any]]:
-    """Download, verify and parse one monthly file.
-
-    Raises:
-        MonthFileNotFoundError: the zip or its checksum does not exist.
-        ChecksumMismatchError: the zip does not match its .CHECKSUM.
-        CorruptArchiveError: the zip cannot be read.
-    """
-    url = month_file_url(symbol, year, month)
+def _read_archive(url: str, symbol: str, fetch: Fetcher) -> list[dict[str, Any]]:
+    """Download ``url`` and its checksum, verify, unzip and parse the klines."""
     archive = _get_existing(fetch, url)
     checksum_line = _get_existing(fetch, url + ".CHECKSUM").decode().split()
     expected = checksum_line[0].lower() if checksum_line else ""
@@ -228,6 +224,135 @@ def fetch_month(
     except zipfile.BadZipFile as exc:
         raise CorruptArchiveError(f"{url} is not a valid zip file") from exc
     return parse_klines_csv(text, symbol)
+
+
+def fetch_month(
+    symbol: str, year: int, month: int, fetch: Fetcher = http_get
+) -> list[dict[str, Any]]:
+    """Download, verify and parse one monthly file.
+
+    Raises:
+        MonthFileNotFoundError: the zip or its checksum does not exist.
+        ChecksumMismatchError: the zip does not match its .CHECKSUM.
+        CorruptArchiveError: the zip cannot be read.
+    """
+    return _read_archive(month_file_url(symbol, year, month), symbol, fetch)
+
+
+def daily_file_url(symbol: str, day: date) -> str:
+    """URL of the single-day klines zip for ``symbol``."""
+    return f"{DAILY_BASE_URL}/{symbol}/1d/{symbol}-1d-{day.isoformat()}.zip"
+
+
+def fetch_day_file(
+    symbol: str, day: date, fetch: Fetcher = http_get
+) -> list[dict[str, Any]]:
+    """Download, verify and parse the daily file of ``day``.
+
+    Raises:
+        MonthFileNotFoundError: the zip or its checksum is not published (404).
+        ChecksumMismatchError: the zip does not match its .CHECKSUM.
+        CorruptArchiveError: the zip cannot be read.
+    """
+    return _read_archive(daily_file_url(symbol, day), symbol, fetch)
+
+
+def fetch_day_rest(
+    symbol: str, day: date, fetch: Fetcher = http_get
+) -> list[dict[str, Any]]:
+    """Fetch the daily bar of ``day`` from the REST klines endpoint.
+
+    Returns an empty list if Binance has no bar for that day.
+
+    Raises:
+        BinanceVisionError: the answer is not the expected list of klines.
+    """
+    start_ms = int(
+        datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp() * 1000
+    )
+    url = f"{REST_KLINES_URL}?symbol={symbol}&interval=1d&startTime={start_ms}&limit=1"
+    try:
+        klines = json.loads(fetch(url))
+        rows: list[dict[str, Any]] = [
+            {
+                "symbol": symbol,
+                "timestamp": parse_open_time(int(kline[0])),
+                "open": Decimal(kline[1]),
+                "high": Decimal(kline[2]),
+                "low": Decimal(kline[3]),
+                "close": Decimal(kline[4]),
+                "volume": Decimal(kline[5]),
+                "source": REST_SOURCE,
+            }
+            for kline in klines
+        ]
+    except (ValueError, TypeError, IndexError, ArithmeticError) as exc:
+        raise BinanceVisionError(f"Unexpected klines answer from {url}: {exc}") from exc
+    return [row for row in rows if row["timestamp"].date() == day]
+
+
+def fetch_day(
+    symbol: str, day: date, fetch: Fetcher = http_get
+) -> list[dict[str, Any]]:
+    """Fetch one closed daily bar: the daily file, or REST if it is unpublished.
+
+    Only a 404 on the file triggers the fallback; a checksum mismatch or corrupt
+    archive is a real problem and propagates.
+    """
+    try:
+        return fetch_day_file(symbol, day, fetch)
+    except MonthFileNotFoundError:
+        logger.warning(
+            "%s %s: daily file not published yet, using REST klines", symbol, day
+        )
+        return fetch_day_rest(symbol, day, fetch)
+
+
+class NoHistoryError(BinanceVisionError):
+    """A symbol has no stored bars, so there is nothing to continue from."""
+
+
+def ingest_new_days(
+    session: Session,
+    symbol: str,
+    today: date | None = None,
+    fetch: Fetcher = http_get,
+) -> int:
+    """Store every closed daily bar after the latest stored one, up to yesterday (UTC).
+
+    The still-open day (``today``) is never requested. A missed day is picked up
+    on the next run because the range starts after the latest stored bar. Rows
+    are committed one day at a time; any failure stops the run.
+
+    Returns the number of rows inserted.
+
+    Raises:
+        NoHistoryError: ``symbol`` has no stored bars (load history first).
+        BinanceVisionError: a day could not be fetched from either source.
+    """
+    latest = session.execute(
+        select(Price.timestamp)
+        .where(Price.symbol == symbol)
+        .order_by(Price.timestamp.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        raise NoHistoryError(
+            f"{symbol} has no stored bars; run scripts/load_binance_history.py first"
+        )
+    yesterday = (today or datetime.now(UTC).date()) - timedelta(days=1)
+    day = latest.astimezone(UTC).date() + timedelta(days=1)
+
+    inserted = 0
+    while day <= yesterday:
+        rows = fetch_day(symbol, day, fetch)
+        if not rows:
+            raise BinanceVisionError(f"{symbol} {day}: no bar returned by Binance")
+        added = insert_prices(session, rows)
+        inserted += added
+        logger.info("%s %s: %d new", symbol, day, added)
+        day += timedelta(days=1)
+    return inserted
 
 
 def insert_prices(session: Session, rows: list[dict[str, Any]]) -> int:

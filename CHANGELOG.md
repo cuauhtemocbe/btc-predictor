@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The fetch-price job ingests each closed daily bar from Binance (daily file,
+  REST klines fallback, missed days backfilled) instead of CoinGecko; the
+  CoinGecko and old Binance clients were removed (#102).
+
 ### Added
 
 - Dev Standards Compliance hardening: container healthcheck, pinned base

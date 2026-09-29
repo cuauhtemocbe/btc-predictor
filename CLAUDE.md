@@ -14,7 +14,7 @@
 - **Framework:** FastAPI + Jinja2 (HTML templates)
 - **Database:** PostgreSQL + SQLAlchemy 2.0 + Alembic (migrations)
 - **ML:** scikit-learn (Linear Regression), pandas, numpy
-- **Data Source:** CoinGecko API (migrated from Binance due to geo-blocking)
+- **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback; CoinGecko was removed in #102
 - **Deployment:** Railway (4 services: postgres, api, fetch-price cron, daily cron)
 - **Dependency Management:** Poetry (workspace with 3 packages: shared, api-service, workers)
 
@@ -63,7 +63,11 @@ btc-predictor/
 - **Phase 1:** Predictor inserts prediction with `actual_price=NULL`
 - **Phase 2:** Evaluator updates with actual price + errors + PnL next day
 
-### 5. CoinGecko Over Binance
+### 5. Binance Vision Over CoinGecko (supersedes the earlier CoinGecko migration)
+
+- The daily job stores one closed UTC daily bar per symbol (file first, REST fallback); the sections below describing 4-hour CoinGecko candles are historical.
+
+### 5b. (historical) CoinGecko Over Binance
 - Migrated from Binance API due to HTTP 451 geo-blocking in Railway
 - CoinGecko free API with rate limit handling
 

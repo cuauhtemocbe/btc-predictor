@@ -82,15 +82,12 @@ Railway will automatically use this from the Dockerfile.
    - **Region:** Use same as your database
 
 ✅ **Ready to deploy!** This service will:
-- Fetch daily BTC/USD prices from CoinGecko API (~6 candles with 4-hour granularity)
-- Store OHLCV data in `prices` table
-- Handle idempotency (skips duplicate timestamps)
-- Implement rate limiting and error handling
+- Ingest the closed daily bar (UTC) of each supported symbol from Binance, with volume
+- Read the `daily/` file of data.binance.vision, falling back to the REST klines endpoint (`data-api.binance.vision`) if the file is not published yet
+- Backfill days missed by earlier runs, never store the still-open day
+- Be idempotent (existing `(symbol, timestamp)` rows are skipped) and exit non-zero if both sources fail
 
-**Note:** CoinGecko granularity varies by time window:
-- 1-30 days: 4-hour candles (~6/day) ✅ Best for ML
-- 31-90 days: Daily candles
-- 91+ days: 4-day candles (too sparse)
+**Note:** the `daily/` file is published ~01:40 UTC, so the 6am UTC cron finds it; the REST fallback covers late publications. Load the history first with `scripts/load_binance_history.py` (the job refuses to run for a symbol with no stored bars).
 
 ---
 
