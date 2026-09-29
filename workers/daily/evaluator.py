@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import Prediction, Price
+from shared.db.models import DEFAULT_SYMBOL, Prediction, Price
 from shared.utils import (
     calculate_pnl,
     calculate_pnl_long_short,
@@ -91,7 +91,9 @@ def find_unevaluated_prediction(
     return predictions[0] if predictions else None
 
 
-def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
+def fetch_actual_price(
+    session: Session, target_date: date, symbol: str = DEFAULT_SYMBOL
+) -> Decimal | None:
     """
     Fetch the BTC close price for the given date at or after 7am UTC.
 
@@ -113,6 +115,7 @@ def fetch_actual_price(session: Session, target_date: date) -> Decimal | None:
     # Find first candle at or after 7am on target_date
     stmt = (
         select(Price.close, Price.timestamp)
+        .where(Price.symbol == symbol)
         .where(Price.timestamp >= target_datetime)
         .where(Price.timestamp < next_day)
         .order_by(Price.timestamp.asc())

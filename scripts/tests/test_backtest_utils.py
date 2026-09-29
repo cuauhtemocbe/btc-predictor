@@ -340,3 +340,49 @@ class TestGetActualPriceForDate:
         # Then: Should return last close (hour 23)
         expected_last_close = Decimal("66000.00") + Decimal(23 * 100)
         assert price == expected_last_close
+
+
+class TestSymbolIsolation:
+    """Backtest helpers must ignore other symbols sharing the prices table."""
+
+    @staticmethod
+    def _add(db_session, symbol, timestamp, close):
+        db_session.add(
+            Price(
+                symbol=symbol,
+                timestamp=timestamp,
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=Decimal("1"),
+                source="test",
+            )
+        )
+
+    def test_fetch_training_data_returns_one_btc_row_per_day(self, db_session):
+        from datetime import UTC
+
+        for i in range(10):
+            ts = datetime(2024, 5, 1, tzinfo=UTC) + timedelta(days=i)
+            self._add(db_session, "BTCUSDT", ts, Decimal("60000"))
+            self._add(db_session, "PAXGUSDT", ts, Decimal("4139"))
+        db_session.commit()
+
+        result = fetch_training_data(date(2024, 5, 10), window_days=10, db=db_session)
+
+        assert result is not None
+        assert len(result) == 10
+        assert (result["close"] == 60000).all()
+
+    def test_get_actual_price_for_date_ignores_other_symbol(self, db_session):
+        from datetime import UTC
+
+        day = datetime(2024, 5, 1, tzinfo=UTC)
+        self._add(db_session, "BTCUSDT", day, Decimal("60000"))
+        self._add(db_session, "PAXGUSDT", day + timedelta(hours=12), Decimal("4139"))
+        db_session.commit()
+
+        assert get_actual_price_for_date(date(2024, 5, 1), db=db_session) == Decimal(
+            "60000"
+        )

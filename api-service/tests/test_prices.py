@@ -226,3 +226,32 @@ async def test_get_prices_response_schema(client, db_session, sample_prices):
         assert item["high"] >= item["low"]
         assert item["volume"] >= 0
         assert len(item["source"]) > 0
+
+
+async def test_get_prices_only_returns_btc(client, db_session, sample_prices):
+    """The endpoint serves BTC prices; other symbols in the table are excluded."""
+    from datetime import UTC, timedelta
+    from decimal import Decimal
+
+    from shared.db.models import Price
+
+    prices = sample_prices(5)  # BTCUSDT, close ~42000
+    db_session.add(
+        Price(
+            symbol="PAXGUSDT",
+            timestamp=datetime.now(UTC) + timedelta(hours=1),
+            open=Decimal("4139"),
+            high=Decimal("4139"),
+            low=Decimal("4139"),
+            close=Decimal("4139"),
+            volume=Decimal("1"),
+            source="test",
+        )
+    )
+    db_session.commit()
+
+    response = await client.get("/api/prices")
+
+    data = response.json()
+    assert len(data) == len(prices)
+    assert all(float(item["close"]) > 10000 for item in data)
