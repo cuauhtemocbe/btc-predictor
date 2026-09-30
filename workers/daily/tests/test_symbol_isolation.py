@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from shared.db.models import Model, Prediction, Price
 from workers.backtest.main import calculate_adaptive_window
 from workers.daily import evaluator, predictor
-from workers.daily.trainer import count_available_days, fetch_training_data
+from workers.daily.trainer import fetch_training_data
 
 BTC = "BTCUSDT"
 PAXG = "PAXGUSDT"
@@ -71,29 +71,16 @@ def two_symbols(db_session: Session) -> Session:
 
 
 class TestTrainerSymbolIsolation:
-    def test_count_available_days_counts_each_day_once(
-        self, two_symbols: Session
-    ) -> None:
-        assert count_available_days(two_symbols) == 40
-
-    def test_count_available_days_scoped_to_symbol(self, db_session: Session) -> None:
-        _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=5)
-
-        assert count_available_days(db_session) == 0
-        assert count_available_days(db_session, symbol=PAXG) == 5
-
     def test_fetch_training_data_returns_only_btc(self, two_symbols: Session) -> None:
-        prices = fetch_training_data(two_symbols, window_days=5, min_days=10)
+        prices = fetch_training_data(two_symbols, window_days=5)
 
-        assert len(prices) == 10
+        assert len(prices) == 40
         assert all(p >= BTC_CLOSE for p in prices)
 
     def test_fetch_training_data_for_other_symbol(self, two_symbols: Session) -> None:
-        prices = fetch_training_data(
-            two_symbols, window_days=5, min_days=10, symbol=PAXG
-        )
+        prices = fetch_training_data(two_symbols, window_days=5, symbol=PAXG)
 
-        assert len(prices) == 10
+        assert len(prices) == 40
         assert all(p < 5000 for p in prices)
 
 
