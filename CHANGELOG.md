@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Baseline comparison (`shared/baselines.py`): every model's direction
+  accuracy and simple-strategy PnL is shown next to always-up, persistence and
+  buy-and-hold over exactly the days it was evaluated on, with the sample size,
+  the edge over the best baseline and a one-sided binomial p-value; no
+  evaluated days reports "unavailable", not zero (#105).
+- Walk-forward backtest with production parity (`scripts/backtest_engine.py`,
+  `scripts/backtest_report.py`): it trains with the same feature builder and
+  model factory as the daily worker on an expanding window with no lookahead,
+  supports `--model`, `--seed`, `--retrain-every` and `--test-start-date`, labels
+  rows `validation` or `test` (new `backtest_results.evaluation_slice` column) and
+  headlines only the test slice. A start date without enough history fails before
+  storing anything and names the earliest allowed one (#106).
+
 ### Changed
+
+- The backtest no longer builds price-level windows by hand: `scripts/backtest_utils.py`
+  was removed, `--training-window` defaults to `settings.training_window_days`
+  (21, was 30) and results are stored in one transaction (#106).
 
 - The daily and weekly Linear models train on log returns instead of price
   levels. One builder (`shared/features.py`) turns daily closes and volumes

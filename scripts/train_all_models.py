@@ -58,7 +58,9 @@ def main() -> int:
 
     except ValueError as e:
         logger.error(f"✗ VALIDATION ERROR: {e}")
-        logger.error("Make sure enough daily BTCUSDT prices are stored (see the error above).")
+        logger.error(
+            "Make sure enough daily BTCUSDT prices are stored (see the error above)."
+        )
         logger.error("Run: docker compose exec api python -m fetch_price.main")
         return 1
 

@@ -6,22 +6,26 @@ The BTC Predictor backtesting system allows you to validate the model's effectiv
 
 ## What is Walk-Forward Backtesting?
 
-Walk-forward backtesting trains a model on a rolling window of past data, generates a prediction for the next day, evaluates it against actual prices, and repeats this process for each historical day:
+Walk-forward backtesting trains a model on the data available before a day, predicts that day, compares the prediction with what happened, and repeats for every day of the range:
 
 ```
-Day 0-29: Train model on first 30 days
-Day 30: Predict price for day 31
-Day 31: Evaluate prediction against actual price
-
-Day 1-30: Re-train model (rolling window)
-Day 31: Predict price for day 32
-Day 32: Evaluate prediction
-
-... repeat for all historical days
+Predict 2024-06-10: train on every daily row dated 2024-06-09 or earlier
+Predict 2024-06-11: train on every daily row dated 2024-06-10 or earlier
+... one prediction (and one stored row) per day
 ```
 
-**Key Principle: No Lookahead Bias**  
-The model never sees future data during training. For each prediction, it only uses data available up to that point in time, ensuring realistic simulation.
+**Key principle: no lookahead.** The price series is loaded once and sliced in memory, so the training data of a day only contains rows dated before it. The window is *expanding* (every earlier row), exactly like the daily worker, which trains on every stored `BTCUSDT` daily row.
+
+**Production parity.** The backtest has no feature or model code of its own (`scripts/backtest_engine.py`). It calls the same code the daily worker runs:
+
+| Step | Code (shared with production) |
+|------|-------------------------------|
+| Training samples | `shared.features.build_training_set` (log returns, rolling volatility, log volume changes) |
+| Prediction features | `shared.features.build_prediction_features` |
+| Predicted price | `shared.features.price_from_return` (`last close * exp(predicted return)`) |
+| Model construction | `workers.daily.models.factory.build_model` (also used by `trainer.train_single_model`) |
+
+If the daily worker changes, the backtest changes with it.
 
 ## Prerequisites
 
@@ -48,46 +52,64 @@ docker compose exec api python scripts/backtest.py \
 ```
 
 This will:
-1. Generate a unique backtest run ID (UUID)
-2. For each day from May 1-30:
-   - Train a LinearRegressionModel on the previous 30 days
-   - Predict the next day's BTC price
-   - Calculate all 4 PnL strategies
-   - Save results to `backtest_results` table
-3. Log progress every 10 days
-4. Display summary statistics
+1. Check there is enough history before the start date (see "Troubleshooting")
+2. Generate a unique backtest run ID (UUID)
+3. For each day, train the model on the rows before it and predict the day's close
+4. Store one `backtest_results` row per day, in a single transaction (nothing is stored if the run fails)
+5. Log progress every 10 days, then print the PnL summary and the **report** (see "Reading the report")
 
 ### CLI Arguments
 
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `--start-date` | Yes | - | Start date for backtest (YYYY-MM-DD) |
-| `--end-date` | Yes | - | End date for backtest (YYYY-MM-DD) |
-| `--training-window` | No | 30 | Training window in days |
+| `--start-date` | Yes | - | First day predicted (YYYY-MM-DD) |
+| `--end-date` | Yes | - | Last day predicted (YYYY-MM-DD, inclusive) |
+| `--model` | No | `linear` | `linear`, `xgboost`, `lstm` or `arima` |
+| `--training-window` | No | `settings.training_window_days` (21) | Window in days; same default as production |
+| `--seed` | No | 42 | Seeds `random`, `numpy` and TensorFlow before every training |
+| `--retrain-every` | No | 1 | Retrain every N days and reuse the model in between |
+| `--test-start-date` | No | start of the last 30% of the range | First day of the test slice |
 
 ### Examples
 
-**Backtest May 2024 (30 days):**
+**Backtest 2024 with the production window:**
 ```bash
 docker compose exec api python scripts/backtest.py \
-  --start-date=2024-05-01 \
-  --end-date=2024-05-31
+  --start-date=2024-01-01 --end-date=2024-12-31
 ```
 
-**Backtest with 60-day training window:**
+**Explicit validation/test split:**
 ```bash
 docker compose exec api python scripts/backtest.py \
-  --start-date=2024-05-01 \
-  --end-date=2024-05-31 \
-  --training-window=60
+  --start-date=2023-01-01 --end-date=2025-12-31 \
+  --test-start-date=2025-01-01
 ```
 
-**Backtest last 90 days:**
+**A heavier model, retrained monthly:**
 ```bash
 docker compose exec api python scripts/backtest.py \
-  --start-date=2024-02-01 \
-  --end-date=2024-04-30
+  --start-date=2024-01-01 --end-date=2024-12-31 \
+  --model=arima --retrain-every=30
 ```
+
+**Print the report of a stored run again:**
+```bash
+docker compose exec api python scripts/backtest_report.py --run-id=<UUID>
+```
+
+### Validation and test slices
+
+The range is split in two: the `validation` slice (before `--test-start-date`) is the only data allowed to inform choices such as the window or a model's hyperparameters; the `test` slice is the out-of-sample result and is never used to choose anything. Every row stores its slice in `evaluation_slice`. Rows stored before the split existed have `NULL` there and are reported as `unsplit`.
+
+If you tune something, tune it by looking only at validation metrics, then run once more and read the test slice. Looking at the test slice and changing the setup afterwards turns it into a second validation set.
+
+### Reproducibility
+
+The same data, parameters and `--seed` store identical predictions (verified for Linear). `--seed` is applied before every training. Stored in each row's `model_params`: `model_name`, `symbol`, `window_days`, `seed`, `retrain_every`, `test_start_date`, `train_from`, `train_to` (the last day the model in use was trained on) and `training_samples`.
+
+### Retrain frequency
+
+Training every day is expensive for the heavy models. `--retrain-every N` retrains on the 1st, (N+1)th, (2N+1)th... day and reuses the model in between, while the prediction features are always rebuilt from data before each day. The frequency is stored in every row and printed in the report: compare runs only when they use the same frequency.
 
 ## Understanding Backtest Results
 
@@ -104,7 +126,8 @@ SELECT
     pnl_simple,
     pnl_long_short,
     pnl_threshold,
-    pnl_realistic
+    pnl_realistic,
+    evaluation_slice   -- 'validation', 'test' or NULL (stored before the split)
 FROM backtest_results
 WHERE backtest_run_id = '<UUID>'
 ORDER BY predicted_for;
@@ -194,40 +217,64 @@ WHERE backtest_run_id = '<UUID>'
 ORDER BY predicted_for;
 ```
 
-## Interpreting Results
+## Reading the report
 
-### Success Metrics
-
-- **Total PnL**: Sum of all PnL values (higher is better)
-- **Average Error**: Mean absolute difference between predicted and actual prices
-- **Prediction Accuracy**: Percentage of predictions in correct direction
-- **Sharpe Ratio**: Risk-adjusted returns (PnL / volatility)
-
-### What to Look For
-
-✅ **Good Signs:**
-- Positive cumulative PnL (especially for `pnl_realistic`)
-- Consistent performance across different time periods
-- Low average error relative to price volatility
-- Realistic strategy outperforms simple strategy (shows robustness)
-
-⚠️ **Red Flags:**
-- Large negative PnL
-- High volatility in daily PnL
-- Model performs worse than random guessing (50% direction accuracy)
-- Overfitting: excellent training performance but poor backtest results
-
-### Example Interpretation
+Every run ends with a report; `scripts/backtest_report.py --run-id=<UUID>` prints it again. Real output (Linear, window 21, 2024-01-01 to 2025-12-31, dev data):
 
 ```
-Backtest Run: 30 days (May 2024)
-Total PnL (Realistic): +$2,450
-Average PnL per day: +$81.67
-Average Error: $350 (0.5% of price)
-Direction Accuracy: 58%
+Model: linear  window: 21d  seed: 42  retrain every: 1 day(s)
+Range: 2024-01-01 to 2025-12-31
+Test slice starts: 2025-05-26
+
+== Headline: test slice (out-of-sample), 220 evaluated days ==
+  Model accuracy:          51.36%
+  Always-up accuracy:      49.55%
+  Persistence accuracy:    50.45% (220 days)
+  Best baseline:           persistence
+  Edge over best baseline: +0.91 pp (p = 0.4200, not significant at 0.05)
+  Model PnL (simple):      -$10,750.12
+  Always-up PnL:           -$21,355.97
+  Persistence PnL:         -$5,970.34
+  Buy-and-hold PnL:        -$21,355.97
+
+-- Validation slice (tuning only, never a result), 511 evaluated days --
+  ...
 ```
 
-**Interpretation**: The model shows modest predictive power with 58% directional accuracy (better than random 50%). Positive PnL suggests the model can be profitable after fees, but relatively small edge means position sizing and risk management are critical.
+- **Headline = test slice only.** Validation numbers are a separate, labelled section.
+- **Baselines are computed on exactly the days the model was evaluated on**, so the comparison is like for like.
+- **Sample size** is always shown. With a few hundred days a difference of one or two points is noise.
+- **No data, no number**: a slice with no evaluated days prints `unavailable`, never `0`.
+
+### Baselines
+
+Direction rules follow the evaluator: the day is UP when `actual_price >= price_at_prediction` (a flat day counts as UP); a model predicts UP when `predicted_price > price_at_prediction`.
+
+| Baseline | Definition |
+|----------|------------|
+| **Always-up** | Predicts UP every day. Its simple-strategy PnL (long 1 BTC every day) equals the buy-and-hold PnL of the period. |
+| **Persistence** | Predicts tomorrow's direction is today's: UP when `price_at_prediction >= close of the day before`. That close comes from `prices`, so every evaluated day is covered. A day without it is left out of persistence only (its day count is shown). |
+| **Buy-and-hold** | Last `actual_price` minus first `price_at_prediction` of the slice (1 BTC, USDT). |
+
+Reference values from the spike (BTC daily 2017-2026): always-up direction accuracy 51.1%, persistence 46.5%. A model that does not beat these adds nothing.
+
+### Edge and significance
+
+`edge = model accuracy - best baseline accuracy`, with the number of evaluated days and a one-sided binomial-test p-value: how likely a coin that is right as often as the best baseline would be to get at least as many days right as the model did. `significant` means `p < 0.05`.
+
+It is an **approximation**: the baseline's accuracy is treated as a fixed probability, and picking the best of two baselines is not corrected for. Read a small p-value as "worth a closer look", not as proof, and a large one as "indistinguishable from the baseline".
+
+### What to look for
+
+✅ **Good signs:**
+- Test-slice accuracy above the best baseline with a small p-value, over a sample of hundreds of days
+- A model PnL that beats always-up and persistence on the test slice, not only on validation
+- Similar behaviour across different test periods
+
+⚠️ **Red flags:**
+- Great validation numbers and a test slice that collapses (overfitting to the validation choices)
+- A positive PnL in a rising market that always-up matches or beats
+- A tiny sample, or a retrain frequency different from the run you compare against
 
 ## Performance Tips
 
@@ -240,13 +287,16 @@ For faster backtests:
 
 ## Troubleshooting
 
-### Error: "Insufficient data"
+### Error: "Start date ... has only N daily rows before it"
 
 ```
-ValueError: Insufficient data: need at least 30 days of data before 2024-05-01
+Start date 2023-01-10 has only 9 daily rows before it but BTCUSDT needs 30 (window=5d):
+the earliest allowed start date is 2023-01-31 (first loaded day 2023-01-01)
 ```
 
-**Solution**: Run the backfill script to load more historical data:
+**Cause**: production needs `(window + 1) * 5` daily rows to train, and fewer precede the start date. Nothing was stored.
+
+**Solution**: use the start date the message gives, or load more history:
 ```bash
 docker compose exec api python scripts/load_binance_history.py
 ```
@@ -285,9 +335,18 @@ WHERE close IS NULL
 ORDER BY timestamp;
 ```
 
+### Error: "Every one of the N days failed to train"
+
+```
+ValueError: Every one of the 91 days failed to train the xgboost model, nothing was stored;
+first error: X must have 5 features (window_days), got 11
+```
+
+**Cause**: the model rejects what the production code gives it. XGBoost and LSTM still expect `window_days` feature columns, while the production builder (#104) produces `2 * window_days + 1`; re-adapting them is tracked in #124. The backtest reproduces the daily trainer's behaviour on purpose instead of working around it.
+
 ### Performance: Slow backtests
 
-If 90-day backtest takes > 5 minutes:
+A year of Linear predictions (retrain every day) takes about 10 s. If a run takes much longer:
 
 1. Check database indexes: `\d backtest_results`
 2. Profile the script: `python -m cProfile scripts/backtest.py ...`
@@ -297,10 +356,11 @@ If 90-day backtest takes > 5 minutes:
 
 ### Current Limitations
 
-- **Single model**: Only LinearRegressionModel supported (no LSTM, XGBoost yet)
-- **Fixed training window**: 30 days (configurable via CLI, but not per-day adaptive)
+- **Heavy models**: XGBoost and LSTM do not accept the return features yet (#124); ARIMA runs. Their tests are marked `non_linear` (`pytest --run-non-linear`).
+- **Expanding window only**: like production; there is no rolling-window mode.
+- **No hyperparameter search**: the validation/test split and its labelling make it possible to tune without leaking, but no tuner is built in.
 - **Sequential processing**: No parallelization
-- **No parameter optimization**: Manual hyperparameter tuning required
+- **One asset**: `BTCUSDT`
 
 ### Future Enhancements (US-021+)
 
@@ -328,6 +388,7 @@ python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-30
 
 ## Related Documentation
 
+- [Baselines and walk-forward backtest spec](../specs/baselines-and-walk-forward-backtest.md) (#105, #106)
 - [US-020 Specification](../specs/us-020-walk-forward-backtesting.md)
 - [US-020 Implementation Plan](../specs/us-020-walk-forward-backtesting-plan.md)
 - [Implementation History](../docs/archive/specs/IMPLEMENTATION_HISTORY.md)
@@ -345,13 +406,13 @@ A: Walk-forward mimics real-world usage where you retrain daily with new data. T
 A: Yes! Use `--start-date` and `--end-date` to specify any range where you have historical data.
 
 **Q: How do I compare different models?**  
-A: Run multiple backtests with different `backtest_run_id` UUIDs and compare results in the database. Future releases (US-023+) will support multi-model backtesting.
+A: Run one backtest per `--model` with the same range, window, seed, `--retrain-every` and `--test-start-date`, and compare their test-slice reports: each is already shown next to the same baselines.
 
 **Q: What's a good PnL result?**  
-A: It depends on your risk tolerance and market conditions. Positive PnL with `pnl_realistic` (after fees) is good. Compare against buy-and-hold strategy for baseline.
+A: One that beats the baselines on the test slice with a sample large enough to tell it from chance. A positive PnL alone says little: in a rising market, buy-and-hold is positive too.
 
 ---
 
-**Last Updated**: 2026-05-19  
-**User Story**: US-020 Walk-Forward Backtesting System  
+**Last Updated**: 2026-09-30  
+**Issues**: US-020 Walk-Forward Backtesting System; #105 baselines; #106 production-parity walk-forward  
 **Status**: ✅ Implemented

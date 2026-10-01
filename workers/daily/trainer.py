@@ -40,6 +40,7 @@ from shared.features import (
 )
 from shared.utils import calculate_mape, split_train_validation
 from workers.daily.models import BaseModel, LinearRegressionModel
+from workers.daily.models.factory import instantiate_model
 
 # Configure logging
 logging.basicConfig(
@@ -294,13 +295,10 @@ def train_single_model(
     start_time = time.time()
 
     try:
-        # Instantiate model (ARIMA has different parameters)
-        if model_name == "arima":
-            model = model_class(order=(5, 1, 0))
-        elif issubclass(model_class, LinearRegressionModel):
-            model = model_class(window_days=window_days, n_features=X_train.shape[1])
-        else:
-            model = model_class(window_days=window_days)
+        # Same construction the walk-forward backtest uses
+        model = instantiate_model(
+            model_class, model_name, window_days, X_train.shape[1]
+        )
 
         # Train model
         model.train(X_train, y_train)
