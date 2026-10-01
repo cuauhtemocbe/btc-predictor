@@ -16,11 +16,7 @@ from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import Price
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
-from workers.daily.trainer import (
-    create_sliding_windows,
-    train_all_models,
-    train_single_model,
-)
+from workers.daily.trainer import train_all_models, train_single_model
 
 
 @pytest.fixture
@@ -107,6 +103,44 @@ class TestTrainSingleModel:
         assert isinstance(model, LinearRegressionModel)
         assert isinstance(validation_error, float)
         assert 0 <= validation_error <= 100  # MAPE percentage
+
+    def test_validation_error_is_measured_on_the_implied_prices(self):
+        """With base closes the targets are log returns and the MAPE is on prices."""
+        rng = np.random.default_rng(3)
+        X_train = rng.normal(0, 0.02, (50, 5))
+        y_train = X_train[:, 0]  # next return = last return, perfectly learnable
+        X_val = rng.normal(0, 0.02, (10, 5))
+        y_val = X_val[:, 0]
+        base_close = np.full(10, 84000.0)
+
+        model, error = train_single_model(
+            model_class=LinearRegressionModel,
+            model_name="linear",
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            window_days=5,
+            base_close_val=base_close,
+        )
+
+        assert isinstance(model, LinearRegressionModel)
+        assert model.n_features == 5
+        assert error == pytest.approx(0, abs=1e-6)
+
+        # A model whose return is 10% too large is ~0.1% off in price (a MAPE on the
+        # raw returns would say ~10%)
+        _, biased_error = train_single_model(
+            model_class=_BiasedModel,
+            model_name="biased",
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            window_days=5,
+            base_close_val=base_close,
+        )
+        assert 0 < biased_error < 1
 
     def test_train_single_model_handles_failure(self):
         """Test that train_single_model returns None on failure."""
@@ -286,87 +320,3 @@ class TestTrainAllModels:
         assert any("linear" in name for name in model_names)
         assert any("lstm" in name for name in model_names)
         assert any("xgboost" in name for name in model_names)
-
-
-class TestCreateSlidingWindows:
-    """Test create_sliding_windows helper function."""
-
-    def test_create_sliding_windows_correct_shape(self):
-        """Test that sliding windows have correct shape."""
-        prices = [Decimal(50000 + i * 100) for i in range(60)]
-
-        X, y = create_sliding_windows(prices, window_days=30)
-
-        # Should create 30 samples (60 - 30)
-        assert X.shape == (30, 30)
-        assert y.shape == (30,)
-
-    def test_create_sliding_windows_chronological_order(self):
-        """Test that windows preserve chronological order."""
-        prices = [Decimal(50000 + i * 100) for i in range(40)]
-
-        X, y = create_sliding_windows(prices, window_days=10)
-
-        # First sample should be days 0-9, predicting day 10
-        assert X[0, 0] == 50000  # First price
-        assert X[0, -1] == 50900  # 10th price
-        assert y[0] == 51000  # 11th price
-
-        # Last sample should be days 29-38, predicting day 39
-        assert X[-1, 0] == 52900
-        assert X[-1, -1] == 53800
-        assert y[-1] == 53900
-
-    def test_create_sliding_windows_horizon_days_default_matches_1_day_ahead(self):
-        """horizon_days defaults to 1, reproducing the original daily behavior."""
-        prices = [Decimal(50000 + i * 100) for i in range(40)]
-
-        X_default, y_default = create_sliding_windows(prices, window_days=10)
-        X_explicit, y_explicit = create_sliding_windows(
-            prices, window_days=10, horizon_days=1
-        )
-
-        assert X_default.shape == X_explicit.shape
-        assert (X_default == X_explicit).all()
-        assert (y_default == y_explicit).all()
-
-    def test_create_sliding_windows_seven_day_horizon(self):
-        """
-        Scenario: Training creates a seven-day-ahead target (issue #61)
-
-        Given chronological daily prices
-        When sliding windows are created with horizon_days=7
-        Then each target is 7 days past the end of its window, not 1
-        """
-        prices = [Decimal(50000 + i * 100) for i in range(40)]
-
-        X, y = create_sliding_windows(prices, window_days=10, horizon_days=7)
-
-        # 40 - 10 - 7 + 1 = 24 samples
-        assert X.shape == (24, 10)
-        assert y.shape == (24,)
-
-        # First sample: window is days 0-9 (prices 50000..50900), target is
-        # 7 days after day 9 -> day 16 (index 16, price 51600)
-        assert X[0, 0] == 50000
-        assert X[0, -1] == 50900
-        assert y[0] == 51600
-
-        # Last sample: window is days 23-32, target is day 39 (index 39,
-        # last price in the series)
-        assert X[-1, 0] == 52300
-        assert X[-1, -1] == 53200
-        assert y[-1] == 53900
-
-    def test_create_sliding_windows_minimum_data_for_one_sample(self):
-        """Exactly window_days + horizon_days prices yields exactly one sample."""
-        window_days, horizon_days = 10, 7
-        prices = [Decimal(50000 + i * 100) for i in range(window_days + horizon_days)]
-
-        X, y = create_sliding_windows(
-            prices, window_days=window_days, horizon_days=horizon_days
-        )
-
-        assert X.shape == (1, window_days)
-        assert y.shape == (1,)
-        assert y[0] == prices[-1]  # target is the very last (17th) price

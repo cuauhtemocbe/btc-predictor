@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 import workers.weekly.predictor as pred_module
 from shared.db.models import Model, Prediction, Price
+from workers.daily import predictor as daily_predictor
 from workers.weekly import evaluator, predictor
 
 BTC = "BTCUSDT"
@@ -46,33 +47,31 @@ def _add_daily_series(session: Session, symbol: str, close: Decimal, days: int) 
 
 
 class TestWeeklyPredictorSymbolIsolation:
-    def test_get_daily_close_prices_returns_one_btc_price_per_day(
+    def test_get_recent_series_returns_one_btc_row_per_day(
         self, db_session: Session
     ) -> None:
         _add_daily_series(db_session, BTC, BTC_CLOSE, days=40)
         _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=40)
 
-        prices = predictor.get_daily_close_prices(db_session, window_days=30)
+        series = daily_predictor.get_recent_series(db_session, days=31)
 
-        assert len(prices) == 30
-        assert all(p == BTC_CLOSE for p in prices)
+        assert len(series) == 31
+        assert all(p == BTC_CLOSE for p in series.closes)
 
-    def test_get_daily_close_prices_for_other_symbol(self, db_session: Session) -> None:
+    def test_get_recent_series_for_other_symbol(self, db_session: Session) -> None:
         _add_daily_series(db_session, BTC, BTC_CLOSE, days=40)
         _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=40)
 
-        prices = predictor.get_daily_close_prices(
-            db_session, window_days=30, symbol=PAXG
-        )
+        series = daily_predictor.get_recent_series(db_session, days=31, symbol=PAXG)
 
-        assert len(prices) == 30
-        assert all(p == PAXG_CLOSE for p in prices)
+        assert len(series) == 31
+        assert all(p == PAXG_CLOSE for p in series.closes)
 
     def test_main_uses_btc_price_when_paxg_is_newest(
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_30_days: list[Price],
+        sample_daily_close_prices_31_days: list[Price],
     ) -> None:
         _add_bar(db_session, PAXG, datetime.now(UTC), PAXG_CLOSE)
         db_session.commit()

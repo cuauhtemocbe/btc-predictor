@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
 from workers.weekly.models import LinearRegressionModel
 
 # Note: db_session is provided by root conftest.py
@@ -17,79 +18,34 @@ from workers.weekly.models import LinearRegressionModel
 
 
 @pytest.fixture
-def synthetic_prices_60_days() -> np.ndarray:
+def sample_trained_model(db_session: Session) -> Model:
     """
-    Generate 60 days of synthetic BTC close prices.
-
-    Returns a linear trend with small random noise to simulate
-    realistic price movement for testing purposes.
-
-    Returns:
-        numpy array of shape (60,) with float64 values representing
-        BTC close prices in USD.
-    """
-    # Start at $50,000, end around $51,500 (upward trend)
-    base_prices = np.linspace(50000, 51500, 60)
-    # Add random noise (+/- $500)
-    np.random.seed(42)  # For reproducibility in tests
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
-    return prices
-
-
-@pytest.fixture
-def sliding_window_data(
-    synthetic_prices_60_days: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Generate sliding window features and labels from 60 days of prices.
-
-    Uses a 30-day window to predict the next day's price.
-    With 60 days of data, this creates 30 training samples.
-
-    Args:
-        synthetic_prices_60_days: 60 days of close prices
-
-    Returns:
-        Tuple (X, y) where:
-        - X: Feature matrix of shape (30, 30) - 30 samples, 30 features each
-        - y: Target vector of shape (30,) - next day's price for each sample
-    """
-    window_days = 30
-    prices = synthetic_prices_60_days
-
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
-
-    return X, y
-
-
-@pytest.fixture
-def sample_trained_model(
-    db_session: Session, sliding_window_data: tuple[np.ndarray, np.ndarray]
-) -> Model:
-    """
-    Create a trained LinearRegressionModel and save it to the database.
+    Create a LinearRegressionModel trained on 7-day log returns and save it.
 
     Returns:
         Model record with is_active=True
     """
-    X, y = sliding_window_data
+    rng = np.random.default_rng(42)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
 
-    # Train model
-    lr_model = LinearRegressionModel(window_days=30)
-    lr_model.train(X, y)
+    window_days = 30
+    training_set = build_training_set(closes, volumes, window_days, horizon_days=7)
+
+    lr_model = LinearRegressionModel(
+        window_days=window_days, n_features=feature_count(window_days)
+    )
+    lr_model.train(training_set.X, training_set.y)
 
     # Serialize and save to database
     model_record = Model(
         name="linear_weekly_v1",
         version="1.0.0",
-        params={"window_days": 30, "horizon_days": 7},
+        params={
+            "window_days": 30,
+            "horizon_days": 7,
+            "target": LOG_RETURN_TARGET,
+        },
         artifact=lr_model.serialize(),
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
@@ -106,14 +62,14 @@ def sample_trained_model(
 
 
 @pytest.fixture(scope="module")
-def cached_daily_price_data_30_days():
-    """Module-scoped cached hourly price data (30 days, 720 records)."""
+def cached_daily_price_data_31_days():
+    """Module-scoped cached hourly price data (31 days, 744 records)."""
     data = []
     base_time = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=30)
+    ) - timedelta(days=31)
 
-    for day in range(30):
+    for day in range(31):
         close_price = 50000 + (day * 50)
         for hour in range(24):
             timestamp = base_time + timedelta(days=day, hours=hour)
@@ -133,18 +89,20 @@ def cached_daily_price_data_30_days():
 
 
 @pytest.fixture
-def sample_daily_close_prices_30_days(
-    db_session: Session, cached_daily_price_data_30_days
+def sample_daily_close_prices_31_days(
+    db_session: Session, cached_daily_price_data_31_days
 ) -> list[Price]:
     """
-    Create 30 days of hourly prices using cached data.
+    Create 31 days of hourly prices using cached data.
+
+    31 daily closes give the 30 daily returns a 30-day window needs.
 
     Returns:
-        List of 720 Price records (30 days * 24 hours)
+        List of 744 Price records (31 days * 24 hours)
     """
     prices = []
 
-    for timestamp, open_p, high, low, close, volume in cached_daily_price_data_30_days:
+    for timestamp, open_p, high, low, close, volume in cached_daily_price_data_31_days:
         price_record = Price(
             timestamp=timestamp,
             open=open_p,

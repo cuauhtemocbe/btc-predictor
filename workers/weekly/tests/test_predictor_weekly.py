@@ -8,14 +8,16 @@ Covers Gherkin acceptance criteria scenarios from US-022:
 4. Insufficient data error handling
 """
 
+import math
 from datetime import date, timedelta
 from decimal import Decimal
 
-import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.features import DailySeries
+from workers.daily import predictor as daily_predictor
 from workers.weekly import predictor
 from workers.weekly.models import LinearRegressionModel
 
@@ -41,80 +43,74 @@ class TestGetActiveModel:
             predictor.get_active_model(db_session)
 
 
-class TestGetDailyClosePrices:
-    """Test the get_daily_close_prices() function."""
+class TestGetRecentSeries:
+    """Test the get_recent_series() function the weekly predictor uses."""
 
-    def test_success_30_days(
-        self, db_session: Session, sample_daily_close_prices_30_days: list[Price]
+    def test_success_31_days(
+        self, db_session: Session, sample_daily_close_prices_31_days: list[Price]
     ) -> None:
-        """Should fetch 30 DAILY close prices (not hourly)."""
-        prices = predictor.get_daily_close_prices(db_session, window_days=30)
+        """Should fetch 31 DAILY closes and volumes (not hourly)."""
+        series = daily_predictor.get_recent_series(db_session, days=31)
 
-        # Should return exactly 30 prices (one per day, not 24 per day)
-        assert len(prices) == 30
+        # Should return exactly 31 rows (one per day, not 24 per day)
+        assert len(series) == 31
+        assert len(series.volumes) == 31
 
         # Should be oldest to newest (chronological)
-        assert prices[0] < prices[-1]
+        assert series.closes[0] < series.closes[-1]
 
         # Should be Decimal type
-        assert all(isinstance(p, Decimal) for p in prices)
+        assert all(isinstance(p, Decimal) for p in series.closes)
 
     def test_insufficient_data(
         self, db_session: Session, sample_daily_close_prices_10_days: list[Price]
     ) -> None:
-        """Should raise ValueError when insufficient data (< 30 days)."""
+        """Should raise ValueError when insufficient data (< 31 days)."""
         with pytest.raises(
-            ValueError, match="Insufficient data: need 30 days, have 10"
+            ValueError, match="Insufficient data: need 31 days, have 10"
         ):
-            predictor.get_daily_close_prices(db_session, window_days=30)
+            daily_predictor.get_recent_series(db_session, days=31)
 
     def test_no_data(self, db_session: Session) -> None:
         """Should raise ValueError when no price data exists."""
-        with pytest.raises(ValueError, match="Insufficient data: need 30 days, have 0"):
-            predictor.get_daily_close_prices(db_session, window_days=30)
+        with pytest.raises(ValueError, match="Insufficient data: need 31 days, have 0"):
+            daily_predictor.get_recent_series(db_session, days=31)
 
     def test_uses_daily_not_hourly(
-        self, db_session: Session, sample_daily_close_prices_30_days: list[Price]
+        self, db_session: Session, sample_daily_close_prices_31_days: list[Price]
     ) -> None:
         """
         Gherkin: Weekly predictor uses daily close prices (not hourly).
 
-        Given 30 days of hourly price data (720 records)
-        When get_daily_close_prices() is called with window_days=30
-        Then it should return 30 prices (1 per day)
-        And not 720 prices (24 per day)
+        Given 31 days of hourly price data (744 records)
+        When get_recent_series() is called with days=31
+        Then it should return 31 rows (1 per day)
+        And not 744 rows (24 per day)
         """
-        # We have 30 days * 24 hours = 720 records in DB
+        # We have 31 days * 24 hours = 744 records in DB
         total_records = db_session.query(Price).count()
-        assert total_records == 720
+        assert total_records == 744
 
-        # But get_daily_close_prices should return only 30 (daily)
-        prices = predictor.get_daily_close_prices(db_session, window_days=30)
-        assert len(prices) == 30
+        # But get_recent_series should return only 31 (daily)
+        series = daily_predictor.get_recent_series(db_session, days=31)
+        assert len(series) == 31
 
 
 class TestPrepareFeatures:
-    """Test the prepare_features() function."""
+    """The weekly predictor builds the same return features as the daily one."""
 
-    def test_converts_decimals_to_numpy_array(self) -> None:
-        """Should convert list of Decimals to numpy array."""
-        prices = [Decimal("50000.00"), Decimal("50100.50"), Decimal("50200.75")]
+    def test_uses_the_daily_feature_builder(self) -> None:
+        assert predictor.prepare_features is daily_predictor.prepare_features
 
-        X = predictor.prepare_features(prices)
+    def test_30_day_window_gives_61_return_features(self) -> None:
+        series = DailySeries(
+            closes=[Decimal(50000 + i * 10) for i in range(31)],
+            volumes=[Decimal(1000 + i) for i in range(31)],
+        )
 
-        assert isinstance(X, np.ndarray)
-        assert X.shape == (1, 3)  # Single sample, 3 features
-        assert X.dtype == np.float64
-        assert np.allclose(X[0], [50000.00, 50100.50, 50200.75])
+        X = predictor.prepare_features(series, window_days=30)
 
-    def test_30_day_window(self) -> None:
-        """Should handle 30-day window correctly."""
-        prices = [Decimal(str(50000 + i * 10)) for i in range(30)]
-
-        X = predictor.prepare_features(prices)
-
-        assert X.shape == (1, 30)
-        assert len(X[0]) == 30
+        assert X.shape == (1, 61)
 
 
 class TestCheckExistingPrediction:
@@ -233,7 +229,7 @@ class TestMainWeeklyPredictor:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_30_days: list[Price],
+        sample_daily_close_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin: Weekly predictor predicts 7 days ahead.
@@ -272,11 +268,49 @@ class TestMainWeeklyPredictor:
         finally:
             pred_module.SessionLocal = original_session
 
+    def test_stored_price_is_last_close_times_exp_of_the_7_day_return(
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        sample_daily_close_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """
+        Given a weekly model that predicts a 7-day log return of +3%
+        When the weekly predictor runs
+        Then the stored price is the last close * exp(0.03)
+        """
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(LinearRegressionModel, "predict", lambda self, X: 0.03)
+
+        assert predictor.main() == 0
+
+        prediction = db_session.query(Prediction).one()
+        assert float(prediction.predicted_price) == pytest.approx(
+            float(prediction.price_at_prediction) * math.exp(0.03)
+        )
+        assert prediction.predicted_price > prediction.price_at_prediction
+
+    def test_price_level_model_is_rejected(
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        sample_daily_close_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A weekly model stored before #104 (price target) is not read as a return."""
+        sample_trained_model.params = {"window_days": 30, "horizon_days": 7}
+        db_session.commit()
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+
+        assert predictor.main() == 1
+        assert db_session.query(Prediction).count() == 0
+
     def test_idempotency_skips_existing_prediction(
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_30_days: list[Price],
+        sample_daily_close_prices_31_days: list[Price],
         sample_weekly_prediction_for_next_monday: Prediction,
     ) -> None:
         """
@@ -360,7 +394,7 @@ class TestMainWeeklyPredictor:
     def test_no_active_model_fails(
         self,
         db_session: Session,
-        sample_daily_close_prices_30_days: list[Price],
+        sample_daily_close_prices_31_days: list[Price],
     ) -> None:
         """
         Should fail when no active model exists.

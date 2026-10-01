@@ -99,11 +99,12 @@ class TestTrainsOnEveryBtcRow:
         _add_daily_rows(db_session, BTC, days=500, close=Decimal("60000"))
         _add_daily_rows(db_session, PAXG, days=500, close=Decimal("4000"))
 
-        prices = trainer.fetch_training_data(db_session, window_days=21)
+        series = trainer.fetch_training_data(db_session, window_days=21)
 
-        assert len(prices) == 500
-        assert all(p >= 60000 for p in prices)
-        assert prices == sorted(prices)  # oldest to newest, rising fixture
+        assert len(series) == 500
+        assert len(series.volumes) == 500
+        assert all(p >= 60000 for p in series.closes)
+        assert series.closes == sorted(series.closes)  # oldest to newest, rising
 
     def test_trainer_trains_on_exactly_the_btc_rows(
         self, use_session: Session, monkeypatch: pytest.MonkeyPatch
@@ -121,8 +122,9 @@ class TestTrainsOnEveryBtcRow:
 
         assert trainer.main() == 0
 
-        # 500 BTCUSDT rows -> 500 - 21 windows of 21 features (PAXG excluded)
-        assert seen["shape"] == (479, 21)
+        # 500 BTCUSDT rows -> 500 - 21 - 1 samples of 2 * 21 + 1 return features
+        # (PAXG excluded)
+        assert seen["shape"] == (478, 43)
 
 
 class TestMinimumRows:
