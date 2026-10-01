@@ -378,3 +378,40 @@ def test_buy_and_hold_is_the_difference_not_a_remainder():
 
 def test_an_empty_report_has_zero_persistence_days():
     assert evaluate_baselines([]).persistence_n_days == 0
+
+
+def test_a_p_value_equal_to_the_level_is_not_significant():
+    days = days_from_directions("UUDUD" * 20, predicted="UUDUD" * 20)  # perfect model
+    p_value = evaluate_baselines(days).p_value
+
+    # significant means strictly below the level
+    assert evaluate_baselines(days, significance_level=p_value).significant is False
+
+
+def test_a_tie_between_the_baselines_names_always_up():
+    days = [
+        EvaluatedDay(START, Decimal("99"), Decimal("100"), Decimal("101")),  # up
+        EvaluatedDay(
+            START + timedelta(days=1), Decimal("100"), Decimal("101"), Decimal("100")
+        ),  # down
+    ]
+    # always-up: right, wrong -> 0.5; persistence (prev day up both times): right,
+    # wrong -> 0.5
+    report = evaluate_baselines(days)
+
+    assert report.always_up_accuracy == report.persistence_accuracy == 0.5
+    assert report.best_baseline == "always_up"
+
+
+def test_a_flat_previous_day_counts_as_up_for_persistence():
+    flat_previous = EvaluatedDay(
+        START,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("101"),  # prev == price: flat
+    )
+
+    report = evaluate_baselines([flat_previous])
+
+    assert report.persistence_accuracy == 1.0  # flat counts as UP, and the day was up
+    assert report.persistence_pnl == Decimal("1")
