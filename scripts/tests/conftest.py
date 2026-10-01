@@ -175,3 +175,52 @@ def historical_90_days(db_session, cached_historical_90_days):
     db_session.add_all(prices)
     db_session.commit()
     return prices
+
+
+# ============================================================================
+# Deterministic daily series for the walk-forward engine (#106)
+# ============================================================================
+
+SYNTHETIC_FIRST_DAY = date(2023, 1, 1)
+SYNTHETIC_DAYS = 800  # through 2025-03-11
+
+
+@pytest.fixture(scope="module")
+def synthetic_daily_rows():
+    """Module-scoped (day, close, volume) rows of a seeded random walk, one per day.
+
+    Every close and volume is distinct, so a test can tell which day's data
+    reached a function by looking at its values.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(20240610)
+    closes = 30000 * np.exp(np.cumsum(rng.normal(0.0005, 0.02, SYNTHETIC_DAYS)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.3, SYNTHETIC_DAYS))
+    return [
+        (
+            SYNTHETIC_FIRST_DAY + timedelta(days=i),
+            Decimal(f"{closes[i]:.2f}"),
+            Decimal(f"{volumes[i]:.8f}"),
+        )
+        for i in range(SYNTHETIC_DAYS)
+    ]
+
+
+@pytest.fixture
+def seeded_prices(db_session, synthetic_daily_rows):
+    """Insert the synthetic series as BTCUSDT daily bars (00:00 UTC) and return it."""
+    db_session.add_all(
+        Price(
+            timestamp=datetime.combine(day, time(0, 0)).replace(tzinfo=UTC),
+            open=close,
+            high=close,
+            low=close,
+            close=close,
+            volume=volume,
+            source="test",
+        )
+        for day, close, volume in synthetic_daily_rows
+    )
+    db_session.commit()
+    return synthetic_daily_rows
