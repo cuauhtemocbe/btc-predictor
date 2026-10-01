@@ -356,3 +356,186 @@ def test_a_day_whose_training_fails_is_skipped_and_counted(
     assert stats.skipped_training_failed == 1
     assert stats.predictions == 4
     assert date(2024, 6, 3) not in [r.predicted_for for r in stored(db_session, run_id)]
+
+
+# --- Scenario: Results are reproducible ---
+
+
+class NoisyModel:
+    """A model whose output depends on the global RNGs, to prove the engine seeds."""
+
+    def train(self, X, y):
+        import random
+
+        import numpy as np
+
+        self.offset = float(np.random.normal(0, 0.01)) + random.random() * 0.01
+
+    def predict(self, X):
+        return self.offset
+
+
+def predicted_prices(db_session, run_id) -> list:
+    return [row.predicted_price for row in stored(db_session, run_id)]
+
+
+def test_same_seed_same_predictions(db_session, seeded_prices, monkeypatch):
+    # Given a fixed random seed, when I run the same backtest twice
+    monkeypatch.setattr(engine, "build_model", lambda *args: NoisyModel())
+    first, second = uuid4(), uuid4()
+    days = (date(2024, 6, 1), date(2024, 6, 10))
+
+    engine.run_walk_forward(db_session, config(*days, seed=7), first)
+    engine.run_walk_forward(db_session, config(*days, seed=7), second)
+
+    # Then both runs store identical predictions
+    assert predicted_prices(db_session, first) == predicted_prices(db_session, second)
+    assert len(set(predicted_prices(db_session, first))) > 1
+
+
+def test_a_different_seed_changes_a_seed_dependent_model(
+    db_session, seeded_prices, monkeypatch
+):
+    monkeypatch.setattr(engine, "build_model", lambda *args: NoisyModel())
+    first, second = uuid4(), uuid4()
+    days = (date(2024, 6, 1), date(2024, 6, 10))
+
+    engine.run_walk_forward(db_session, config(*days, seed=7), first)
+    engine.run_walk_forward(db_session, config(*days, seed=8), second)
+
+    assert predicted_prices(db_session, first) != predicted_prices(db_session, second)
+
+
+def test_linear_runs_are_identical_with_the_default_seed(db_session, seeded_prices):
+    first, second = uuid4(), uuid4()
+    days = (date(2024, 6, 1), date(2024, 6, 20))
+
+    engine.run_walk_forward(db_session, config(*days), first)
+    engine.run_walk_forward(db_session, config(*days), second)
+
+    assert predicted_prices(db_session, first) == predicted_prices(db_session, second)
+
+
+def test_the_seed_is_stored_with_every_result(db_session, seeded_prices):
+    run_id = uuid4()
+    engine.run_walk_forward(
+        db_session, config(date(2024, 6, 1), date(2024, 6, 3), seed=123), run_id
+    )
+
+    assert {r.model_params["seed"] for r in stored(db_session, run_id)} == {123}
+
+
+def test_the_default_seed_is_42():
+    assert config(date(2024, 6, 1), date(2024, 6, 2)).seed == 42
+
+
+# --- Retrain frequency ---
+
+
+def count_trainings(monkeypatch) -> list[int]:
+    trained_on: list[int] = []
+    real = engine.build_training_set
+
+    def spy(closes, volumes, window_days, horizon_days=1):
+        trained_on.append(len(closes))
+        return real(closes, volumes, window_days, horizon_days)
+
+    monkeypatch.setattr(engine, "build_training_set", spy)
+    return trained_on
+
+
+def test_retrain_every_n_days_trains_on_day_0_n_2n(
+    db_session, seeded_prices, monkeypatch
+):
+    trained_on = count_trainings(monkeypatch)
+    start = date(2024, 6, 1)
+
+    engine.run_walk_forward(
+        db_session, config(start, date(2024, 6, 10), retrain_every=3), uuid4()
+    )
+
+    first = (start - FIRST_DAY).days  # rows before the first predicted day
+    assert trained_on == [first, first + 3, first + 6, first + 9]
+
+
+def test_retrain_every_defaults_to_every_day(db_session, seeded_prices, monkeypatch):
+    trained_on = count_trainings(monkeypatch)
+
+    engine.run_walk_forward(
+        db_session, config(date(2024, 6, 1), date(2024, 6, 5)), uuid4()
+    )
+
+    assert len(trained_on) == 5
+
+
+def test_reused_model_still_predicts_from_data_before_each_day(
+    db_session, seeded_prices, monkeypatch
+):
+    by_close = {close: day for day, close, _ in seeded_prices}
+    last_closes: list[date] = []
+    real = engine.build_prediction_features
+
+    def spy(closes, volumes, window_days):
+        last_closes.append(by_close[closes[-1]])
+        return real(closes, volumes, window_days)
+
+    monkeypatch.setattr(engine, "build_prediction_features", spy)
+    start = date(2024, 6, 1)
+
+    engine.run_walk_forward(
+        db_session, config(start, date(2024, 6, 8), retrain_every=5), uuid4()
+    )
+
+    assert last_closes == [start + timedelta(days=i - 1) for i in range(8)]
+
+
+def test_stored_params_say_how_often_the_model_was_retrained_and_on_what_data(
+    db_session, seeded_prices
+):
+    run_id = uuid4()
+    start = date(2024, 6, 1)
+
+    engine.run_walk_forward(
+        db_session, config(start, date(2024, 6, 7), retrain_every=3), run_id
+    )
+
+    rows = stored(db_session, run_id)
+    assert {r.model_params["retrain_every"] for r in rows} == {3}
+    train_to = [r.model_params["train_to"] for r in rows]
+    assert train_to == ["2024-05-31"] * 3 + ["2024-06-03"] * 3 + ["2024-06-06"]
+    for row in rows:  # a reused model never saw the day it predicts
+        assert date.fromisoformat(row.model_params["train_to"]) < row.predicted_for
+
+
+def test_a_failed_training_is_retried_the_next_day(
+    db_session, seeded_prices, monkeypatch
+):
+    real = engine.build_training_set
+    calls = {"n": 0}
+
+    def fail_first(closes, volumes, window_days, horizon_days=1):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("bad data")
+        return real(closes, volumes, window_days, horizon_days)
+
+    monkeypatch.setattr(engine, "build_training_set", fail_first)
+
+    stats = engine.run_walk_forward(
+        db_session,
+        config(date(2024, 6, 1), date(2024, 6, 4), retrain_every=10),
+        uuid4(),
+    )
+
+    assert stats.skipped_training_failed == 1
+    assert stats.predictions == 3
+
+
+@pytest.mark.parametrize("retrain_every", [0, -1])
+def test_retrain_every_must_be_positive(db_session, seeded_prices, retrain_every):
+    with pytest.raises(ValueError, match="retrain_every must be >= 1"):
+        engine.run_walk_forward(
+            db_session,
+            config(date(2024, 6, 1), date(2024, 6, 2), retrain_every=retrain_every),
+            uuid4(),
+        )

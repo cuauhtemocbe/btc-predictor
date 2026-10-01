@@ -14,12 +14,15 @@ succeeds, and a start date without enough history fails before any work.
 """
 
 import logging
+import random
+import sys
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -38,6 +41,7 @@ from shared.utils import (
     calculate_pnl_realistic,
     calculate_pnl_threshold,
 )
+from workers.daily.models.base import BaseModel
 from workers.daily.models.factory import build_model, model_class_for
 from workers.daily.trainer import required_training_days
 
@@ -45,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_EVERY_DAYS = 10
 PRICE_QUANTUM = Decimal("0.01")  # backtest_results prices are NUMERIC(15, 2)
+DEFAULT_SEED = 42
 
 
 class InsufficientHistoryError(ValueError):
@@ -61,6 +66,10 @@ class BacktestConfig:
         start_date: First day predicted.
         end_date: Last day predicted (inclusive).
         symbol: Asset whose daily prices are backtested.
+        seed: Seeds ``random``, ``numpy`` and TensorFlow before every training, so
+            the same run stores the same predictions.
+        retrain_every: The model is retrained every this many days and reused in
+            between; the features are rebuilt every day. Part of the report.
     """
 
     model_name: str
@@ -68,6 +77,8 @@ class BacktestConfig:
     start_date: date
     end_date: date
     symbol: str = DEFAULT_SYMBOL
+    seed: int = DEFAULT_SEED
+    retrain_every: int = 1
 
     @staticmethod
     def default_window() -> int:
@@ -153,6 +164,15 @@ def check_enough_history(history: DailyHistory, config: BacktestConfig) -> None:
     )
 
 
+def seed_everything(seed: int) -> None:
+    """Seed the global RNGs the models draw from (TensorFlow only if it is loaded)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    tensorflow = sys.modules.get("tensorflow")
+    if tensorflow is not None:
+        tensorflow.random.set_seed(seed)
+
+
 def _midnight(day: date) -> datetime:
     return datetime.combine(day, datetime.min.time(), tzinfo=UTC)
 
@@ -180,6 +200,8 @@ def run_walk_forward(
             f"start date must be before or equal to end date "
             f"({config.start_date} > {config.end_date})"
         )
+    if config.retrain_every < 1:
+        raise ValueError(f"retrain_every must be >= 1 (got {config.retrain_every})")
     model_class_for(config.model_name)  # unknown names fail before any work
 
     history = load_daily_history(db, config.symbol)
@@ -187,6 +209,10 @@ def run_walk_forward(
 
     stats = BacktestStats()
     results: list[BacktestResult] = []
+    model: BaseModel | None = None
+    trained_on_day = 0  # index of the day (0 = start date) the model was trained on
+    trained_samples = 0
+    train_to = config.start_date
     day = config.start_date
     while day <= config.end_date:
         stats.total_days += 1
@@ -204,14 +230,22 @@ def run_walk_forward(
             continue
 
         closes, volumes = history.closes[:end], history.volumes[:end]
+        day_index = stats.total_days - 1
         try:
-            training_set = build_training_set(
-                closes, volumes, config.window_days, horizon_days=1
-            )
-            model = build_model(
-                config.model_name, config.window_days, feature_count(config.window_days)
-            )
-            model.train(training_set.X, training_set.y)
+            if model is None or day_index - trained_on_day >= config.retrain_every:
+                training_set = build_training_set(
+                    closes, volumes, config.window_days, horizon_days=1
+                )
+                candidate = build_model(
+                    config.model_name,
+                    config.window_days,
+                    feature_count(config.window_days),
+                )
+                seed_everything(config.seed)
+                candidate.train(training_set.X, training_set.y)
+                model, trained_on_day = candidate, day_index
+                trained_samples = len(training_set.y)
+                train_to = history.dates[end - 1]
             predicted_return = model.predict(
                 build_prediction_features(closes, volumes, config.window_days)
             )
@@ -250,9 +284,11 @@ def run_walk_forward(
                     "model_name": config.model_name,
                     "window_days": config.window_days,
                     "target": LOG_RETURN_TARGET,
+                    "seed": config.seed,
+                    "retrain_every": config.retrain_every,
                     "train_from": history.dates[0].isoformat(),
-                    "train_to": history.dates[end - 1].isoformat(),
-                    "training_samples": len(training_set.y),
+                    "train_to": train_to.isoformat(),
+                    "training_samples": trained_samples,
                 },
             )
         )

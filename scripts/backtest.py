@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from scripts.backtest_engine import BacktestConfig, run_walk_forward
+from scripts.backtest_engine import DEFAULT_SEED, BacktestConfig, run_walk_forward
 from shared.db.database import SessionLocal
 from shared.db.models import BacktestResult
 from workers.daily.models.factory import MODEL_NAMES
@@ -72,6 +72,19 @@ Examples:
         help="Window in days (default: settings.training_window_days, the "
         "production value)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"Random seed for reproducible runs (default: {DEFAULT_SEED})",
+    )
+    parser.add_argument(
+        "--retrain-every",
+        type=int,
+        default=1,
+        help="Retrain the model every N days and reuse it in between "
+        "(default: 1, every day). Reported with the results.",
+    )
     return parser.parse_args(argv)
 
 
@@ -98,11 +111,16 @@ def build_config(args: argparse.Namespace) -> BacktestConfig:
     if args.training_window < 1:
         raise ValueError(f"training-window must be >= 1 (got {args.training_window})")
 
+    if args.retrain_every < 1:
+        raise ValueError(f"retrain-every must be >= 1 (got {args.retrain_every})")
+
     return BacktestConfig(
         model_name=args.model,
         window_days=args.training_window,
         start_date=start_date,
         end_date=end_date,
+        seed=args.seed,
+        retrain_every=args.retrain_every,
     )
 
 
@@ -142,6 +160,9 @@ def main(
         logger.info("=" * 60)
         logger.info("BTC Predictor Walk-Forward Backtesting")
         logger.info(f"Model: {config.model_name}  Window: {config.window_days} days")
+        logger.info(
+            f"Seed: {config.seed}  Retrain every: {config.retrain_every} day(s)"
+        )
         logger.info(f"Range: {config.start_date} to {config.end_date}")
         logger.info(f"Backtest run ID: {run_id}")
         logger.info("=" * 60)

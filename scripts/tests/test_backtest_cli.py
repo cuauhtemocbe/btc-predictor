@@ -105,3 +105,25 @@ def test_the_summary_logs_the_pnl_of_every_strategy(db_session, seeded_prices, c
         "Realistic strategy",
     ):
         assert label in caplog.text
+
+
+def test_seed_and_retrain_every_reach_the_stored_params(db_session, seeded_prices):
+    assert run(db_session, *DAY, "--seed=9", "--retrain-every=2") == 0
+
+    params = [r.model_params for r in db_session.query(BacktestResult).all()]
+    assert {p["seed"] for p in params} == {9}
+    assert {p["retrain_every"] for p in params} == {2}
+
+
+def test_seed_defaults_to_42_and_retrain_every_to_1():
+    args = backtest.parse_arguments(
+        ["--start-date=2024-01-01", "--end-date=2024-01-02"]
+    )
+
+    assert (args.seed, args.retrain_every) == (42, 1)
+
+
+def test_retrain_every_below_one_is_rejected(db_session, seeded_prices, caplog):
+    assert run(db_session, *DAY, "--retrain-every=0") == 1
+
+    assert "retrain-every must be >= 1" in caplog.text
