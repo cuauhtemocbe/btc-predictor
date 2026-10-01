@@ -6,6 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_VERSION=2.3.3 \
     POETRY_VIRTUALENVS_CREATE=false
 
+# Patch openssl until the pinned base digest ships it: Debian 13.7 has
+# 3.5.7-1~deb13u2 (CVE-2026-75804, CVE-2026-84782, fixed in deb13u3). Remove this
+# step after bumping the digest to an image that already includes the fix.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --only-upgrade \
+        openssl libssl3t64 openssl-provider-legacy && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir --upgrade pip==26.1 && \
     pip install --no-cache-dir poetry==$POETRY_VERSION && \
     addgroup --system appgroup && adduser --system --ingroup appgroup appuser
