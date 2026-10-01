@@ -339,3 +339,42 @@ def test_p_value_handles_degenerate_probabilities(k, n, p, expected):
 
     assert binomial_tail_probability(k, n, p) == expected
     assert not math.isnan(binomial_tail_probability(k, n, p))
+
+
+def test_p_value_never_exceeds_one_despite_rounding():
+    from shared.baselines import binomial_tail_probability
+
+    # summing 49 near-certain terms in log space rounds to 1.0000000000000158
+    assert binomial_tail_probability(1, 50, 0.9) == 1.0
+
+
+@pytest.mark.parametrize(
+    ("k", "n", "p"), [(3, 10, 0.3), (2, 8, 0.2), (4, 12, 0.7), (1, 20, 0.05)]
+)
+def test_p_value_matches_scipy_when_successes_are_below_half_the_trials(k, n, p):
+    from shared.baselines import binomial_tail_probability
+
+    assert binomial_tail_probability(k, n, p) == pytest.approx(
+        binomial_tail(k, n, p), rel=1e-9
+    )
+
+
+def test_p_value_handles_out_of_range_success_counts():
+    from shared.baselines import binomial_tail_probability
+
+    assert binomial_tail_probability(-1, 10, 0.5) == 1.0
+    assert binomial_tail_probability(11, 10, 0.5) == 0.0
+
+
+def test_buy_and_hold_is_the_difference_not_a_remainder():
+    days = [
+        EvaluatedDay(START, None, Decimal("100"), Decimal("120")),
+        EvaluatedDay(START + timedelta(days=1), None, Decimal("120"), Decimal("250")),
+    ]
+
+    # 250 - 100 = 150 (and 250 % 100 would be 50)
+    assert evaluate_baselines(days).buy_and_hold_pnl == Decimal("150")
+
+
+def test_an_empty_report_has_zero_persistence_days():
+    assert evaluate_baselines([]).persistence_n_days == 0
