@@ -165,3 +165,23 @@ def test_a_malformed_test_start_date_exits_one(db_session, seeded_prices, caplog
     assert run(db_session, *DAY, "--test-start-date=soon") == 1
 
     assert "Invalid test-start-date" in caplog.text
+
+
+def test_ctrl_c_exits_one(db_session, monkeypatch, caplog):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(backtest, "run_walk_forward", interrupted)
+
+    assert run(db_session, *DAY) == 1
+    assert "interrupted by user" in caplog.text
+
+
+def test_an_unexpected_error_exits_one_and_is_logged(db_session, monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(backtest, "run_walk_forward", broken)
+
+    assert run(db_session, *DAY) == 1
+    assert "Backtest failed: database went away" in caplog.text

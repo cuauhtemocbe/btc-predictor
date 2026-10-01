@@ -215,13 +215,19 @@ docker compose exec api python scripts/backtest.py \
   --start-date=2024-05-01 --end-date=2024-05-30 \
   --training-window=60
 
+# Otro modelo, split validación/test explícito, reentrenando cada 30 días
+docker compose exec api python scripts/backtest.py \
+  --start-date=2023-01-01 --end-date=2025-12-31 \
+  --model=arima --retrain-every=30 --test-start-date=2025-01-01
+
 # Backtest de últimos 90 días
 docker compose exec api python scripts/backtest.py \
   --start-date=2024-02-01 --end-date=2024-04-30
 ```
 
 **Características:**
-- ✅ **Walk-Forward Testing:** Entrena modelo progresivamente sin lookahead bias
+- ✅ **Walk-Forward Testing:** Entrena modelo progresivamente sin lookahead bias, con el mismo código de features y modelos que el worker diario
+- ✅ **Baselines y significancia:** compara contra always-up, persistence y buy-and-hold, con tamaño de muestra, edge y p-value; el headline usa solo el slice de test
 - ✅ **4 Estrategias PnL:** Simple, Long/Short, Threshold, Realistic (con fees)
 - ✅ **UUID por Run:** Distingue múltiples simulaciones
 - ✅ **Progress Logging:** Muestra progreso cada 10 días
