@@ -625,3 +625,41 @@ def test_the_test_start_date_is_stored_with_every_result(db_session, seeded_pric
     assert {r.model_params["test_start_date"] for r in stored(db_session, run_id)} == {
         "2024-06-08"
     }
+
+
+def test_a_run_where_every_day_fails_to_train_raises_instead_of_storing_nothing(
+    db_session, seeded_prices, monkeypatch
+):
+    def always_fail(closes, volumes, window_days, horizon_days=1):
+        raise ValueError("X must have 5 features (window_days), got 11")
+
+    monkeypatch.setattr(engine, "build_training_set", always_fail)
+
+    with pytest.raises(ValueError, match="Every one of the 3 days.*X must have 5"):
+        engine.run_walk_forward(
+            db_session, config(date(2024, 6, 1), date(2024, 6, 3)), uuid4()
+        )
+
+    assert db_session.query(BacktestResult).count() == 0
+
+
+@pytest.mark.slow
+def test_a_year_of_linear_predictions_stays_within_the_time_budget(
+    db_session, seeded_prices
+):
+    import time
+
+    started = time.perf_counter()
+    stats = engine.run_walk_forward(
+        db_session,
+        config(
+            date(2024, 1, 1),
+            date(2024, 12, 30),
+            window_days=BacktestConfig.default_window(),
+        ),
+        uuid4(),
+    )
+    elapsed = time.perf_counter() - started
+
+    assert stats.predictions == 365
+    assert elapsed < 60, f"365 days took {elapsed:.1f}s (budget 60s)"

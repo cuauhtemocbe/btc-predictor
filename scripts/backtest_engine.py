@@ -236,6 +236,7 @@ def run_walk_forward(
 
     stats = BacktestStats()
     results: list[BacktestResult] = []
+    first_training_error: str | None = None
     model: BaseModel | None = None
     trained_on_day = 0  # index of the day (0 = start date) the model was trained on
     trained_samples = 0
@@ -278,6 +279,7 @@ def run_walk_forward(
             )
         except ValueError as error:
             logger.warning(f"Skipping {day}: training failed - {error}")
+            first_training_error = first_training_error or str(error)
             stats.skipped_training_failed += 1
             day += timedelta(days=1)
             continue
@@ -324,6 +326,13 @@ def run_walk_forward(
         )
         stats.predictions += 1
         day += timedelta(days=1)
+
+    if not results and first_training_error is not None:
+        raise ValueError(
+            f"Every one of the {stats.skipped_training_failed} days failed to train "
+            f"the {config.model_name} model, nothing was stored; first error: "
+            f"{first_training_error}"
+        )
 
     db.add_all(results)
     db.commit()
