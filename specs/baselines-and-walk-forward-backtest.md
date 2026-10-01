@@ -1,6 +1,6 @@
 ---
 title: Baseline Comparison and Walk-Forward Backtest
-status: in-progress
+status: completed
 created: 2026-09-30
 updated: 2026-09-30
 issue: "#105, #106"
@@ -289,7 +289,7 @@ Run Cosmic Ray on `shared/shared/baselines.py` (target > 85%, as in the project 
 
 ## Implementation Plan
 
-See `specs/baselines-and-walk-forward-backtest-plan.md`.
+See `specs/baselines-and-walk-forward-backtest-plan.md`. Delivered in PR #136 (merged 2026-10-01).
 Delivered in the order baselines → model factory → migration → engine → seed/retrain →
 split + report → non-linear models → docs, one commit per task.
 
