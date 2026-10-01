@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from shared.config import settings
 from shared.db.crud import get_active_model
 from shared.db.models import Model, Price
 from workers.weekly import trainer
@@ -26,7 +27,7 @@ from workers.weekly import trainer
 
 @pytest.fixture
 def sample_prices_200_days(db_session: Session) -> list[Price]:
-    """200 days of daily-spaced BTC prices -- enough for Phase 5 + a 7-day horizon."""
+    """200 days of daily-spaced BTC prices: covers the window + a 7-day horizon."""
     base_price = 50000
     prices = []
 
@@ -47,18 +48,13 @@ def sample_prices_200_days(db_session: Session) -> list[Price]:
     return prices
 
 
-@pytest.fixture
-def sample_prices_35_days(db_session: Session) -> list[Price]:
-    """
-    35 days: enough for calculate_dynamic_window()'s Phase 1 floor (min=30)
-    but NOT enough once the 7-day horizon is added on top (needs 36).
-    """
+def _add_daily_prices(db_session: Session, days: int) -> list[Price]:
     base_price = 50000
     prices = []
 
-    for i in range(35):
+    for i in range(days):
         price_record = Price(
-            timestamp=datetime.now(UTC) - timedelta(days=35 - i),
+            timestamp=datetime.now(UTC) - timedelta(days=days - i),
             open=Decimal(base_price + i * 100),
             high=Decimal(base_price + i * 100 + 500),
             low=Decimal(base_price + i * 100 - 500),
@@ -71,6 +67,15 @@ def sample_prices_35_days(db_session: Session) -> list[Price]:
     db_session.add_all(prices)
     db_session.commit()
     return prices
+
+
+@pytest.fixture
+def sample_prices_115_days(db_session: Session) -> list[Price]:
+    """
+    115 days: enough for the configured window alone ((21 + 1) * 5 = 110 rows)
+    but NOT once the 7-day horizon is added on top (needs 116).
+    """
+    return _add_daily_prices(db_session, 115)
 
 
 @pytest.fixture
@@ -169,13 +174,13 @@ class TestMainWeeklyTrainer:
         assert reloaded.is_active is True
 
     def test_insufficient_history_prevents_training(
-        self, db_session: Session, sample_prices_35_days: list[Price]
+        self, db_session: Session, sample_prices_115_days: list[Price]
     ) -> None:
         """
         Scenario: Insufficient history prevents invalid training
 
         Given fewer than the required historical observations for a
-        seven-day horizon (35 days: enough for the base window, not
+        seven-day horizon (115 days: enough for the base window, not
         enough once the horizon is added)
         When weekly model training runs
         Then no invalid weekly model or prediction is created
@@ -184,6 +189,43 @@ class TestMainWeeklyTrainer:
         exit_code = trainer.main()
 
         assert exit_code == 1
+        assert get_active_model(db_session, timeframe="1w") is None
+
+    def test_horizon_is_added_on_top_of_the_configured_window(
+        self, db_session: Session
+    ) -> None:
+        """116 rows = (21 + 1) * 5 + 7 - 1: the smallest history that trains."""
+        _add_daily_prices(db_session, 116)
+
+        assert trainer.main() == 0
+
+        active = get_active_model(db_session, timeframe="1w")
+        assert active is not None
+        assert active.params["window_days"] == settings.training_window_days == 21
+        assert active.params["horizon_days"] == 7
+
+    def test_weekly_trainer_ignores_other_symbols(self, db_session: Session) -> None:
+        """PAXGUSDT rows must not make up for missing BTCUSDT history."""
+        _add_daily_prices(db_session, 115)
+        first_day = datetime.now(UTC).date() - timedelta(days=300)
+        db_session.add_all(
+            Price(
+                symbol="PAXGUSDT",
+                timestamp=datetime.combine(
+                    first_day + timedelta(days=i), datetime.min.time(), tzinfo=UTC
+                ),
+                open=Decimal("4000"),
+                high=Decimal("4000"),
+                low=Decimal("4000"),
+                close=Decimal("4000"),
+                volume=Decimal("1"),
+                source="test",
+            )
+            for i in range(300)
+        )
+        db_session.commit()
+
+        assert trainer.main() == 1
         assert get_active_model(db_session, timeframe="1w") is None
 
     def test_no_data_fails_gracefully(self, db_session: Session) -> None:

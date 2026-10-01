@@ -17,8 +17,6 @@ from shared.db.models import Price
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import (
-    calculate_dynamic_window,
-    count_available_days,
     create_sliding_windows,
     train_all_models,
     train_single_model,
@@ -164,9 +162,8 @@ class TestTrainAllModels:
 
     @pytest.mark.non_linear
     def test_train_all_models_success(self, db_session, sample_prices):
-        """Test successful training of all models with dynamic window."""
-        # Train all models (200 days -> Phase 5 Optimal: window=30, min=60)
-        # Should train all 4 models including ARIMA (200 days >= 60)
+        """Test successful training of all models with the configured window."""
+        # 200 days >= 60, so ARIMA is included next to linear, lstm and xgboost
         models = train_all_models(db_session)
 
         # Verify we got models back (should be 4: linear, lstm, xgboost, arima)
@@ -243,8 +240,8 @@ class TestTrainAllModels:
         assert get_active_model(db_session) is not None
 
     def test_train_all_models_insufficient_data_raises_error(self, db_session):
-        """Test that train_all_models raises ValueError with insufficient data."""
-        # Create only 29 days of data (< 30 min for Phase 1)
+        """train_all_models fails when fewer rows are stored than the split needs."""
+        # 29 rows < (21 + 1) * 5 = 110 required for the default window
         for i in range(29):
             price_record = Price(
                 timestamp=datetime.now(UTC) - timedelta(days=29 - i),
@@ -259,14 +256,13 @@ class TestTrainAllModels:
 
         db_session.commit()
 
-        # Should raise ValueError (29 days < 30 minimum)
-        with pytest.raises(ValueError, match="Insufficient data for training"):
+        with pytest.raises(ValueError, match=r"need 110 daily rows.*have 29"):
             train_all_models(db_session)
 
     @pytest.mark.non_linear
     def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
         """Test that ARIMA is excluded when less than 60 days available."""
-        # Create 55 days of data (Phase 2: enough for training but not for ARIMA)
+        # 55 days: enough for window=10 ((10 + 1) * 5 = 55) but not for ARIMA
         for i in range(55):
             price_record = Price(
                 timestamp=datetime.now(UTC) - timedelta(days=55 - i),
@@ -281,8 +277,7 @@ class TestTrainAllModels:
 
         db_session.commit()
 
-        # Train with automatic configuration (55 days -> Phase 2: window=10, min=55)
-        models = train_all_models(db_session)
+        models = train_all_models(db_session, window_days=10)
 
         # Should have 3 models (linear, lstm, xgboost) but NOT arima
         assert len(models) == 3
@@ -291,93 +286,6 @@ class TestTrainAllModels:
         assert any("linear" in name for name in model_names)
         assert any("lstm" in name for name in model_names)
         assert any("xgboost" in name for name in model_names)
-
-
-class TestCalculateDynamicWindow:
-    """Test calculate_dynamic_window function."""
-
-    def test_phase_1_initial(self):
-        """Test Phase 1: 30-44 days -> window=5, min=30."""
-        window, min_days = calculate_dynamic_window(35)
-        assert window == 5
-        assert min_days == 30
-
-    def test_phase_2_growth(self):
-        """Test Phase 2: 45-59 days -> window=7, min=40."""
-        window, min_days = calculate_dynamic_window(50)
-        assert window == 7
-        assert min_days == 40
-
-    def test_phase_3_intermediate(self):
-        """Test Phase 3: 60-89 days -> window=10, min=55."""
-        window, min_days = calculate_dynamic_window(70)
-        assert window == 10
-        assert min_days == 55
-
-    def test_phase_4_mature(self):
-        """Test Phase 4: 90-144 days -> window=14, min=75."""
-        window, min_days = calculate_dynamic_window(100)
-        assert window == 14
-        assert min_days == 75
-
-    def test_phase_5_optimal(self):
-        """Test Phase 5: 145+ days -> window=21, min=110."""
-        window, min_days = calculate_dynamic_window(200)
-        assert window == 21
-        assert min_days == 110
-
-    def test_insufficient_data_raises_error(self):
-        """Test that less than 30 days raises ValueError."""
-        with pytest.raises(ValueError, match="Insufficient data for training"):
-            calculate_dynamic_window(29)
-
-    def test_edge_case_boundaries(self):
-        """Test boundary values between phases."""
-        # Exactly 30 days -> Phase 1
-        assert calculate_dynamic_window(30) == (5, 30)
-        # Exactly 45 days -> Phase 2
-        assert calculate_dynamic_window(45) == (7, 40)
-        # Exactly 60 days -> Phase 3
-        assert calculate_dynamic_window(60) == (10, 55)
-        # Exactly 90 days -> Phase 4
-        assert calculate_dynamic_window(90) == (14, 75)
-        # Exactly 145 days -> Phase 5
-        assert calculate_dynamic_window(145) == (21, 110)
-
-
-class TestCountAvailableDays:
-    """Test count_available_days function."""
-
-    def test_count_available_days(self, db_session):
-        """Test counting distinct days of price data."""
-        # Create 10 days of data with 6 records per day (4-hour candles)
-        # Start from a fixed date to avoid timezone issues
-        from datetime import datetime as dt
-
-        base_time = dt(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
-        for day in range(10):
-            for hour in [0, 4, 8, 12, 16, 20]:  # 6 candles per day
-                price_record = Price(
-                    timestamp=base_time + timedelta(days=day, hours=hour),
-                    open=Decimal(50000),
-                    high=Decimal(51000),
-                    low=Decimal(49000),
-                    close=Decimal(50000),
-                    volume=Decimal("1000.5"),
-                    source="coingecko",
-                )
-                db_session.add(price_record)
-
-        db_session.commit()
-
-        # Should count 10 distinct days despite having 60 records
-        count = count_available_days(db_session)
-        assert count == 10
-
-    def test_count_available_days_empty_database(self, db_session):
-        """Test counting with empty database."""
-        count = count_available_days(db_session)
-        assert count == 0
 
 
 class TestCreateSlidingWindows:

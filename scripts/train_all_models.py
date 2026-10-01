@@ -48,11 +48,7 @@ def main() -> int:
 
     try:
         # Train all models
-        models = train_all_models(
-            session=session,
-            window_days=30,  # 30-day sliding window
-            min_days=90,  # Need 90 days for ARIMA and validation split
-        )
+        models = train_all_models(session=session)
 
         logger.info("=" * 70)
         logger.info(f"✓ SUCCESS: Trained and saved {len(models)} models")
@@ -62,7 +58,7 @@ def main() -> int:
 
     except ValueError as e:
         logger.error(f"✗ VALIDATION ERROR: {e}")
-        logger.error("Make sure you have at least 90 days of historical BTC prices.")
+        logger.error("Make sure enough daily BTCUSDT prices are stored (see the error above).")
         logger.error("Run: docker compose exec api python -m fetch_price.main")
         return 1
 

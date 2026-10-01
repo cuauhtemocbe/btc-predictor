@@ -4,7 +4,7 @@ Configuration module using pydantic-settings.
 Loads environment variables and validates required configuration.
 """
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +14,11 @@ class Settings(BaseSettings):
 
     Attributes:
         database_url: PostgreSQL connection string (required)
+        training_window_days: Sliding-window size (days) the trainers use (default 21)
     """
 
     database_url: str
+    training_window_days: int = Field(default=21, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=".env",

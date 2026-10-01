@@ -9,9 +9,9 @@ genuinely 7 calendar days after the end of its feature window, using the
 same sliding-window mechanism as the daily trainer with horizon_days=7.
 
 This job:
-1. Detects available historical data and calculates a window size (reusing
-   the daily trainer's dynamic-window strategy)
-2. Fetches daily-aggregated historical prices
+1. Reads the window size from settings.training_window_days (same as the
+   daily trainer)
+2. Fetches every stored daily BTCUSDT close price
 3. Creates sliding window features with a 7-day-ahead target
 4. Trains a LinearRegressionModel (matching the daily trainer's simplest,
    currently-production single-model path in workers/daily/trainer.py:main())
@@ -29,15 +29,11 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from shared.config import settings
 from shared.db.crud import activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import Model
-from workers.daily.trainer import (
-    calculate_dynamic_window,
-    count_available_days,
-    create_sliding_windows,
-    fetch_training_data,
-)
+from workers.daily.trainer import create_sliding_windows, fetch_training_data
 from workers.weekly.models import LinearRegressionModel
 
 # Configure logging
@@ -115,24 +111,12 @@ def main() -> int:
     session = SessionLocal()
 
     try:
-        days_available = count_available_days(session)
-        logger.info(f"Available historical data: {days_available} days")
-
-        window_days, min_days = calculate_dynamic_window(days_available)
-
-        # The last training sample needs horizon_days days of "future" data
-        # past its window to have a target -- calculate_dynamic_window()
-        # doesn't know about the horizon, so pad its floor here.
-        required_days = min_days + HORIZON_DAYS - 1
-        logger.info(
-            f"Dynamic configuration: window={window_days}d, "
-            f"required={required_days}d (min={min_days}d + "
-            f"horizon={HORIZON_DAYS}d - 1)"
-        )
+        window_days = settings.training_window_days
+        logger.info(f"Training window: {window_days}d, horizon: {HORIZON_DAYS}d")
 
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")
 
-        prices = fetch_training_data(session, window_days, required_days)
+        prices = fetch_training_data(session, window_days, horizon_days=HORIZON_DAYS)
 
         X, y = create_sliding_windows(prices, window_days, horizon_days=HORIZON_DAYS)
 
