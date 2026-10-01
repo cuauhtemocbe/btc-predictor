@@ -7,12 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_VERSION=2.3.3 \
     POETRY_VIRTUALENVS_CREATE=false
 
-# Patch openssl until the base image ships it: Debian 13.7 has
+# Patch openssl and pcre2 until the base image ships it: Debian 13.7 has
 # 3.5.7-1~deb13u2 (CVE-2026-75804, CVE-2026-84782, fixed in deb13u3). Remove this
 # step once python:3.13-slim includes the fix.
+# libpcre2-8-0 10.46-1~deb13u2 has CVE-2026-103111 (HIGH, fixed in deb13u3).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --only-upgrade \
-        openssl libssl3t64 openssl-provider-legacy && \
+        openssl libssl3t64 openssl-provider-legacy libpcre2-8-0 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip==26.1 && \
