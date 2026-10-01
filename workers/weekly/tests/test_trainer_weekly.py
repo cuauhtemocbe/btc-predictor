@@ -151,6 +151,7 @@ class TestMainWeeklyTrainer:
         assert active.timeframe == "1w"
         assert active.name == trainer.MODEL_NAME
         assert active.params["horizon_days"] == trainer.HORIZON_DAYS
+        assert active.params["target"] == "log_return"
         assert active.is_active is True
 
     def test_does_not_touch_active_daily_model(

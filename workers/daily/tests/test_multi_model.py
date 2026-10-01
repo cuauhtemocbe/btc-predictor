@@ -233,12 +233,13 @@ class TestCheckExistingPrediction:
 class TestMultiModelPrediction:
     """Integration tests for multi-model prediction mode."""
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_generates_predictions_from_all_active_models(
         self,
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should generate predictions from all active models."""
         # Ensure both models are active
@@ -269,7 +270,7 @@ class TestMultiModelPrediction:
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should generate only one prediction in single-model mode."""
         # Ensure both models are active
@@ -291,12 +292,13 @@ class TestMultiModelPrediction:
         predictions = db_session.query(Prediction).all()
         assert len(predictions) == 1
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_idempotency_with_multi_model(
         self,
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should not duplicate predictions when re-running in multi-model mode."""
         # Ensure both models are active
@@ -328,12 +330,13 @@ class TestMultiModelPrediction:
         predictions_count_2 = db_session.query(Prediction).count()
         assert predictions_count_2 == 2  # No duplicates
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_all_models_use_same_input_features(
         self,
         db_session: Session,
         sample_trained_model: Model,
         sample_xgboost_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should use same current price for all models (fair comparison)."""
         # Ensure both models are active

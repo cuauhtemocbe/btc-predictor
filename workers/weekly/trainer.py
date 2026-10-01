@@ -12,7 +12,8 @@ This job:
 1. Reads the window size from settings.training_window_days (same as the
    daily trainer)
 2. Fetches every stored daily BTCUSDT close price
-3. Creates sliding window features with a 7-day-ahead target
+3. Builds return features with a 7-day log return target (the sum of the next
+   7 daily log returns)
 4. Trains a LinearRegressionModel (matching the daily trainer's simplest,
    currently-production single-model path in workers/daily/trainer.py:main())
 5. Saves the model with timeframe="1w" and horizon_days=7 in its params,
@@ -33,7 +34,8 @@ from shared.config import settings
 from shared.db.crud import activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import Model
-from workers.daily.trainer import create_sliding_windows, fetch_training_data
+from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
+from workers.daily.trainer import fetch_training_data
 from workers.weekly.models import LinearRegressionModel
 
 # Configure logging
@@ -75,7 +77,11 @@ def save_weekly_model(
     model_record = Model(
         name=MODEL_NAME,
         version=version,
-        params={"window_days": window_days, "horizon_days": HORIZON_DAYS},
+        params={
+            "window_days": window_days,
+            "horizon_days": HORIZON_DAYS,
+            "target": LOG_RETURN_TARGET,
+        },
         artifact=model_artifact,
         trained_at=datetime.now(UTC),
         train_from=train_from,
@@ -116,16 +122,21 @@ def main() -> int:
 
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")
 
-        prices = fetch_training_data(session, window_days, horizon_days=HORIZON_DAYS)
+        series = fetch_training_data(session, window_days, horizon_days=HORIZON_DAYS)
 
-        X, y = create_sliding_windows(prices, window_days, horizon_days=HORIZON_DAYS)
+        training_set = build_training_set(
+            series.closes, series.volumes, window_days, horizon_days=HORIZON_DAYS
+        )
+        logger.info(f"Created {len(training_set.y)} training samples")
 
         logger.info(f"Training {MODEL_NAME} (horizon_days={HORIZON_DAYS})...")
-        model = LinearRegressionModel(window_days=window_days)
-        model.train(X, y)
+        model = LinearRegressionModel(
+            window_days=window_days, n_features=feature_count(window_days)
+        )
+        model.train(training_set.X, training_set.y)
 
         train_to = date.today()
-        train_from = train_to - timedelta(days=len(prices))
+        train_from = train_to - timedelta(days=len(series))
 
         save_weekly_model(
             session=session,

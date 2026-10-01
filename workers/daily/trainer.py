@@ -4,8 +4,8 @@ Daily trainer job - trains ML model on historical BTC price data.
 This job:
 1. Reads the sliding-window size from settings.training_window_days
 2. Fetches every stored daily BTCUSDT close price
-3. Creates sliding window features for time series prediction
-4. Trains the model
+3. Builds return-based features (shared.features) and the next-day log return target
+4. Trains the model on log returns, not on price levels
 5. Saves the trained model to the database
 6. Sets it as the active model (deactivates previous models)
 
@@ -22,7 +22,6 @@ Entry point: python -m workers.daily.trainer
 import logging
 import sys
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 
 import numpy as np
 import numpy.typing as npt
@@ -33,6 +32,12 @@ from shared.config import settings
 from shared.db.crud import activate_model as crud_activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Price
+from shared.features import (
+    LOG_RETURN_TARGET,
+    DailySeries,
+    build_training_set,
+    feature_count,
+)
 from shared.utils import calculate_mape, split_train_validation
 from workers.daily.models import BaseModel, LinearRegressionModel
 
@@ -61,12 +66,12 @@ def fetch_training_data(
     window_days: int,
     horizon_days: int = 1,
     symbol: str = DEFAULT_SYMBOL,
-) -> list[Decimal]:
+) -> DailySeries:
     """
-    Fetch every stored DAILY close price of one symbol for training.
+    Fetch every stored DAILY close price and volume of one symbol for training.
 
-    Uses date aggregation to get exactly one price per day (not per hour/4h).
-    Takes the latest close price for each day.
+    Uses date aggregation to get exactly one row per day (not per hour/4h).
+    Takes the latest row (its close and volume) for each day.
 
     Args:
         session: Database session
@@ -75,7 +80,7 @@ def fetch_training_data(
         symbol: Asset whose prices are read (default BTCUSDT)
 
     Returns:
-        List of daily close prices (oldest to newest)
+        Daily closes and volumes (oldest to newest)
 
     Raises:
         ValueError: If fewer rows are stored than required_training_days()
@@ -93,7 +98,7 @@ def fetch_training_data(
 
     # Main query: Join to get the close price for the latest timestamp each day
     stmt = (
-        select(Price.close)
+        select(Price.close, Price.volume)
         .join(
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
@@ -102,69 +107,23 @@ def fetch_training_data(
         .order_by(latest_per_day.c.day)
     )
 
-    prices = list(session.execute(stmt).scalars().all())
+    rows = session.execute(stmt).all()
 
     required = required_training_days(window_days, horizon_days)
-    if len(prices) < required:
+    if len(rows) < required:
         raise ValueError(
             f"Insufficient training data for {symbol}: need {required} daily rows "
-            f"(window={window_days}d, horizon={horizon_days}d), have {len(prices)}"
+            f"(window={window_days}d, horizon={horizon_days}d), have {len(rows)}"
         )
 
     logger.info(
-        f"Fetched {len(prices)} DAYS of {symbol} prices for training "
+        f"Fetched {len(rows)} DAYS of {symbol} prices for training "
         f"(aggregated from multiple records/day)"
     )
 
-    return prices
-
-
-def create_sliding_windows(
-    prices: list[Decimal], window_days: int = 30, horizon_days: int = 1
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """
-    Create sliding window features and labels from price history.
-
-    For 60 days of prices with a 30-day window and the default 1-day
-    horizon:
-    - Sample 1: days 1-30 → predict day 31
-    - Sample 2: days 2-31 → predict day 32
-    - ...
-    - Sample 30: days 30-59 → predict day 60
-
-    With horizon_days=7 (weekly training), each sample's target shifts 7
-    days past the end of its window instead of 1 -- e.g. days 1-30 predict
-    day 37. horizon_days=1 reproduces the original daily behavior exactly.
-
-    Args:
-        prices: List of close prices (oldest to newest)
-        window_days: Size of sliding window
-        horizon_days: How many days past the end of the window the target
-            is. 1 = predict the very next day (daily). 7 = predict 7
-            calendar days after the window's last observed day (weekly).
-
-    Returns:
-        Tuple (X, y) where:
-        - X: Feature matrix of shape (n_samples, window_days)
-        - y: Target vector of shape (n_samples,)
-    """
-    prices_float = [float(p) for p in prices]
-    n_samples = len(prices_float) - window_days - horizon_days + 1
-
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices_float[i : i + window_days]
-        y[i] = prices_float[i + window_days + horizon_days - 1]
-
-    logger.info(
-        f"Created {n_samples} training samples "
-        f"(feature shape: {X.shape}, target shape: {y.shape}, "
-        f"horizon_days={horizon_days})"
+    return DailySeries(
+        closes=[row.close for row in rows], volumes=[row.volume for row in rows]
     )
-
-    return X, y
 
 
 def save_model(
@@ -201,7 +160,11 @@ def save_model(
     model_record = Model(
         name=model_name,
         version=version,
-        params={"window_days": window_days},
+        params={
+            "window_days": window_days,
+            "horizon_days": 1,
+            "target": LOG_RETURN_TARGET,
+        },
         artifact=model_artifact,
         trained_at=datetime.now(UTC),
         train_from=train_from,
@@ -246,20 +209,25 @@ def main() -> int:
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")  # Timestamp version
 
         # Fetch training data
-        prices = fetch_training_data(session, window_days)
+        series = fetch_training_data(session, window_days)
 
-        # Create sliding windows
-        X, y = create_sliding_windows(prices, window_days)
+        # Return features and next-day log return target
+        training_set = build_training_set(
+            series.closes, series.volumes, window_days, horizon_days=1
+        )
+        logger.info(f"Created {len(training_set.y)} training samples")
 
         # Train model
-        logger.info("Training LinearRegressionModel...")
-        model = LinearRegressionModel(window_days=window_days)
-        model.train(X, y)
+        logger.info("Training LinearRegressionModel on log returns...")
+        model = LinearRegressionModel(
+            window_days=window_days, n_features=feature_count(window_days)
+        )
+        model.train(training_set.X, training_set.y)
 
         # Calculate training date range
         # Assuming hourly data, approximate day range
         train_to = date.today()
-        train_from = train_to - timedelta(days=len(prices))
+        train_from = train_to - timedelta(days=len(series))
 
         # Save model
         save_model(
@@ -293,6 +261,7 @@ def train_single_model(
     X_val: npt.NDArray[np.float64],
     y_val: npt.NDArray[np.float64],
     window_days: int,
+    base_close_val: npt.NDArray[np.float64] | None = None,
 ) -> tuple[BaseModel, float] | None:
     """
     Train a single model with validation data and calculate validation error.
@@ -305,6 +274,10 @@ def train_single_model(
         X_val: Validation features
         y_val: Validation targets
         window_days: Window size for model
+        base_close_val: Close of the day each validation sample was built at. When
+            given, y_val and the predictions are log returns and the error is the
+            MAPE of the prices they imply (base_close * exp(return)); when None,
+            the MAPE is computed on y_val directly.
 
     Returns:
         Tuple of (trained_model, validation_error_pct) or None if training fails
@@ -324,6 +297,8 @@ def train_single_model(
         # Instantiate model (ARIMA has different parameters)
         if model_name == "arima":
             model = model_class(order=(5, 1, 0))
+        elif issubclass(model_class, LinearRegressionModel):
+            model = model_class(window_days=window_days, n_features=X_train.shape[1])
         else:
             model = model_class(window_days=window_days)
 
@@ -334,8 +309,13 @@ def train_single_model(
         predictions = [model.predict(X_val[i : i + 1]) for i in range(len(X_val))]
         y_val_pred = np.array(predictions)
 
-        # Calculate MAPE validation error
-        validation_error = calculate_mape(y_val, y_val_pred)
+        # Calculate MAPE validation error (on prices when targets are returns)
+        if base_close_val is None:
+            validation_error = calculate_mape(y_val, y_val_pred)
+        else:
+            validation_error = calculate_mape(
+                base_close_val * np.exp(y_val), base_close_val * np.exp(y_val_pred)
+            )
 
         # Calculate training duration
         duration = time.time() - start_time
@@ -412,33 +392,31 @@ def train_all_models(
     logger.info(f"Training window: {window_days}d")
 
     # Fetch training data
-    prices = fetch_training_data(session, window_days)
+    series = fetch_training_data(session, window_days)
 
     # Model registry - ARIMA needs 60+ days of data
-    MODEL_CLASSES = model_registry(len(prices))
-
-    # Convert to numpy array
-    prices_array = np.array([float(p) for p in prices])
+    MODEL_CLASSES = model_registry(len(series))
 
     # Split into train/validation (70/20/10)
     logger.info("Splitting data: 70% train, 20% validation, 10% buffer")
-    train_prices, val_prices = split_train_validation(
-        prices_array, train_pct=0.7, val_pct=0.2
+    closes = np.array([float(c) for c in series.closes])
+    volumes = np.array([float(v) for v in series.volumes])
+    train_closes, val_closes = split_train_validation(
+        closes, train_pct=0.7, val_pct=0.2
+    )
+    train_volumes, val_volumes = split_train_validation(
+        volumes, train_pct=0.7, val_pct=0.2
     )
 
     logger.info(
-        f"Train set: {len(train_prices)} days, Validation set: {len(val_prices)} days"
+        f"Train set: {len(train_closes)} days, Validation set: {len(val_closes)} days"
     )
 
-    # Create sliding windows for train set
-    X_train, y_train = create_sliding_windows(
-        [Decimal(str(p)) for p in train_prices], window_days
-    )
-
-    # Create sliding windows for validation set
-    X_val, y_val = create_sliding_windows(
-        [Decimal(str(p)) for p in val_prices], window_days
-    )
+    # Return features and next-day log return targets for each set
+    train_set = build_training_set(train_closes, train_volumes, window_days)
+    val_set = build_training_set(val_closes, val_volumes, window_days)
+    X_train, y_train = train_set.X, train_set.y
+    X_val, y_val = val_set.X, val_set.y
 
     logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
 
@@ -454,6 +432,7 @@ def train_all_models(
             X_val=X_val,
             y_val=y_val,
             window_days=window_days,
+            base_close_val=val_set.base_close,
         )
 
         if result is not None:
@@ -469,7 +448,7 @@ def train_all_models(
 
     # Calculate training date range
     train_to = date.today()
-    train_from = train_to - timedelta(days=len(prices))
+    train_from = train_to - timedelta(days=len(series))
 
     # Get next version number for each model
     # Query max version for each model name
@@ -506,6 +485,8 @@ def train_all_models(
             version=version,
             params={
                 "window_days": window_days,
+                "horizon_days": 1,
+                "target": LOG_RETURN_TARGET,
                 "validation_error_pct": round(validation_error, 2),
                 "training_samples": len(X_train),
                 "validation_samples": len(X_val),

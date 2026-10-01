@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.features import DailySeries, build_training_set
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -53,20 +54,22 @@ class TestGetActiveModel:
             predictor.get_active_model(db_session)
 
 
-class TestGetRecentPrices:
-    """Test the get_recent_prices() function."""
+class TestGetRecentSeries:
+    """Test the get_recent_series() function."""
 
     def test_success_30_days(
-        self, db_session: Session, sample_btc_prices_30_days: list[Price]
+        self, db_session: Session, sample_btc_prices_31_days: list[Price]
     ) -> None:
-        """Should fetch 30 recent prices in chronological order."""
-        prices = predictor.get_recent_prices(db_session, window_days=30)
+        """Should fetch 30 recent closes and volumes in chronological order."""
+        series = predictor.get_recent_series(db_session, days=30)
 
-        assert len(prices) == 30
+        assert len(series) == 30
+        assert len(series.volumes) == 30
         # Should be oldest to newest (chronological)
-        assert prices[0] < prices[-1]
+        assert series.closes[0] < series.closes[-1]
         # Should be Decimal type
-        assert all(isinstance(p, Decimal) for p in prices)
+        assert all(isinstance(p, Decimal) for p in series.closes)
+        assert all(isinstance(v, Decimal) for v in series.volumes)
 
     def test_insufficient_data(
         self, db_session: Session, sample_btc_prices_10_days: list[Price]
@@ -75,36 +78,57 @@ class TestGetRecentPrices:
         with pytest.raises(
             ValueError, match="Insufficient data: need 30 days, have 10"
         ):
-            predictor.get_recent_prices(db_session, window_days=30)
+            predictor.get_recent_series(db_session, days=30)
 
     def test_no_data(self, db_session: Session) -> None:
         """Should raise ValueError when no price data exists."""
         with pytest.raises(ValueError, match="Insufficient data: need 30 days, have 0"):
-            predictor.get_recent_prices(db_session, window_days=30)
+            predictor.get_recent_series(db_session, days=30)
 
 
 class TestPrepareFeatures:
     """Test the prepare_features() function."""
 
-    def test_converts_decimals_to_numpy_array(self) -> None:
-        """Should convert list of Decimals to numpy array."""
-        prices = [Decimal("50000.00"), Decimal("50100.50"), Decimal("50200.75")]
+    def test_builds_return_features_of_the_last_day(self) -> None:
+        """Should return one row of 2 * window + 1 float features."""
+        series = DailySeries(
+            closes=[Decimal(50000 + i * 10) for i in range(31)],
+            volumes=[Decimal(1000 + i) for i in range(31)],
+        )
 
-        X = predictor.prepare_features(prices)
+        X = predictor.prepare_features(series, window_days=30)
 
         assert isinstance(X, np.ndarray)
-        assert X.shape == (1, 3)  # Single sample, 3 features
+        assert X.shape == (1, 61)
         assert X.dtype == np.float64
-        assert np.allclose(X[0], [50000.00, 50100.50, 50200.75])
 
-    def test_30_day_window(self) -> None:
-        """Should handle 30-day window correctly."""
-        prices = [Decimal(str(50000 + i * 10)) for i in range(30)]
+    def test_matches_the_training_builder_for_the_same_day(self) -> None:
+        """Prediction features equal the last training row of the same series."""
+        closes = [Decimal(50000 + (i * 37) % 900) for i in range(40)]
+        volumes = [Decimal(1000 + (i * 13) % 50) for i in range(40)]
 
-        X = predictor.prepare_features(prices)
+        X = predictor.prepare_features(DailySeries(closes, volumes), window_days=10)
+        # horizon 1 drops the last day; compare with a series ending one day earlier
+        training = build_training_set(
+            closes + [closes[-1]], volumes + [volumes[-1]], 10
+        )
 
-        assert X.shape == (1, 30)
-        assert len(X[0]) == 30
+        assert np.array_equal(X[0], training.X[-1])
+
+
+class TestRequireReturnModel:
+    """A model trained on price levels must not be read as a return."""
+
+    def test_rejects_a_price_level_model(self, sample_trained_model: Model) -> None:
+        sample_trained_model.params = {"window_days": 30}
+
+        with pytest.raises(ValueError, match="not trained on log returns"):
+            predictor.require_return_model(sample_trained_model)
+
+    def test_accepts_a_log_return_model(self, sample_trained_model: Model) -> None:
+        sample_trained_model.params = {"window_days": 30, "target": "log_return"}
+
+        predictor.require_return_model(sample_trained_model)
 
 
 class TestCheckExistingPrediction:
@@ -199,7 +223,7 @@ class TestPredictorGherkinScenarios:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario 1: Predict next day price
@@ -299,7 +323,7 @@ class TestPredictorGherkinScenarios:
             predictor.parse_args = original_parse_args
 
     def test_scenario_3_no_active_model(
-        self, db_session: Session, sample_btc_prices_30_days: list[Price]
+        self, db_session: Session, sample_btc_prices_31_days: list[Price]
     ) -> None:
         """
         Gherkin Scenario 3: No active model
@@ -342,7 +366,7 @@ class TestPredictorGherkinScenarios:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
         sample_prediction_for_tomorrow: Prediction,
     ) -> None:
         """

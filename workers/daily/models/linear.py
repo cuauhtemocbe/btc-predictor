@@ -16,10 +16,13 @@ from workers.daily.models.base import BaseModel
 
 class LinearRegressionModel(BaseModel):
     """
-    Linear Regression model for predicting next-day BTC close price.
+    Linear Regression model over a sliding window of features.
 
-    Uses a sliding window approach where the last N days of close prices
-    are used as features to predict the next day's close price.
+    The model is agnostic to what the columns mean. The trainers feed it the
+    return features of shared.features and a log-return target, so predict()
+    returns a log return; the predictor turns it into a price with
+    shared.features.price_from_return(). With raw close windows and a price
+    target it predicts a price (n_features defaults to window_days).
 
     Attributes:
         window_days: Number of historical days used as features (default: 30)
@@ -46,13 +49,16 @@ class LinearRegressionModel(BaseModel):
         >>> restored = LinearRegressionModel.deserialize(model_bytes)
     """
 
-    def __init__(self, window_days: int = 30):
+    def __init__(self, window_days: int = 30, n_features: int | None = None):
         """
         Initialize a new LinearRegressionModel.
 
         Args:
             window_days: Number of historical days to use as features.
                         Must be >= 1. Default is 30 days.
+            n_features: Number of feature columns. Defaults to window_days (one
+                        column per day). Models trained on the return features of
+                        shared.features pass feature_count(window_days).
 
         Raises:
             ValueError: If window_days < 1.
@@ -65,6 +71,7 @@ class LinearRegressionModel(BaseModel):
             raise ValueError("window_days must be >= 1")
 
         self.window_days = window_days
+        self.n_features = window_days if n_features is None else n_features
         self.model = LinearRegression()
         self._is_trained = False
 
@@ -102,9 +109,9 @@ class LinearRegressionModel(BaseModel):
                 f"Got X.shape[0]={X.shape[0]}, y.shape[0]={y.shape[0]}"
             )
 
-        if X.shape[1] != self.window_days:
+        if X.shape[1] != self.n_features:
             raise ValueError(
-                f"X must have {self.window_days} features (window_days), "
+                f"X must have {self.n_features} features (window_days), "
                 f"got {X.shape[1]}"
             )
 
@@ -153,19 +160,19 @@ class LinearRegressionModel(BaseModel):
 
         # Reshape if needed (accept both (window_days,) and (1, window_days))
         if X.ndim == 1:
-            if X.shape[0] != self.window_days:
+            if X.shape[0] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[0]}"
+                    f"X must have {self.n_features} features, got {X.shape[0]}"
                 )
             X = X.reshape(1, -1)
         elif X.ndim == 2:
             if X.shape[0] != 1:
                 raise ValueError(
-                    f"X must have shape (1, {self.window_days}), got {X.shape}"
+                    f"X must have shape (1, {self.n_features}), got {X.shape}"
                 )
-            if X.shape[1] != self.window_days:
+            if X.shape[1] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[1]}"
+                    f"X must have {self.n_features} features, got {X.shape[1]}"
                 )
         else:
             raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
@@ -205,6 +212,7 @@ class LinearRegressionModel(BaseModel):
             state = {
                 "sklearn_model": self.model,
                 "window_days": self.window_days,
+                "n_features": self.n_features,
                 "is_trained": self._is_trained,
             }
             return pickle.dumps(state)
@@ -249,7 +257,10 @@ class LinearRegressionModel(BaseModel):
             raise ValueError(f"Missing required keys in serialized data: {missing}")
 
         # Reconstruct model
-        instance = cls(window_days=state["window_days"])
+        instance = cls(
+            window_days=state["window_days"],
+            n_features=state.get("n_features"),
+        )
         instance.model = state["sklearn_model"]
         instance._is_trained = state["is_trained"]
 

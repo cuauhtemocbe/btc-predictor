@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.features import build_training_set, feature_count
 from workers.daily.models import LinearRegressionModel
 
 
@@ -120,23 +121,19 @@ def cached_linear_artifact() -> bytes:
     Trains the model ONCE and caches the serialized bytes.
     Tests use this to create fresh DB records without re-training.
     """
-    # Generate training data (same as sliding_window_data fixture)
-    base_prices = np.linspace(50000, 51500, 60)
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
+    # Return features of a noisy 120-day series (log-return target)
+    rng = np.random.default_rng(42)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
 
     window_days = 30
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
+    training_set = build_training_set(closes, volumes, window_days)
 
     # Train model ONCE
-    lr_model = LinearRegressionModel(window_days=30)
-    lr_model.train(X, y)
+    lr_model = LinearRegressionModel(
+        window_days=window_days, n_features=feature_count(window_days)
+    )
+    lr_model.train(training_set.X, training_set.y)
 
     # Return serialized bytes (cached for all tests in this module)
     return lr_model.serialize()
@@ -226,7 +223,7 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
     model_record = Model(
         name="linear_v1",
         version="1.0.0",
-        params={"window_days": 30},
+        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
         artifact=cached_linear_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
@@ -272,7 +269,7 @@ def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) ->
 
 
 @pytest.fixture(scope="module")
-def cached_price_data_30_days():
+def cached_price_data_31_days():
     """
     Module-scoped cached price data (pre-calculated values).
 
@@ -281,9 +278,9 @@ def cached_price_data_30_days():
     """
     data = []
     today = datetime.now(UTC).date()
-    base_date = today - timedelta(days=30)
+    base_date = today - timedelta(days=31)
 
-    for i in range(30):
+    for i in range(31):
         current_date = base_date + timedelta(days=i)
         base_close = 50000 + (i * 50)
 
@@ -308,20 +305,21 @@ def cached_price_data_30_days():
 
 
 @pytest.fixture
-def sample_btc_prices_30_days(
-    db_session: Session, cached_price_data_30_days
+def sample_btc_prices_31_days(
+    db_session: Session, cached_price_data_31_days
 ) -> list[Price]:
     """
-    Create 30 days of BTC price records using cached data.
+    Create 31 days of BTC price records using cached data.
 
+    31 daily closes give the 30 daily returns a 30-day window needs.
     Uses pre-calculated price data to avoid redundant computations.
 
     Returns:
-        List of 180 Price records (6 per day at 4-hour intervals)
+        List of 186 Price records (6 per day at 4-hour intervals)
     """
     prices = []
 
-    for timestamp, open_price, high, low, close, volume in cached_price_data_30_days:
+    for timestamp, open_price, high, low, close, volume in cached_price_data_31_days:
         price_record = Price(
             timestamp=timestamp,
             open=open_price,

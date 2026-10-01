@@ -3,9 +3,10 @@ Daily predictor job - predicts tomorrow's BTC price.
 
 This job:
 1. Loads the active ML model(s) from the database
-2. Fetches recent historical prices
-3. Generates prediction(s) for tomorrow
-4. Stores the prediction(s) in the database for later evaluation
+2. Fetches the recent daily closes and volumes
+3. Builds the return features (shared.features) and predicts tomorrow's log return
+4. Stores the predicted price, ``last close * exp(predicted return)``, in the
+   database for later evaluation
 
 Modes:
 - Single-model mode (default): Uses only the primary active model
@@ -27,6 +28,13 @@ from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
+from shared.features import (
+    LOG_RETURN_TARGET,
+    DailySeries,
+    build_prediction_features,
+    price_from_return,
+    required_history_days,
+)
 from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -178,21 +186,22 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
     return models[0]
 
 
-def get_recent_prices(
-    session: Session, window_days: int, symbol: str = DEFAULT_SYMBOL
-) -> list[Decimal]:
+def get_recent_series(
+    session: Session, days: int, symbol: str = DEFAULT_SYMBOL
+) -> DailySeries:
     """
-    Fetch the most recent N DAYS of BTC close prices.
+    Fetch the most recent N DAYS of close prices and volumes of one symbol.
 
-    Uses date aggregation to get exactly one price per day (not per hour/4h).
-    Takes the latest close price for each day.
+    Uses date aggregation to get exactly one row per day (not per hour/4h).
+    Takes the latest row (its close and volume) for each day.
 
     Args:
         session: Database session
-        window_days: Number of DAYS to fetch
+        days: Number of DAYS to fetch
+        symbol: Asset whose prices are read (default BTCUSDT)
 
     Returns:
-        List of daily close prices (oldest to newest)
+        Daily closes and volumes (oldest to newest)
 
     Raises:
         ValueError: If insufficient historical data available
@@ -206,13 +215,13 @@ def get_recent_prices(
         .where(Price.symbol == symbol)
         .group_by("day")
         .order_by(func.date_trunc("day", Price.timestamp).desc())
-        .limit(window_days)
+        .limit(days)
         .subquery()
     )
 
-    # Main query: Join to get the close price for the latest timestamp each day
+    # Main query: Join to get the close and volume for the latest timestamp each day
     stmt = (
-        select(Price.close)
+        select(Price.close, Price.volume)
         .join(
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
@@ -221,38 +230,55 @@ def get_recent_prices(
         .order_by(latest_per_day.c.day.desc())
     )
 
-    results = session.execute(stmt).scalars().all()
+    rows = session.execute(stmt).all()
 
-    if len(results) < window_days:
-        raise ValueError(
-            f"Insufficient data: need {window_days} days, have {len(results)}"
-        )
+    if len(rows) < days:
+        raise ValueError(f"Insufficient data: need {days} days, have {len(rows)}")
 
     # Reverse to get oldest to newest (chronological order)
-    prices = list(reversed(results))
+    rows.reverse()
 
     logger.info(
-        f"Fetched {len(prices)} DAYS of recent prices for feature preparation "
+        f"Fetched {len(rows)} DAYS of recent prices for feature preparation "
         f"(aggregated from multiple records/day)"
     )
 
-    return prices
+    return DailySeries(
+        closes=[row.close for row in rows], volumes=[row.volume for row in rows]
+    )
 
 
-def prepare_features(prices: list[Decimal]) -> npt.NDArray[np.float64]:
+def require_return_model(model_record: Model) -> None:
     """
-    Convert list of close prices to feature vector for prediction.
+    Reject a model that was not trained on log returns.
+
+    A model trained on price levels would have its output read as a return, so
+    the predictor refuses it until the trainer replaces it.
+
+    Raises:
+        ValueError: If the model's params do not mark a log-return target
+    """
+    if model_record.params.get("target") != LOG_RETURN_TARGET:
+        raise ValueError(
+            f"Model {model_record.name} was not trained on log returns "
+            f"(params target={model_record.params.get('target')!r}); "
+            f"retrain it before predicting"
+        )
+
+
+def prepare_features(series: DailySeries, window_days: int) -> npt.NDArray[np.float64]:
+    """
+    Build the return features of the most recent day for a single prediction.
 
     Args:
-        prices: List of close prices (oldest to newest)
+        series: Daily closes and volumes (oldest to newest), at least
+            window_days + 1 rows
+        window_days: Window the model was trained with
 
     Returns:
-        Numpy array of shape (1, len(prices)) for single prediction
+        Numpy array of shape (1, feature_count(window_days))
     """
-    # Convert Decimal to float
-    prices_float = [float(p) for p in prices]
-    # Reshape to (1, N) for single sample prediction
-    return np.array([prices_float])
+    return build_prediction_features(series.closes, series.volumes, window_days)
 
 
 def check_existing_prediction(
@@ -397,15 +423,21 @@ def main(session: Session | None = None) -> int:
                     f"{model_name} requires {window_days} days of historical data"
                 )
 
-                # Fetch recent prices
-                prices = get_recent_prices(session, window_days)
+                require_return_model(model_record)
+
+                # Fetch recent prices (window_days returns need window_days + 1 closes)
+                series = get_recent_series(session, required_history_days(window_days))
 
                 # Prepare features
-                X = prepare_features(prices)
+                X = prepare_features(series, window_days)
 
-                # Make prediction
-                predicted_price = model_instance.predict(X)
-                logger.info(f"{model_name} predicted price: ${predicted_price:.2f}")
+                # The model predicts tomorrow's log return; the price follows from it
+                predicted_return = model_instance.predict(X)
+                predicted_price = price_from_return(current_price, predicted_return)
+                logger.info(
+                    f"{model_name} predicted return {predicted_return:+.4%}, "
+                    f"price: ${predicted_price:.2f}"
+                )
 
                 # Save prediction
                 save_prediction(

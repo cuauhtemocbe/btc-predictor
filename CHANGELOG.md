@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The daily and weekly Linear models train on log returns instead of price
+  levels. One builder (`shared/features.py`) turns daily closes and volumes
+  into lagged log returns, rolling volatility and log volume changes, and the
+  stored predicted price is `last close * exp(predicted return)`. Models stored
+  before this change are rejected by the predictors until the trainers replace
+  them (#104).
 - The fetch-price job ingests each closed daily bar from Binance (daily file,
   REST klines fallback, missed days backfilled) instead of CoinGecko; the
   CoinGecko and old Binance clients were removed (#102).

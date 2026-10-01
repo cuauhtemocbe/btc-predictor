@@ -72,38 +72,38 @@ def two_symbols(db_session: Session) -> Session:
 
 class TestTrainerSymbolIsolation:
     def test_fetch_training_data_returns_only_btc(self, two_symbols: Session) -> None:
-        prices = fetch_training_data(two_symbols, window_days=5)
+        series = fetch_training_data(two_symbols, window_days=5)
 
-        assert len(prices) == 40
-        assert all(p >= BTC_CLOSE for p in prices)
+        assert len(series) == 40
+        assert all(p >= BTC_CLOSE for p in series.closes)
 
     def test_fetch_training_data_for_other_symbol(self, two_symbols: Session) -> None:
-        prices = fetch_training_data(two_symbols, window_days=5, symbol=PAXG)
+        series = fetch_training_data(two_symbols, window_days=5, symbol=PAXG)
 
-        assert len(prices) == 40
-        assert all(p < 5000 for p in prices)
+        assert len(series) == 40
+        assert all(p < 5000 for p in series.closes)
 
 
 class TestPredictorSymbolIsolation:
-    def test_get_recent_prices_returns_one_btc_price_per_day(
+    def test_get_recent_series_returns_one_btc_row_per_day(
         self, two_symbols: Session
     ) -> None:
-        prices = predictor.get_recent_prices(two_symbols, window_days=21)
+        series = predictor.get_recent_series(two_symbols, days=22)
 
-        assert len(prices) == 21
-        assert all(p >= BTC_CLOSE for p in prices)
+        assert len(series) == 22
+        assert all(p >= BTC_CLOSE for p in series.closes)
 
-    def test_get_recent_prices_for_other_symbol(self, two_symbols: Session) -> None:
-        prices = predictor.get_recent_prices(two_symbols, window_days=21, symbol=PAXG)
+    def test_get_recent_series_for_other_symbol(self, two_symbols: Session) -> None:
+        series = predictor.get_recent_series(two_symbols, days=22, symbol=PAXG)
 
-        assert len(prices) == 21
-        assert all(p < 5000 for p in prices)
+        assert len(series) == 22
+        assert all(p < 5000 for p in series.closes)
 
     def test_main_uses_btc_price_and_predicts_when_paxg_is_newest(
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """The newest row in the table is PAXG; the prediction must still be BTC."""
         _add_bar(db_session, PAXG, datetime.now(UTC), PAXG_CLOSE)

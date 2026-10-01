@@ -108,11 +108,12 @@ def three_active_models(
 class TestMultiModelPredictions:
     """Test that multi-model mode generates predictions from ALL active models."""
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_mode_generates_predictions_for_all_active_models(
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Predictor generates predictions from all active models
@@ -180,11 +181,12 @@ class TestMultiModelPredictions:
 class TestCLIFlag:
     """Test that --multi-model flag controls behavior correctly."""
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_single_model_mode_uses_only_first_active_model(
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Single-model mode uses only the "best" active model
@@ -221,11 +223,12 @@ class TestCLIFlag:
         finally:
             predictor.parse_args = original_parse_args
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_flag_enabled_uses_all_active_models(
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: CLI flag to enable multi-model mode
@@ -365,11 +368,12 @@ class TestEvaluatorMultiModel:
 class TestMultiModelFailureHandling:
     """Test that multi-model mode handles individual model failures gracefully."""
 
+    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_handles_individual_model_failure(
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Handle prediction failure for one model
@@ -435,7 +439,7 @@ class TestMultiModelIdempotency:
         self,
         db_session: Session,
         three_active_models: list[Model],
-        sample_btc_prices_30_days: list[Price],
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario: Idempotency - re-running predictor doesn't

@@ -3,8 +3,9 @@ Weekly predictor job - predicts BTC price 7 days ahead.
 
 This job:
 1. Loads the active ML model from the database
-2. Fetches recent historical DAILY close prices (not hourly)
-3. Generates a prediction for 7 days ahead
+2. Fetches recent historical DAILY closes and volumes (not hourly)
+3. Builds the return features and predicts the 7-day log return; the stored
+   price is ``last close * exp(predicted return)``
 4. Stores the prediction with timeframe='1w' for later evaluation
 
 Entry point: python -m weekly.predictor
@@ -16,13 +17,17 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-import numpy as np
-import numpy.typing as npt
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
+from shared.features import price_from_return, required_history_days
+from workers.daily.predictor import (
+    get_recent_series,
+    prepare_features,
+    require_return_model,
+)
 from workers.weekly.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -75,83 +80,6 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
     )
 
     return model_record, model_instance
-
-
-def get_daily_close_prices(
-    session: Session, window_days: int, symbol: str = DEFAULT_SYMBOL
-) -> list[Decimal]:
-    """
-    Fetch the last N DAILY close prices from the database.
-
-    For weekly predictions, we use daily close prices (1 per day) rather than
-    hourly prices (24 per day). This provides a 30-day window for training.
-
-    Implementation: Group by DATE(timestamp) and select the closing price
-    (highest timestamp for each day).
-
-    Args:
-        session: Database session
-        window_days: Number of recent days to fetch (typically 30)
-
-    Returns:
-        List of daily close prices (oldest to newest)
-
-    Raises:
-        ValueError: If insufficient historical data available
-    """
-    # Subquery: Get the latest timestamp for each day
-    latest_per_day = (
-        select(
-            func.date_trunc("day", Price.timestamp).label("day"),
-            func.max(Price.timestamp).label("latest_timestamp"),
-        )
-        .where(Price.symbol == symbol)
-        .group_by("day")
-        .order_by(func.date_trunc("day", Price.timestamp).desc())
-        .limit(window_days)
-        .subquery()
-    )
-
-    # Main query: Join to get the close price for the latest timestamp each day
-    stmt = (
-        select(Price.close)
-        .join(
-            latest_per_day,
-            Price.timestamp == latest_per_day.c.latest_timestamp,
-        )
-        .where(Price.symbol == symbol)
-        .order_by(latest_per_day.c.day.desc())
-    )
-
-    results = session.execute(stmt).scalars().all()
-
-    if len(results) < window_days:
-        raise ValueError(
-            f"Insufficient data: need {window_days} days, have {len(results)}"
-        )
-
-    # Reverse to get oldest to newest (chronological order)
-    prices = list(reversed(results))
-
-    logger.info(f"Fetched {len(prices)} daily close prices for weekly prediction")
-
-    return prices
-
-
-def prepare_features(prices: list[Decimal]) -> npt.NDArray[np.float64]:
-    """
-    Convert list of close prices to feature vector for prediction.
-
-    Args:
-        prices: List of daily close prices (oldest to newest)
-
-    Returns:
-        Numpy array of shape (1, len(prices)) for single prediction
-    """
-    # Convert Decimal to float
-    prices_float = [float(p) for p in prices]
-    # Reshape to (1, N) for single sample prediction
-    return np.array([prices_float])
 
 
 def check_existing_prediction(
@@ -257,19 +185,17 @@ def main() -> int:
         # Load active model
         model_record, model_instance = get_active_model(session)
 
-        # Get window_days from model params (typically 30 for weekly)
-        window_days = model_record.params.get("window_days", 30)
-        logger.info(f"Model requires {window_days} days of historical data")
+        require_return_model(model_record)
 
-        # Fetch daily close prices (not hourly)
-        prices = get_daily_close_prices(session, window_days)
+        # Get window_days from model params
+        window_days = model_record.params.get("window_days", 30)
+        logger.info(f"Model requires {window_days} days of returns")
+
+        # Fetch daily closes and volumes (not hourly)
+        series = get_recent_series(session, required_history_days(window_days))
 
         # Prepare features
-        X = prepare_features(prices)
-
-        # Make prediction
-        predicted_price = model_instance.predict(X)
-        logger.info(f"Model predicted price (7 days ahead): ${predicted_price:.2f}")
+        X = prepare_features(series, window_days)
 
         # Get current price (latest from prices)
         current_price_stmt = (
@@ -280,6 +206,14 @@ def main() -> int:
         )
         current_price = session.execute(current_price_stmt).scalar_one()
         logger.info(f"Current BTC price: ${current_price}")
+
+        # The model predicts the 7-day log return; the price follows from it
+        predicted_return = model_instance.predict(X)
+        predicted_price = price_from_return(current_price, predicted_return)
+        logger.info(
+            f"Model predicted 7-day return {predicted_return:+.4%}, "
+            f"price: ${predicted_price:.2f}"
+        )
 
         # Save prediction with timeframe='1w'
         save_prediction(
