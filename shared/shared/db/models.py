@@ -327,6 +327,12 @@ class BacktestResult(Base):
     """
 
     __tablename__ = "backtest_results"
+    __table_args__ = (
+        CheckConstraint(
+            "evaluation_slice IN ('validation', 'test')",
+            name="valid_evaluation_slice_values",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     backtest_run_id: Mapped[UUID] = mapped_column(
@@ -386,6 +392,12 @@ class BacktestResult(Base):
         nullable=True,
         comment="Model training parameters as JSONB "
         "(e.g., {'model_name': 'linear_v1', 'window_days': 30})",
+    )
+    evaluation_slice: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="'validation' (may inform choices) or 'test' (headline, "
+        "out-of-sample); NULL for rows stored before the split existed",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

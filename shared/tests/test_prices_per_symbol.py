@@ -263,7 +263,7 @@ class TestMigration:
                     {"symbol": symbol},
                 )
 
-        _alembic(url, "downgrade", "-1")
+        _alembic(url, "downgrade", REVISION_BEFORE)
 
         with engine.connect() as connection:
             tables = set(
