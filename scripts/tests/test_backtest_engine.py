@@ -539,3 +539,89 @@ def test_retrain_every_must_be_positive(db_session, seeded_prices, retrain_every
             config(date(2024, 6, 1), date(2024, 6, 2), retrain_every=retrain_every),
             uuid4(),
         )
+
+
+# --- Validation / test split ---
+
+
+def slices(db_session, run_id) -> dict[date, str | None]:
+    return {r.predicted_for: r.evaluation_slice for r in stored(db_session, run_id)}
+
+
+def test_the_last_30_percent_of_the_range_is_the_default_test_slice(
+    db_session, seeded_prices
+):
+    run_id = uuid4()
+
+    engine.run_walk_forward(
+        db_session, config(date(2024, 6, 1), date(2024, 6, 10)), run_id
+    )
+
+    labels = slices(db_session, run_id)
+    assert [d.day for d, s in labels.items() if s == "validation"] == list(range(1, 8))
+    assert [d.day for d, s in labels.items() if s == "test"] == [8, 9, 10]
+
+
+def test_an_explicit_test_start_date_splits_the_range(db_session, seeded_prices):
+    run_id = uuid4()
+
+    engine.run_walk_forward(
+        db_session,
+        config(date(2024, 6, 1), date(2024, 6, 10), test_start_date=date(2024, 6, 5)),
+        run_id,
+    )
+
+    labels = slices(db_session, run_id)
+    assert {d: s for d, s in labels.items() if d < date(2024, 6, 5)} == {
+        date(2024, 6, d): "validation" for d in range(1, 5)
+    }
+    assert {s for d, s in labels.items() if d >= date(2024, 6, 5)} == {"test"}
+
+
+def test_a_test_start_on_the_first_day_leaves_no_validation_rows(
+    db_session, seeded_prices
+):
+    run_id = uuid4()
+
+    engine.run_walk_forward(
+        db_session,
+        config(date(2024, 6, 1), date(2024, 6, 5), test_start_date=date(2024, 6, 1)),
+        run_id,
+    )
+
+    assert set(slices(db_session, run_id).values()) == {"test"}
+
+
+def test_a_one_day_range_is_all_test(db_session, seeded_prices):
+    run_id = uuid4()
+
+    engine.run_walk_forward(
+        db_session, config(date(2024, 6, 10), date(2024, 6, 10)), run_id
+    )
+
+    assert set(slices(db_session, run_id).values()) == {"test"}
+
+
+@pytest.mark.parametrize("test_start", [date(2024, 5, 31), date(2024, 6, 11)])
+def test_a_test_start_outside_the_range_is_rejected_before_writing(
+    db_session, seeded_prices, test_start
+):
+    with pytest.raises(ValueError, match="test start date.*within"):
+        engine.run_walk_forward(
+            db_session,
+            config(date(2024, 6, 1), date(2024, 6, 10), test_start_date=test_start),
+            uuid4(),
+        )
+    assert db_session.query(BacktestResult).count() == 0
+
+
+def test_the_test_start_date_is_stored_with_every_result(db_session, seeded_prices):
+    run_id = uuid4()
+
+    engine.run_walk_forward(
+        db_session, config(date(2024, 6, 1), date(2024, 6, 10)), run_id
+    )
+
+    assert {r.model_params["test_start_date"] for r in stored(db_session, run_id)} == {
+        "2024-06-08"
+    }

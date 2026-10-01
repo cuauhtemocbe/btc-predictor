@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from scripts.backtest_engine import DEFAULT_SEED, BacktestConfig, run_walk_forward
+from scripts.backtest_report import build_report, format_report
 from shared.db.database import SessionLocal
 from shared.db.models import BacktestResult
 from workers.daily.models.factory import MODEL_NAMES
@@ -85,6 +86,12 @@ Examples:
         help="Retrain the model every N days and reuse it in between "
         "(default: 1, every day). Reported with the results.",
     )
+    parser.add_argument(
+        "--test-start-date",
+        help="First day of the test slice, the out-of-sample headline (YYYY-MM-DD, "
+        "within the range). Earlier days are the validation slice. Default: the "
+        "start of the last 30%% of the range.",
+    )
     return parser.parse_args(argv)
 
 
@@ -111,6 +118,14 @@ def build_config(args: argparse.Namespace) -> BacktestConfig:
     if args.training_window < 1:
         raise ValueError(f"training-window must be >= 1 (got {args.training_window})")
 
+    test_start_date = None
+    if args.test_start_date is not None:
+        try:
+            test_start_date = datetime.strptime(args.test_start_date, "%Y-%m-%d").date()
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid test-start-date format: {args.test_start_date}"
+            ) from e
     if args.retrain_every < 1:
         raise ValueError(f"retrain-every must be >= 1 (got {args.retrain_every})")
 
@@ -121,6 +136,7 @@ def build_config(args: argparse.Namespace) -> BacktestConfig:
         end_date=end_date,
         seed=args.seed,
         retrain_every=args.retrain_every,
+        test_start_date=test_start_date,
     )
 
 
@@ -173,6 +189,7 @@ def main(
             logger.info(f"Skipped (no actual price): {stats.skipped_no_actual}")
             logger.info(f"Skipped (training failed): {stats.skipped_training_failed}")
             log_pnl_summary(db, run_id)
+            print(format_report(build_report(db, run_id)))
 
         logger.info(f"Elapsed time: {time.time() - started:.1f} seconds")
         return 0

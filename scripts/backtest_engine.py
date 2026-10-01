@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 PROGRESS_EVERY_DAYS = 10
 PRICE_QUANTUM = Decimal("0.01")  # backtest_results prices are NUMERIC(15, 2)
 DEFAULT_SEED = 42
+VALIDATION_FRACTION = 0.7  # the first 70% of the range is validation, the rest test
+VALIDATION = "validation"
+TEST = "test"
 
 
 class InsufficientHistoryError(ValueError):
@@ -70,6 +73,10 @@ class BacktestConfig:
             the same run stores the same predictions.
         retrain_every: The model is retrained every this many days and reused in
             between; the features are rebuilt every day. Part of the report.
+        test_start_date: First day of the ``test`` slice (the headline,
+            out-of-sample metrics); earlier days are the ``validation`` slice, the
+            only data allowed to inform choices. Defaults to the start of the last
+            30% of the range.
     """
 
     model_name: str
@@ -79,6 +86,7 @@ class BacktestConfig:
     symbol: str = DEFAULT_SYMBOL
     seed: int = DEFAULT_SEED
     retrain_every: int = 1
+    test_start_date: date | None = None
 
     @staticmethod
     def default_window() -> int:
@@ -164,6 +172,24 @@ def check_enough_history(history: DailyHistory, config: BacktestConfig) -> None:
     )
 
 
+def resolve_test_start(config: BacktestConfig) -> date:
+    """
+    First day of the test slice: the configured one, or the start of the last 30%.
+
+    Raises:
+        ValueError: If the configured date is outside the backtest range.
+    """
+    if config.test_start_date is None:
+        n_days = (config.end_date - config.start_date).days + 1
+        return config.start_date + timedelta(days=int(n_days * VALIDATION_FRACTION))
+    if not config.start_date <= config.test_start_date <= config.end_date:
+        raise ValueError(
+            f"test start date {config.test_start_date} must be within the backtest "
+            f"range {config.start_date} to {config.end_date}"
+        )
+    return config.test_start_date
+
+
 def seed_everything(seed: int) -> None:
     """Seed the global RNGs the models draw from (TensorFlow only if it is loaded)."""
     random.seed(seed)
@@ -203,6 +229,7 @@ def run_walk_forward(
     if config.retrain_every < 1:
         raise ValueError(f"retrain_every must be >= 1 (got {config.retrain_every})")
     model_class_for(config.model_name)  # unknown names fail before any work
+    test_start = resolve_test_start(config)
 
     history = load_daily_history(db, config.symbol)
     check_enough_history(history, config)
@@ -264,6 +291,7 @@ def run_walk_forward(
             BacktestResult(
                 backtest_run_id=backtest_run_id,
                 predicted_for=day,
+                evaluation_slice=VALIDATION if day < test_start else TEST,
                 predicted_at=_midnight(history.dates[end - 1]),
                 price_at_prediction=price_at_prediction,
                 predicted_price=predicted_price,
@@ -282,10 +310,12 @@ def run_walk_forward(
                 ),
                 model_params={
                     "model_name": config.model_name,
+                    "symbol": config.symbol,
                     "window_days": config.window_days,
                     "target": LOG_RETURN_TARGET,
                     "seed": config.seed,
                     "retrain_every": config.retrain_every,
+                    "test_start_date": test_start.isoformat(),
                     "train_from": history.dates[0].isoformat(),
                     "train_to": train_to.isoformat(),
                     "training_samples": trained_samples,

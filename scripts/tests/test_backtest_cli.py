@@ -127,3 +127,41 @@ def test_retrain_every_below_one_is_rejected(db_session, seeded_prices, caplog):
     assert run(db_session, *DAY, "--retrain-every=0") == 1
 
     assert "retrain-every must be >= 1" in caplog.text
+
+
+def test_the_run_prints_the_report_with_the_test_slice_as_headline(
+    db_session, seeded_prices, capsys
+):
+    assert run(db_session, *DAY) == 0
+
+    out = capsys.readouterr().out
+    assert "Headline: test slice (out-of-sample)" in out
+    assert "Always-up accuracy:" in out
+    assert "Edge over best baseline:" in out
+
+
+def test_test_start_date_reaches_the_stored_slices(db_session, seeded_prices):
+    assert run(db_session, *DAY, "--test-start-date=2024-06-12") == 0
+
+    slices = {
+        r.predicted_for: r.evaluation_slice
+        for r in db_session.query(BacktestResult).all()
+    }
+    assert slices == {
+        date(2024, 6, 10): "validation",
+        date(2024, 6, 11): "validation",
+        date(2024, 6, 12): "test",
+    }
+
+
+def test_test_start_date_outside_the_range_exits_one(db_session, seeded_prices, caplog):
+    assert run(db_session, *DAY, "--test-start-date=2024-07-01") == 1
+
+    assert "within the backtest range" in caplog.text
+    assert db_session.query(BacktestResult).count() == 0
+
+
+def test_a_malformed_test_start_date_exits_one(db_session, seeded_prices, caplog):
+    assert run(db_session, *DAY, "--test-start-date=soon") == 1
+
+    assert "Invalid test-start-date" in caplog.text
