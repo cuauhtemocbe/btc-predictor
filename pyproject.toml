@@ -64,6 +64,7 @@ pythonpath = "."
 testpaths = [
     "shared/tests",
     "api/tests",
+    "workers/backtest/tests",
     "workers/daily/tests",
     "workers/fetch_price/tests",
     "workers/weekly/tests",

@@ -14,8 +14,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
+from scripts.backtest_engine import InsufficientHistoryError, load_daily_history
 from shared.db.models import Model, Prediction, Price
-from workers.backtest.main import calculate_adaptive_window
+from workers.backtest.main import plan_range
 from workers.daily import evaluator, predictor
 from workers.daily.trainer import fetch_training_data
 
@@ -139,9 +140,10 @@ class TestEvaluatorSymbolIsolation:
 
 
 class TestBacktestWindowSymbolIsolation:
-    def test_adaptive_window_counts_only_btc_days(self, db_session: Session) -> None:
-        """80 BTC days would give a 30/30 window; 10 BTC + 70 PAXG must not."""
+    def test_planned_range_counts_only_btc_days(self, db_session: Session) -> None:
+        """300 BTC + PAXG days would plan a range; 10 BTC + 290 PAXG must not."""
         _add_daily_series(db_session, BTC, BTC_CLOSE, days=10)
-        _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=70)
+        _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=290)
 
-        assert calculate_adaptive_window(db_session) is None
+        with pytest.raises(InsufficientHistoryError):
+            plan_range(load_daily_history(db_session), 21)
