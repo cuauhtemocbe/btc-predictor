@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   REST klines fallback, missed days backfilled) instead of CoinGecko; the
   CoinGecko and old Binance clients were removed (#102).
 
+### Fixed
+
+- The daily and weekly evaluators scored nothing since the move to daily bars:
+  they looked for a candle at or after 07:00 UTC, and daily bars are stored at
+  00:00 UTC. Both now settle each prediction against the close of the bar it
+  predicted (the bar opened the day before `predicted_for`) and pick up every
+  pending prediction of their timeframe due up to today, so a late bar no
+  longer leaves one unevaluated for good (#143).
+
 ### Added
 
 - Dev Standards Compliance hardening: container healthcheck, pinned base

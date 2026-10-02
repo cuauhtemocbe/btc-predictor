@@ -1,12 +1,16 @@
 """
-Daily evaluator job - evaluates yesterday's BTC price predictions.
+Daily evaluator job - evaluates the BTC price predictions that are due.
 
 This job:
-1. Finds ALL predictions for today that haven't been evaluated yet
-2. Fetches today's 7am BTC close price from the database
+1. Finds ALL daily predictions due today or earlier that haven't been evaluated
+2. Fetches the close of the daily bar each prediction was about (the bar opened
+   the day before ``predicted_for``, which closes at 00:00 UTC on that date)
 3. Calculates error metrics (absolute, percentage, direction correctness)
 4. Calculates simulated PnL based on prediction strategy
-5. Updates all prediction records with evaluation results
+5. Updates the prediction records with evaluation results
+
+A prediction whose bar is not stored yet stays pending and is picked up by a
+later run, so a missed or late ingest never leaves it unevaluated for good.
 
 Supports multi-model predictions (evaluates predictions from all models).
 
@@ -17,6 +21,7 @@ import logging
 import sys
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from itertools import groupby
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -91,33 +96,58 @@ def find_unevaluated_prediction(
     return predictions[0] if predictions else None
 
 
+def find_pending_predictions(session: Session, up_to: date) -> list[Prediction]:
+    """
+    Find every daily prediction due on or before ``up_to`` that is not evaluated.
+
+    Includes predictions an earlier run could not score because their bar was
+    not stored yet. Weekly predictions belong to the weekly evaluator.
+
+    Args:
+        session: Database session
+        up_to: Last ``predicted_for`` date to include (usually today)
+
+    Returns:
+        Pending predictions ordered by ``predicted_for`` and model (may be empty)
+    """
+    stmt = (
+        select(Prediction)
+        .where(Prediction.timeframe == "1d")
+        .where(Prediction.predicted_for <= up_to)
+        .where(Prediction.actual_price.is_(None))
+        .order_by(Prediction.predicted_for.asc(), Prediction.model_id.asc())
+    )
+    return list(session.execute(stmt).scalars().all())
+
+
 def fetch_actual_price(
     session: Session, target_date: date, symbol: str = DEFAULT_SYMBOL
 ) -> Decimal | None:
     """
-    Fetch the BTC close price for the given date at or after 7am UTC.
+    Fetch the close that settles a prediction made for ``target_date``.
 
-    With 4-hour candles (0am, 4am, 8am, 12pm, 4pm, 8pm), this will return
-    the 8am candle close price as it's the first one at/after 7am.
+    Daily bars are stored at their 00:00 UTC open. The predictor, running at
+    07:00 UTC on day D, uses the close of the bar opened on D-1 and predicts
+    the next bar, the one opened on D, which closes at 00:00 UTC on D+1 (the
+    prediction's ``predicted_for``). That bar is ingested by the 06:00 UTC
+    fetch-price job on D+1, before this evaluator runs.
 
     Args:
         session: Database session
-        target_date: Date to fetch price for
+        target_date: The prediction's ``predicted_for`` date
+        symbol: Asset symbol
 
     Returns:
-        Close price if found, None otherwise
+        Close of the bar opened on ``target_date - 1 day``, None if not stored
     """
-    # Construct 7am timestamp in UTC
-    target_datetime = datetime.combine(target_date, time(7, 0), tzinfo=UTC)
-    # Next day at midnight (to exclude candles from the next day)
-    next_day = datetime.combine(target_date + timedelta(days=1), time(0, 0), tzinfo=UTC)
+    bar_open = datetime.combine(target_date - timedelta(days=1), time(0, 0), tzinfo=UTC)
+    bar_close = datetime.combine(target_date, time(0, 0), tzinfo=UTC)
 
-    # Find first candle at or after 7am on target_date
     stmt = (
         select(Price.close, Price.timestamp)
         .where(Price.symbol == symbol)
-        .where(Price.timestamp >= target_datetime)
-        .where(Price.timestamp < next_day)
+        .where(Price.timestamp >= bar_open)
+        .where(Price.timestamp < bar_close)
         .order_by(Price.timestamp.asc())
         .limit(1)
     )
@@ -129,12 +159,12 @@ def fetch_actual_price(
             f"Fetched actual price for {target_date}: ${price} (timestamp: {timestamp})"
         )
         return price
-    else:
-        logger.warning(
-            f"No price data available for {target_date} at/after 7am "
-            f"(will retry tomorrow)"
-        )
-        return None
+
+    logger.warning(
+        f"No {symbol} daily bar opened {bar_open.date()} stored yet "
+        f"(needed to settle predictions for {target_date})"
+    )
+    return None
 
 
 def calculate_direction_correct(
@@ -311,11 +341,38 @@ def update_prediction(
     )
 
 
-def main() -> int:
+def evaluate_predictions(
+    session: Session, predictions: list[Prediction], actual_price: Decimal
+) -> int:
+    """Score each prediction against ``actual_price``; return how many succeeded."""
+    evaluated = 0
+    for prediction in predictions:
+        try:
+            logger.info(
+                f"Evaluating prediction #{prediction.id} "
+                f"(model_id={prediction.model_id})"
+            )
+            metrics = calculate_metrics(prediction, actual_price)
+            update_prediction(session, prediction, actual_price, metrics)
+            evaluated += 1
+        except Exception as e:
+            logger.error(
+                f"Failed to evaluate prediction #{prediction.id}: {e}",
+                exc_info=True,
+            )
+            # Continue with other predictions
+    return evaluated
+
+
+def main(today: date | None = None) -> int:
     """
     Main entry point for the evaluator job.
 
-    Evaluates ALL unevaluated predictions for today (supports multi-model).
+    Evaluates ALL pending daily predictions due up to ``today`` (supports
+    multi-model), each against the bar it predicted.
+
+    Args:
+        today: Date the job runs on (defaults to the current date)
 
     Returns:
         Exit code (0 = success, 1 = failure)
@@ -325,53 +382,36 @@ def main() -> int:
     session = SessionLocal()
 
     try:
-        # Evaluate predictions for today
-        today = date.today()
-        logger.info(f"Evaluating predictions for date: {today}")
+        today = today or date.today()
+        logger.info(f"Evaluating pending predictions due up to {today}")
 
-        # Find ALL unevaluated predictions (supports multi-model)
-        predictions = find_unevaluated_predictions(session, today)
+        predictions = find_pending_predictions(session, today)
 
         if not predictions:
             logger.info("No predictions to evaluate, exiting successfully")
             return 0
 
-        # Fetch actual price once (7am close, same for all models)
-        actual_price = fetch_actual_price(session, today)
+        logger.info(f"Found {len(predictions)} pending prediction(s)")
+        evaluated = 0
+        waiting = 0
 
-        if actual_price is None:
-            logger.info(
-                "Actual price not available yet, skipping evaluation "
-                "(will retry tomorrow)"
-            )
-            return 0
+        for predicted_for, group in groupby(predictions, key=lambda p: p.predicted_for):
+            due = list(group)
+            actual_price = fetch_actual_price(session, predicted_for)
 
-        # Evaluate each prediction
-        logger.info(f"Evaluating {len(predictions)} prediction(s)...")
-
-        for prediction in predictions:
-            try:
+            if actual_price is None:
+                waiting += len(due)
                 logger.info(
-                    f"Evaluating prediction #{prediction.id} "
-                    f"(model_id={prediction.model_id})"
+                    f"Skipping {len(due)} prediction(s) for {predicted_for}: "
+                    f"settling bar not available yet, they stay pending"
                 )
-
-                # Calculate metrics
-                metrics = calculate_metrics(prediction, actual_price)
-
-                # Update prediction record
-                update_prediction(session, prediction, actual_price, metrics)
-
-            except Exception as e:
-                logger.error(
-                    f"Failed to evaluate prediction #{prediction.id}: {e}",
-                    exc_info=True,
-                )
-                # Continue with other predictions
                 continue
 
+            evaluated += evaluate_predictions(session, due, actual_price)
+
         logger.info(
-            f"Evaluator job completed: {len(predictions)} prediction(s) evaluated"
+            f"Evaluator job completed: {evaluated} prediction(s) evaluated, "
+            f"{waiting} waiting for their bar"
         )
         return 0
 

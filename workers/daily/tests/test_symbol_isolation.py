@@ -125,17 +125,11 @@ class TestPredictorSymbolIsolation:
 
 class TestEvaluatorSymbolIsolation:
     def test_fetch_actual_price_ignores_other_symbol(self, db_session: Session) -> None:
-        """PAXG has the earliest candle after 07:00, BTC has a later one."""
+        """Both symbols have a bar that settles today; each gets its own close."""
         today = date.today()
-        _add_bar(
-            db_session,
-            PAXG,
-            datetime.combine(today, time(7, 0), tzinfo=UTC),
-            PAXG_CLOSE,
-        )
-        _add_bar(
-            db_session, BTC, datetime.combine(today, time(8, 0), tzinfo=UTC), BTC_CLOSE
-        )
+        bar_open = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
+        _add_bar(db_session, PAXG, bar_open, PAXG_CLOSE)
+        _add_bar(db_session, BTC, bar_open, BTC_CLOSE)
         db_session.commit()
 
         assert evaluator.fetch_actual_price(db_session, today) == BTC_CLOSE
