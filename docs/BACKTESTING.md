@@ -386,6 +386,16 @@ python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-30
 
 **Note**: Long-running backtests (>30 days) may timeout on Railway's free tier. For large backtests, run locally and sync results to production database.
 
+### Monthly cron (`workers/backtest/`)
+
+The monthly Railway cron (`Dockerfile.backtest`) runs `scripts/backtest.py` with the production configuration, so its stored results describe what the live system does:
+
+- **Window**: `settings.training_window_days` (21, `TRAINING_WINDOW_DAYS`), passed as `--training-window`. It never picks its own window.
+- **Range**: ends on the newest loaded day and covers the last 365 days. It starts no earlier than the earliest allowed start date for the window (`required_training_days(window)` rows must precede it), so a short history shortens the range instead of failing.
+- **Split**: the last 100 days are the test slice (`--test-start-date`); everything before is validation.
+- **Seed and retrain**: `--seed=42` and `--retrain-every=1`, logged at start and shown in the printed report.
+- **Too little history**: exits 1 and logs the engine's message (the earliest allowed start date, or that no start date has enough history). It also exits 1 when the earliest allowed start date leaves fewer than 100 test days plus one validation day. It never shrinks the window to fit.
+
 ## Related Documentation
 
 - [Baselines and walk-forward backtest spec](../specs/baselines-and-walk-forward-backtest.md) (#105, #106)
