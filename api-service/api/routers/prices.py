@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from api.models.responses import BtcPriceResponse
+from api.symbols import SymbolQuery
 from shared.db.database import get_db
 from shared.db.models import DEFAULT_SYMBOL, Price
 
@@ -18,27 +19,29 @@ async def get_prices(
         le=1000,
         description="Number of recent prices to return (1-1000)",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> list[BtcPriceResponse]:
     """
-    Get recent BTC prices.
+    Get recent prices of one asset.
 
-    Returns the most recent BTC OHLCV prices from the database,
-    ordered by timestamp descending (newest first).
+    Returns the most recent OHLCV prices of ``symbol`` (default BTCUSDT) from the
+    database, ordered by timestamp descending (newest first).
 
     Args:
         limit: Number of records to return (default: 24, max: 1000)
+        symbol: Asset to return (default: BTCUSDT)
         db: Database session (injected)
 
     Returns:
         List of BTC price records
 
     Example:
-        GET /api/prices?limit=24
+        GET /api/prices?limit=24&symbol=PAXGUSDT
     """
     prices = (
         db.query(Price)
-        .filter(Price.symbol == DEFAULT_SYMBOL)
+        .filter(Price.symbol == symbol)
         .order_by(Price.timestamp.desc())
         .limit(limit)
         .all()

@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.models.backtesting import (
@@ -16,10 +17,15 @@ from api.models.backtesting import (
     BacktestStrategyMetrics,
     DailyPnlPoint,
 )
+from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
 from shared.db.database import get_db
 from shared.db.models import BacktestResult
 
 router = APIRouter(tags=["backtesting"])
+
+# Asset of a stored run. Runs saved before the backtest recorded ``symbol`` were
+# all BTCUSDT.
+RUN_SYMBOL = func.coalesce(BacktestResult.model_params["symbol"].astext, DEFAULT_SYMBOL)
 
 # Templates for HTML rendering
 templates_dir = Path(__file__).parent.parent / "templates"
@@ -147,17 +153,20 @@ async def get_backtesting_metrics(
         description="Filter end date (inclusive)",
         alias="end",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> BacktestMetricsResponse:
     """
     Get backtesting metrics with strategy comparison and daily PnL.
 
-    Queries the most recent backtest run (by backtest_run_id with latest created_at)
-    and returns aggregated metrics for all 4 strategies plus daily PnL time series.
+    Queries the most recent backtest run of ``symbol`` (by backtest_run_id with
+    latest created_at) and returns aggregated metrics for all 4 strategies plus
+    daily PnL time series.
 
     Args:
         start_date: Optional start date filter (query param: ?start=2024-05-01)
         end_date: Optional end date filter (query param: ?end=2024-05-30)
+        symbol: Asset whose latest run is shown (default BTCUSDT)
         db: Database session (injected)
 
     Returns:
@@ -171,6 +180,7 @@ async def get_backtesting_metrics(
     # Find the most recent backtest_run_id
     latest_run_query = (
         db.query(BacktestResult.backtest_run_id)
+        .filter(RUN_SYMBOL == symbol)
         .order_by(BacktestResult.created_at.desc())
         .limit(1)
     )
@@ -180,7 +190,8 @@ async def get_backtesting_metrics(
         raise HTTPException(
             status_code=404,
             detail=(
-                "No backtest results found. Run scripts/backtest.py to generate data."
+                f"No backtest results found for {symbol}. "
+                "Run scripts/backtest.py to generate data."
             ),
         )
 
@@ -268,6 +279,7 @@ async def get_backtesting_dashboard(
         description="Filter end date (inclusive)",
         alias="end",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """
@@ -277,6 +289,7 @@ async def get_backtesting_dashboard(
         request: FastAPI request object
         start_date: Optional start date filter
         end_date: Optional end date filter
+        symbol: Asset to show (default BTCUSDT)
         db: Database session (injected)
 
     Returns:
@@ -287,6 +300,7 @@ async def get_backtesting_dashboard(
         metrics_data = await get_backtesting_metrics(
             start_date=start_date,
             end_date=end_date,
+            symbol=symbol,
             db=db,
         )
         has_data = True
@@ -305,5 +319,6 @@ async def get_backtesting_dashboard(
             "metrics": metrics_data.model_dump() if metrics_data else None,
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
+            **asset_context(request, symbol),
         },
     )

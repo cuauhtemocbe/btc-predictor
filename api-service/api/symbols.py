@@ -1,0 +1,49 @@
+"""Asset selection shared by every dashboard page and JSON endpoint (#107)."""
+
+from typing import Annotated, Any
+from urllib.parse import urlencode
+
+from fastapi import Query, Request
+
+from shared.assets import ASSETS, SUPPORTED_SYMBOLS
+from shared.db.models import DEFAULT_SYMBOL
+
+# Unknown symbols fail validation (HTTP 422) instead of silently showing no data.
+SymbolQuery = Annotated[
+    str,
+    Query(
+        pattern=f"^({'|'.join(SUPPORTED_SYMBOLS)})$",
+        description=f"Asset symbol: {', '.join(SUPPORTED_SYMBOLS)}",
+    ),
+]
+
+
+def asset_context(request: Request, symbol: str) -> dict[str, Any]:
+    """
+    Template context for the asset selector and the selected asset's caveat.
+
+    Each option links to the same page with only ``symbol`` replaced, so the other
+    filters (dates, timeframe) survive a switch. Links are relative so they do not
+    depend on the scheme or host the app is served behind.
+
+    Args:
+        request: Current request, whose query string the links keep
+        symbol: Selected symbol, already validated by ``SymbolQuery``
+
+    Returns:
+        ``{"asset": Asset, "asset_options": [{"asset", "href", "selected"}]}``
+    """
+    kept = [(k, v) for k, v in request.query_params.multi_items() if k != "symbol"]
+    options = []
+    for asset in ASSETS.values():
+        options.append(
+            {
+                "asset": asset,
+                "href": f"?{urlencode([*kept, ('symbol', asset.symbol)])}",
+                "selected": asset.symbol == symbol,
+            }
+        )
+    return {"asset": ASSETS[symbol], "asset_options": options}
+
+
+__all__ = ["DEFAULT_SYMBOL", "SymbolQuery", "asset_context"]

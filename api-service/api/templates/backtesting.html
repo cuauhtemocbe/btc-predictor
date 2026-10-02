@@ -345,10 +345,12 @@
         <header>
             <h1>📈 Backtesting Results</h1>
             <p class="subtitle">Historical model performance simulation with walk-forward validation</p>
-            <a href="/" class="nav-link">← Back to Dashboard</a>
+            <a href="/?symbol={{ asset.symbol }}" class="nav-link">← Back to Dashboard</a>
         </header>
 
         <div class="content">
+            {% include "_asset_selector.html" %}
+
             {% if has_data %}
                 <!-- Metadata Section -->
                 <div class="metadata">
@@ -372,6 +374,7 @@
 
                 <!-- Date Range Filter -->
                 <form class="filter-form" method="get" action="/backtesting">
+                    <input type="hidden" name="symbol" value="{{ asset.symbol }}">
                     <div class="filter-group">
                         <label class="filter-label" for="start">Start Date</label>
                         <input

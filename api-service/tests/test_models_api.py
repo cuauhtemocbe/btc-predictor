@@ -216,7 +216,7 @@ async def test_models_dashboard_renders_with_models(
     # Verify navigation link back to dashboard
     nav_link = soup.find("a", class_="nav-link")
     assert nav_link is not None
-    assert nav_link["href"] == "/"
+    assert nav_link["href"] == "/?symbol=BTCUSDT"
 
 
 @pytest.mark.asyncio
@@ -229,7 +229,7 @@ async def test_models_dashboard_shows_all_metrics(
     Given there are 3 models with different performance
     When I view the model comparison table
     Then I see columns: Model, Predictions, Accuracy, Avg Error %,
-         Total PnL, Win Rate, Sharpe, Max DD
+         Total PnL, Win Rate, Sharpe, Max DD and the baseline columns
     And I see metrics for all 3 models
     """
     # Act
@@ -250,6 +250,10 @@ async def test_models_dashboard_shows_all_metrics(
         "Win Rate",
         "Sharpe",
         "Max DD",
+        "Always-up",
+        "Persistence",
+        "Buy & hold PnL",
+        "vs best baseline",
     ]
     assert headers == expected_headers
 
@@ -259,7 +263,7 @@ async def test_models_dashboard_shows_all_metrics(
 
     for row in rows:
         cells = row.find_all("td")
-        assert len(cells) == 8, "Each row should have 8 cells"
+        assert len(cells) == 12, "Each row should have 12 cells"
 
         # Verify no empty cells (except N/A for metrics)
         for cell in cells:
