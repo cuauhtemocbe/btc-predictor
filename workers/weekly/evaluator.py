@@ -1,12 +1,18 @@
 """
-Weekly evaluator job - evaluates weekly BTC price predictions 7 days later.
+Weekly evaluator job - evaluates the weekly BTC price predictions that are due.
 
 This job:
-1. Finds weekly predictions (timeframe='1w') for today that haven't been evaluated
-2. Fetches today's 7am BTC close price from the database
+1. Finds ALL weekly predictions (timeframe='1w') due today or earlier that
+   haven't been evaluated
+2. Fetches the close of the daily bar each prediction was about (the bar opened
+   the day before ``predicted_for``, which closes at 00:00 UTC on that date; the
+   same settlement rule as the daily evaluator)
 3. Calculates error metrics (absolute, percentage, direction correctness)
 4. Calculates simulated PnL based on prediction strategy (same formulas as daily)
-5. Updates the prediction record with evaluation results
+5. Updates the prediction records with evaluation results
+
+A prediction whose bar is not stored yet stays pending and is picked up by the
+next Monday's run.
 
 Entry point: python -m workers.weekly.evaluator
 Runs: Every Monday (as part of weekly job orchestration)
@@ -14,20 +20,22 @@ Runs: Every Monday (as part of weekly job orchestration)
 
 import logging
 import sys
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from itertools import groupby
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
-from shared.db.models import DEFAULT_SYMBOL, Prediction, Price
+from shared.db.models import Prediction
 from shared.utils import (
     calculate_pnl,
     calculate_pnl_long_short,
     calculate_pnl_realistic,
     calculate_pnl_threshold,
 )
+from workers.daily.evaluator import fetch_actual_price
 
 # Configure logging
 logging.basicConfig(
@@ -69,52 +77,28 @@ def find_unevaluated_weekly_prediction(
     return prediction
 
 
-def fetch_actual_price(
-    session: Session, target_date: date, symbol: str = DEFAULT_SYMBOL
-) -> Decimal | None:
+def find_pending_weekly_predictions(session: Session, up_to: date) -> list[Prediction]:
     """
-    Fetch the BTC close price for the given date at or after 7am UTC.
+    Find every weekly prediction due on or before ``up_to`` that is not evaluated.
 
-    Uses the same range query as workers/daily/evaluator.py:fetch_actual_price()
-    for consistency: with 4-hour candles (0am, 4am, 8am, ...) this returns the
-    8am candle, since an exact-equality match against 7:00:00 almost never
-    exists in 4-hour data.
+    Includes predictions an earlier run could not score because their bar was
+    not stored yet. Daily predictions belong to the daily evaluator.
 
     Args:
         session: Database session
-        target_date: Date to fetch price for
+        up_to: Last ``predicted_for`` date to include (usually today)
 
     Returns:
-        Close price if found, None otherwise
+        Pending predictions ordered by ``predicted_for`` and model (may be empty)
     """
-    # Construct 7am timestamp in UTC
-    target_datetime = datetime.combine(target_date, time(7, 0), tzinfo=UTC)
-    # Next day at midnight (to exclude candles from the next day)
-    next_day = datetime.combine(target_date + timedelta(days=1), time(0, 0), tzinfo=UTC)
-
-    # Find first candle at or after 7am on target_date
     stmt = (
-        select(Price.close, Price.timestamp)
-        .where(Price.symbol == symbol)
-        .where(Price.timestamp >= target_datetime)
-        .where(Price.timestamp < next_day)
-        .order_by(Price.timestamp.asc())
-        .limit(1)
+        select(Prediction)
+        .where(Prediction.timeframe == "1w")
+        .where(Prediction.predicted_for <= up_to)
+        .where(Prediction.actual_price.is_(None))
+        .order_by(Prediction.predicted_for.asc(), Prediction.model_id.asc())
     )
-    result = session.execute(stmt).first()
-
-    if result:
-        price, timestamp = result
-        logger.info(
-            f"Fetched actual price for {target_date}: ${price} (timestamp: {timestamp})"
-        )
-        return price
-    else:
-        logger.warning(
-            f"No price data available for {target_date} at/after 7am "
-            f"(will retry next Monday)"
-        )
-        return None
+    return list(session.execute(stmt).scalars().all())
 
 
 def calculate_direction_correct(
@@ -270,9 +254,15 @@ def update_prediction(
     )
 
 
-def main() -> int:
+def main(today: date | None = None) -> int:
     """
     Main entry point for the weekly evaluator job.
+
+    Evaluates ALL pending weekly predictions due up to ``today``, each against
+    the bar it predicted.
+
+    Args:
+        today: Date the job runs on (defaults to the current date)
 
     Returns:
         Exit code (0 = success, 1 = failure)
@@ -282,34 +272,41 @@ def main() -> int:
     session = SessionLocal()
 
     try:
-        # Evaluate weekly prediction for today (7 days after it was made)
-        today = date.today()
-        logger.info(f"Evaluating weekly prediction for date: {today}")
+        today = today or date.today()
+        logger.info(f"Evaluating pending weekly predictions due up to {today}")
 
-        # Find unevaluated weekly prediction
-        prediction = find_unevaluated_weekly_prediction(session, today)
+        predictions = find_pending_weekly_predictions(session, today)
 
-        if prediction is None:
+        if not predictions:
             logger.info("No weekly predictions to evaluate, exiting successfully")
             return 0
 
-        # Fetch actual price (7am close)
-        actual_price = fetch_actual_price(session, today)
+        logger.info(f"Found {len(predictions)} pending weekly prediction(s)")
+        evaluated = 0
+        waiting = 0
 
-        if actual_price is None:
-            logger.info(
-                "Actual price not available yet, skipping evaluation "
-                "(will retry next Monday)"
-            )
-            return 0
+        for predicted_for, group in groupby(predictions, key=lambda p: p.predicted_for):
+            due = list(group)
+            actual_price = fetch_actual_price(session, predicted_for)
 
-        # Calculate metrics (same formulas as daily, timeframe-agnostic)
-        metrics = calculate_metrics(prediction, actual_price)
+            if actual_price is None:
+                waiting += len(due)
+                logger.info(
+                    f"Skipping {len(due)} weekly prediction(s) for {predicted_for}: "
+                    f"settling bar not available yet, they stay pending"
+                )
+                continue
 
-        # Update prediction record
-        update_prediction(session, prediction, actual_price, metrics)
+            for prediction in due:
+                # Calculate metrics (same formulas as daily, timeframe-agnostic)
+                metrics = calculate_metrics(prediction, actual_price)
+                update_prediction(session, prediction, actual_price, metrics)
+                evaluated += 1
 
-        logger.info("Weekly evaluator job completed successfully")
+        logger.info(
+            f"Weekly evaluator job completed: {evaluated} prediction(s) evaluated, "
+            f"{waiting} waiting for their bar"
+        )
         return 0
 
     except ValueError as e:

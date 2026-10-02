@@ -262,124 +262,55 @@ class TestFindUnevaluatedPrediction:
 
 
 class TestFetchActualPrice:
-    """Test the fetch_actual_price() function."""
+    """Test fetch_actual_price(): the close of the daily bar that ends on a date."""
+
+    @staticmethod
+    def _add_bar(
+        db_session: Session, opened: date, close: str, symbol: str = "BTCUSDT"
+    ) -> None:
+        price = Decimal(close)
+        db_session.add(
+            Price(
+                symbol=symbol,
+                timestamp=datetime.combine(opened, datetime.min.time(), tzinfo=UTC),
+                open=price,
+                high=price,
+                low=price,
+                close=price,
+                volume=Decimal("1"),
+                source="binance_vision",
+            )
+        )
+        db_session.commit()
 
     def test_fetch_existing_price(
         self, db_session: Session, sample_actual_price_for_today: Price
     ) -> None:
-        """Should fetch 7am close price for today."""
-        today = date.today()
+        """A prediction for today is settled by the bar opened yesterday."""
+        price = evaluator.fetch_actual_price(db_session, date.today())
 
-        price = evaluator.fetch_actual_price(db_session, today)
-
-        assert price is not None
         assert price == Decimal("67500.00")
 
     def test_missing_price_returns_none(self, db_session: Session) -> None:
-        """Should return None when no price data exists for 7am."""
-        today = date.today()
+        """Should return None when the settling bar is not stored."""
+        assert evaluator.fetch_actual_price(db_session, date.today()) is None
 
-        price = evaluator.fetch_actual_price(db_session, today)
+    def test_uses_bar_opened_the_day_before(self, db_session: Session) -> None:
+        """Predicted for 10-03: the bar opened 10-02, which closes 10-03 00:00."""
+        self._add_bar(db_session, date(2026, 10, 1), "84880.05")
+        self._add_bar(db_session, date(2026, 10, 2), "85100.00")
+        self._add_bar(db_session, date(2026, 10, 3), "85500.00")
 
-        assert price is None
+        result = evaluator.fetch_actual_price(db_session, date(2026, 10, 3))
 
-    def test_fetch_actual_price_with_4hour_candles(self, db_session: Session) -> None:
-        """Test evaluator finds 8am candle with 4-hour granularity."""
-        target_date = date(2026, 5, 24)
+        assert result == Decimal("85100.00")
 
-        # Insert 4-hour candles for May 24: 0am, 4am, 8am, 12pm, 4pm, 8pm
-        candles = [
-            datetime(2026, 5, 24, 0, 0, tzinfo=UTC),  # 0am
-            datetime(2026, 5, 24, 4, 0, tzinfo=UTC),  # 4am
-            datetime(2026, 5, 24, 8, 0, tzinfo=UTC),  # 8am ← should be selected
-            datetime(2026, 5, 24, 12, 0, tzinfo=UTC),  # 12pm
-            datetime(2026, 5, 24, 16, 0, tzinfo=UTC),  # 4pm
-            datetime(2026, 5, 24, 20, 0, tzinfo=UTC),  # 8pm
-        ]
+    def test_bar_not_ingested_yet_returns_none(self, db_session: Session) -> None:
+        """Only earlier and later bars exist; the settling bar is missing."""
+        self._add_bar(db_session, date(2026, 10, 1), "84880.05")
+        self._add_bar(db_session, date(2026, 10, 3), "85500.00")
 
-        for i, timestamp in enumerate(candles):
-            price = Decimal("95000.00") + Decimal(i * 100)  # Incrementing prices
-            db_session.add(
-                Price(
-                    timestamp=timestamp,
-                    open=price,
-                    high=price,
-                    low=price,
-                    close=price,
-                    volume=Decimal("0"),
-                    source="coingecko",
-                )
-            )
-        db_session.commit()
-
-        # Should find 8am candle (index 2 → $95200)
-        result = evaluator.fetch_actual_price(db_session, target_date)
-
-        assert result == Decimal("95200.00")
-
-    def test_fetch_actual_price_no_data_after_7am(self, db_session: Session) -> None:
-        """Should return None if no candles exist at or after 7am on target date."""
-        target_date = date(2026, 5, 25)
-
-        # Insert candles only before 7am (0am, 4am)
-        early_candles = [
-            datetime(2026, 5, 25, 0, 0, tzinfo=UTC),  # 0am
-            datetime(2026, 5, 25, 4, 0, tzinfo=UTC),  # 4am
-        ]
-
-        for i, timestamp in enumerate(early_candles):
-            price = Decimal("96000.00") + Decimal(i * 100)
-            db_session.add(
-                Price(
-                    timestamp=timestamp,
-                    open=price,
-                    high=price,
-                    low=price,
-                    close=price,
-                    volume=Decimal("0"),
-                    source="coingecko",
-                )
-            )
-        db_session.commit()
-
-        # Should return None (no candles >= 7am)
-        result = evaluator.fetch_actual_price(db_session, target_date)
-
-        assert result is None
-
-    def test_fetch_actual_price_excludes_next_day(self, db_session: Session) -> None:
-        """Should not return candles from the next day."""
-        target_date = date(2026, 5, 26)
-
-        # Insert candles for May 26 (0am, 4am only) and May 27 (0am, 4am, 8am)
-        candles = [
-            # May 26 (target date) - only early candles
-            (datetime(2026, 5, 26, 0, 0, tzinfo=UTC), Decimal("97000.00")),
-            (datetime(2026, 5, 26, 4, 0, tzinfo=UTC), Decimal("97100.00")),
-            # May 27 (next day) - has 8am candle but should be excluded
-            (datetime(2026, 5, 27, 0, 0, tzinfo=UTC), Decimal("97200.00")),
-            (datetime(2026, 5, 27, 4, 0, tzinfo=UTC), Decimal("97300.00")),
-            (datetime(2026, 5, 27, 8, 0, tzinfo=UTC), Decimal("97400.00")),
-        ]
-
-        for timestamp, price in candles:
-            db_session.add(
-                Price(
-                    timestamp=timestamp,
-                    open=price,
-                    high=price,
-                    low=price,
-                    close=price,
-                    volume=Decimal("0"),
-                    source="coingecko",
-                )
-            )
-        db_session.commit()
-
-        # Should return None (no candles >= 7am on May 26, May 27's 8am excluded)
-        result = evaluator.fetch_actual_price(db_session, target_date)
-
-        assert result is None
+        assert evaluator.fetch_actual_price(db_session, date(2026, 10, 3)) is None
 
 
 class TestUpdatePrediction:
@@ -573,3 +504,175 @@ class TestEvaluatorMain:
 
         # Should continue processing and return 0 (error is logged but job doesn't fail)
         assert exit_code == 0
+
+
+# ============================================================================
+# Pending predictions are scored against their own daily bar (#143)
+# ============================================================================
+
+
+def _patch_session(db_session: Session, monkeypatch) -> None:
+    def mock_session():
+        db_session.close = lambda: None
+        return db_session
+
+    monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
+
+
+def _add_daily_bar(
+    db_session: Session, opened: date, close: str, symbol: str = "BTCUSDT"
+) -> None:
+    price = Decimal(close)
+    db_session.add(
+        Price(
+            symbol=symbol,
+            timestamp=datetime.combine(opened, datetime.min.time(), tzinfo=UTC),
+            open=price,
+            high=price,
+            low=price,
+            close=price,
+            volume=Decimal("1"),
+            source="binance_vision",
+        )
+    )
+    db_session.commit()
+
+
+def _add_prediction(
+    db_session: Session,
+    model: Model,
+    predicted_for: date,
+    timeframe: str = "1d",
+    model_id: int | None = None,
+) -> Prediction:
+    prediction = Prediction(
+        model_id=model_id or model.id,
+        predicted_for=predicted_for,
+        timeframe=timeframe,
+        predicted_at=datetime.now(UTC),
+        price_at_prediction=Decimal("84880.05"),
+        predicted_price=Decimal("85500.00"),
+    )
+    db_session.add(prediction)
+    db_session.commit()
+    db_session.refresh(prediction)
+    return prediction
+
+
+class TestPendingPredictions:
+    def test_prediction_scored_against_bar_it_predicted(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        """Given a prediction for 10-03, the bar opened 10-02 closing at 85100.00."""
+        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
+        prediction = _add_prediction(
+            db_session, sample_trained_model, date(2026, 10, 3)
+        )
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 3)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(prediction)
+        assert prediction.actual_price == Decimal("85100.00")
+        assert prediction.error_abs == Decimal("400.00")
+        assert prediction.direction_correct is True
+        assert prediction.evaluated_at is not None
+
+    def test_missing_bar_leaves_prediction_pending_and_names_the_bar(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch, caplog
+    ) -> None:
+        prediction = _add_prediction(
+            db_session, sample_trained_model, date(2026, 10, 3)
+        )
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 3)
+
+        with caplog.at_level("INFO"):
+            assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(prediction)
+        assert prediction.actual_price is None
+        assert "2026-10-02" in caplog.text
+        assert "will retry tomorrow" not in caplog.text
+
+    def test_past_pending_predictions_are_evaluated_on_the_next_run(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        _add_daily_bar(db_session, date(2026, 10, 1), "84000.00")
+        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
+        first = _add_prediction(db_session, sample_trained_model, date(2026, 10, 2))
+        second = _add_prediction(db_session, sample_trained_model, date(2026, 10, 3))
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 4)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(first)
+        db_session.refresh(second)
+        assert first.actual_price == Decimal("84000.00")
+        assert second.actual_price == Decimal("85100.00")
+
+    def test_a_missing_bar_does_not_block_the_other_dates(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
+        gap = _add_prediction(db_session, sample_trained_model, date(2026, 10, 2))
+        later = _add_prediction(db_session, sample_trained_model, date(2026, 10, 3))
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 3)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(gap)
+        db_session.refresh(later)
+        assert gap.actual_price is None
+        assert later.actual_price == Decimal("85100.00")
+
+    def test_already_evaluated_prediction_is_untouched(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
+        prediction = _add_prediction(
+            db_session, sample_trained_model, date(2026, 10, 3)
+        )
+        evaluated_at = datetime(2026, 10, 3, 7, 0, tzinfo=UTC)
+        prediction.actual_price = Decimal("1.00")
+        prediction.evaluated_at = evaluated_at
+        db_session.commit()
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 4)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(prediction)
+        assert prediction.actual_price == Decimal("1.00")
+        assert prediction.evaluated_at == evaluated_at
+
+    def test_weekly_predictions_are_left_to_the_weekly_evaluator(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
+        weekly = _add_prediction(
+            db_session, sample_trained_model, date(2026, 10, 3), timeframe="1w"
+        )
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 4)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(weekly)
+        assert weekly.actual_price is None
+
+    def test_future_predictions_are_not_touched(
+        self, db_session: Session, sample_trained_model: Model, monkeypatch
+    ) -> None:
+        _add_daily_bar(db_session, date(2026, 10, 3), "85500.00")
+        future = _add_prediction(db_session, sample_trained_model, date(2026, 10, 4))
+        _patch_session(db_session, monkeypatch)
+        run_date = date(2026, 10, 3)
+
+        assert evaluator.main(today=run_date) == 0
+
+        db_session.refresh(future)
+        assert future.actual_price is None

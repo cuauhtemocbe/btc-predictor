@@ -476,18 +476,19 @@ def sample_unevaluated_prediction_for_today(
 @pytest.fixture
 def sample_actual_price_for_today(db_session: Session) -> Price:
     """
-    Create today's 7am BTC price record.
+    Create the daily bar that settles today's predictions.
+
+    A prediction for today is scored against the bar opened yesterday, which
+    closes at 00:00 UTC today (daily bars are stored at their 00:00 UTC open).
 
     Returns:
-        Price record with timestamp=today 7am
+        Price record with timestamp=yesterday 00:00 UTC
     """
-    today = date.today()
-    timestamp_7am = datetime.combine(
-        today, datetime.min.time().replace(hour=7), tzinfo=UTC
-    )
+    yesterday = date.today() - timedelta(days=1)
+    timestamp = datetime.combine(yesterday, datetime.min.time(), tzinfo=UTC)
 
     price_record = Price(
-        timestamp=timestamp_7am,
+        timestamp=timestamp,
         open=Decimal("67000.00"),
         high=Decimal("67800.00"),
         low=Decimal("66800.00"),
