@@ -864,6 +864,7 @@ def get_all_models_metrics(
     pnl_column: str = "pnl_simulated",
     timeframe: str | None = None,
     capital: float = DEFAULT_CAPITAL,
+    symbol: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Get performance metrics for all models in one call.
@@ -879,6 +880,7 @@ def get_all_models_metrics(
             every timeframe is mixed together for every metric below.
         capital: Reference capital that sharpe_ratio and max_drawdown_pct
             are normalized against (default: DEFAULT_CAPITAL)
+        symbol: Optional asset filter; only models trained for it are returned.
 
     Returns:
         List of dictionaries with structure:
@@ -896,6 +898,8 @@ def get_all_models_metrics(
             "sharpe_ratio": float | None,
             "max_drawdown": float | None,
             "max_drawdown_pct": float | None,
+            "symbol": str,
+            "baseline": dict | None,  # see get_model_baseline (daily only)
         }
 
     Examples:
@@ -913,9 +917,13 @@ def get_all_models_metrics(
         ]
     """
     from shared.db.models import Model, Prediction
+    from shared.model_baselines import get_model_baseline
 
-    # Get all models
-    models = db.query(Model).all()
+    # Get all models (of one asset when a symbol is given)
+    model_query = db.query(Model)
+    if symbol:
+        model_query = model_query.filter(Model.symbol == symbol)
+    models = model_query.all()
 
     results = []
     for model in models:
@@ -989,6 +997,10 @@ def get_all_models_metrics(
                 "max_drawdown": round(max_dd, 2) if max_dd is not None else None,
                 "max_drawdown_pct": (
                     round(max_dd_pct, 2) if max_dd_pct is not None else None
+                ),
+                "symbol": model.symbol,
+                "baseline": get_model_baseline(
+                    db, model.id, model.symbol, start_date, end_date, timeframe
                 ),
             }
         )

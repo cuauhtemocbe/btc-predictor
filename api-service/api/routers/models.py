@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
 from shared.db.database import get_db
 from shared.utils import DEFAULT_TIMEFRAME, get_all_models_metrics, get_cumulative_pnl
 
@@ -43,6 +44,7 @@ async def models_dashboard(
         description="Timeframe filter: '1h', '1d', or '1w'",
         pattern="^(1h|1d|1w)$",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ):
     """
@@ -54,6 +56,7 @@ async def models_dashboard(
         end_date: Optional end date for filtering metrics
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
             daily and weekly metrics are never silently combined
+        symbol: Asset to show (default BTCUSDT); only its models are compared
         db: Database session
 
     Returns:
@@ -61,7 +64,7 @@ async def models_dashboard(
     """
     # Get metrics for all models
     models_metrics = get_all_models_metrics(
-        db, start_date, end_date, timeframe=timeframe
+        db, start_date, end_date, timeframe=timeframe, symbol=symbol
     )
 
     # Identify best performing model (highest Total PnL)
@@ -92,6 +95,7 @@ async def models_dashboard(
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
             "timeframe": timeframe,
+            **asset_context(request, symbol),
         },
     )
 
@@ -110,6 +114,7 @@ async def models_metrics_api(
         description="Timeframe filter: '1h', '1d', or '1w'",
         pattern="^(1h|1d|1w)$",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -124,6 +129,7 @@ async def models_metrics_api(
         pnl_column: Which PnL column to use (default: pnl_simulated)
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
             daily and weekly metrics are never silently combined
+        symbol: Asset to show (default BTCUSDT); only its models are returned
         db: Database session
 
     Returns:
@@ -158,7 +164,7 @@ async def models_metrics_api(
     """
     # Get metrics for all models
     models_metrics = get_all_models_metrics(
-        db, start_date, end_date, pnl_column, timeframe
+        db, start_date, end_date, pnl_column, timeframe, symbol=symbol
     )
 
     # Get daily cumulative PnL for all models
@@ -184,5 +190,6 @@ async def models_metrics_api(
             "end_date": end_date.isoformat() if end_date else None,
             "pnl_column": pnl_column,
             "timeframe": timeframe,
+            "symbol": symbol,
         },
     }

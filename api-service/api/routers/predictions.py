@@ -13,10 +13,11 @@ from api.models.predictions import (
     StrategiesResponse,
     StrategyMetrics,
 )
+from api.symbols import DEFAULT_SYMBOL, SymbolQuery
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
-from shared.db.models import Prediction
+from shared.db.models import Model, Prediction
 from shared.utils import DEFAULT_TIMEFRAME
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
@@ -39,6 +40,7 @@ async def get_prediction_history(
         description="Timeframe filter: '1h', '1d', or '1w'",
         pattern="^(1h|1d|1w)$",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> list[PredictionHistoryResponse]:
     """
@@ -51,6 +53,7 @@ async def get_prediction_history(
         from_date: Optional start date filter (query param: ?from=2026-05-01)
         to_date: Optional end date filter (query param: ?to=2026-05-15)
         timeframe: Optional timeframe filter (query param: ?timeframe=1w)
+        symbol: Asset to show (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         db: Database session (injected)
 
     Returns:
@@ -68,6 +71,7 @@ async def get_prediction_history(
         from_date=from_date,
         to_date=to_date,
         timeframe=timeframe,
+        symbol=symbol,
     )
 
     # Convert to response models with model info
@@ -98,6 +102,7 @@ async def get_total_pnl(
         description="Timeframe filter: '1h', '1d', or '1w'",
         pattern="^(1h|1d|1w)$",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> PnlResponse:
     """
@@ -111,6 +116,7 @@ async def get_total_pnl(
 
     Args:
         timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
+        symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         db: Database session (injected)
 
     Returns:
@@ -129,9 +135,11 @@ async def get_total_pnl(
             func.sum(Prediction.pnl_simulated),
             func.count(Prediction.id),
         )
+        .join(Model, Prediction.model_id == Model.id)
         .filter(
             Prediction.pnl_simulated.isnot(None),
             Prediction.timeframe == timeframe,
+            Model.symbol == symbol,
         )
         .first()
     )
@@ -153,6 +161,7 @@ async def get_strategies_comparison(
         description="Timeframe filter: '1h', '1d', or '1w'",
         pattern="^(1h|1d|1w)$",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> StrategiesResponse:
     """
@@ -165,6 +174,7 @@ async def get_strategies_comparison(
 
     Args:
         timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
+        symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         db: Database session (injected)
 
     Returns:
@@ -193,7 +203,7 @@ async def get_strategies_comparison(
               ]
           }
     """
-    strategies_data = get_all_strategies_metrics(db, timeframe=timeframe)
+    strategies_data = get_all_strategies_metrics(db, timeframe=timeframe, symbol=symbol)
 
     # Convert to Pydantic models
     strategies = [

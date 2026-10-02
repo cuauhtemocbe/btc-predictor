@@ -339,14 +339,14 @@
 <body>
     <div class="container">
         <header>
-            <h1>🪙 Bitcoin Price Predictions</h1>
+            <h1>🪙 {{ asset.label }} Price Predictions</h1>
             <p class="subtitle" id="subtitle">
                 {% set timeframe = request.query_params.get('timeframe', '1d') %}
                 {{ 'Weekly' if timeframe == '1w' else 'Daily' }} model performance tracking and evaluation
             </p>
             <div style="margin-top: 12px;">
-                <a href="/models" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-right: 20px;">📊 Compare Models →</a>
-                <a href="/backtesting" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">📈 View Backtesting Results →</a>
+                <a href="/models?symbol={{ asset.symbol }}" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-right: 20px;">📊 Compare Models →</a>
+                <a href="/backtesting?symbol={{ asset.symbol }}" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">📈 View Backtesting Results →</a>
             </div>
         </header>
 
@@ -359,6 +359,8 @@
         </div>
 
         <div class="content">
+            {% include "_asset_selector.html" %}
+
             {% if predictions %}
                 <div class="stats">
                     <div class="stat-card">
@@ -535,7 +537,8 @@
 
             {% else %}
                 <div class="empty-state">
-                    <h2>No predictions yet</h2>
+                    <h2>No predictions yet for {{ asset.label }}</h2>
+                    <p>No evaluated {{ asset.symbol }} predictions exist, so there is nothing to show here.</p>
                     <p>Check back tomorrow! The predictor runs daily at 7 AM.</p>
                 </div>
             {% endif %}

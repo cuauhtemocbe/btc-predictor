@@ -18,6 +18,7 @@ def get_evaluated_predictions(
     from_date: date | None = None,
     to_date: date | None = None,
     timeframe: str | None = None,
+    symbol: str | None = None,
 ) -> list[Prediction]:
     """
     Query all evaluated predictions (actual_price IS NOT NULL) with model info.
@@ -27,6 +28,7 @@ def get_evaluated_predictions(
         from_date: Optional start date filter (inclusive)
         to_date: Optional end date filter (inclusive)
         timeframe: Optional timeframe filter ('1h', '1d', '1w')
+        symbol: Optional asset filter, matched on the predicting model's symbol
 
     Returns:
         List of Prediction objects with model relationship loaded,
@@ -50,6 +52,8 @@ def get_evaluated_predictions(
         query = query.where(Prediction.predicted_for <= to_date)
     if timeframe:
         query = query.where(Prediction.timeframe == timeframe)
+    if symbol:
+        query = query.where(Model.symbol == symbol)
 
     # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())

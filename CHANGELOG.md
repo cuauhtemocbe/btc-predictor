@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Asset selector on the dashboard, models and backtesting pages: a `symbol` query
+  parameter (`BTCUSDT` by default, `PAXGUSDT` for gold) scopes every table, chart
+  and JSON endpoint (`/api/predictions/*`, `/api/prices`, `/api/backtesting/metrics`,
+  `/models/metrics`) to one asset, an unknown symbol is a 422, and gold is labelled
+  as a gold-backed token proxy, not XAU spot. An asset with no predictions shows an
+  explanatory empty state (#107).
+- The models view shows each model's always-up and persistence accuracy, buy-and-hold
+  PnL, sample size and edge next to its own metrics, marked "Beats baseline",
+  "Not significant" or "Does not beat baseline" with a glyph, not only a color.
+  Baselines are daily-only; other timeframes show N/A. `/models/metrics` returns the
+  same data under `baseline` (`shared/shared/model_baselines.py`) (#107).
 - Baseline comparison (`shared/baselines.py`): every model's direction
   accuracy and simple-strategy PnL is shown next to always-up, persistence and
   buy-and-hold over exactly the days it was evaluated on, with the sample size,

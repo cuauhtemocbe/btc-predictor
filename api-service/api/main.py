@@ -12,6 +12,7 @@ from api.routers.backtesting import router as backtesting_router
 from api.routers.models import router as models_router
 from api.routers.predictions import router as predictions_router
 from api.routers.prices import router as prices_router
+from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
@@ -34,6 +35,7 @@ async def dashboard(
     request: Request,
     db: Session = Depends(get_db),
     timeframe: str | None = None,
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
 ):
     """
     Render the main dashboard showing prediction history.
@@ -45,6 +47,7 @@ async def dashboard(
         request: FastAPI request object
         db: Database session
         timeframe: Optional filter for timeframe ('1d', '1w'). Defaults to '1d' if None.
+        symbol: Asset to show (default BTCUSDT); every table and chart is scoped to it.
     """
     # Default timeframe if none specified -- shared across every metrics
     # endpoint so daily and weekly results are never silently combined.
@@ -52,7 +55,9 @@ async def dashboard(
         timeframe = DEFAULT_TIMEFRAME
 
     # Fetch evaluated predictions filtered by timeframe
-    predictions_data = get_evaluated_predictions(session=db, timeframe=timeframe)
+    predictions_data = get_evaluated_predictions(
+        session=db, timeframe=timeframe, symbol=symbol
+    )
 
     # Convert to template-friendly format
     predictions = [
@@ -74,7 +79,7 @@ async def dashboard(
     ]
 
     # Fetch strategy metrics for the same timeframe as the predictions above
-    strategies = get_all_strategies_metrics(db, timeframe=timeframe)
+    strategies = get_all_strategies_metrics(db, timeframe=timeframe, symbol=symbol)
 
     return templates.TemplateResponse(
         request=request,
@@ -82,6 +87,7 @@ async def dashboard(
         context={
             "predictions": predictions,
             "strategies": strategies,
+            **asset_context(request, symbol),
         },
     )
 
