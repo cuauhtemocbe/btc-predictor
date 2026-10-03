@@ -1,6 +1,7 @@
 """Router for prediction history endpoints."""
 
 from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
@@ -22,6 +23,14 @@ from shared.utils import DEFAULT_TIMEFRAME
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 
+# One definition of the timeframe filter (description and pattern) for every endpoint.
+_TIMEFRAME_QUERY = Query(
+    description="Timeframe filter: '1h', '1d', or '1w'",
+    pattern="^(1h|1d|1w)$",
+)
+TimeframeQuery = Annotated[str, _TIMEFRAME_QUERY]
+OptionalTimeframeQuery = Annotated[str | None, _TIMEFRAME_QUERY]
+
 
 @router.get("/history", response_model=list[PredictionHistoryResponse])
 async def get_prediction_history(
@@ -35,11 +44,7 @@ async def get_prediction_history(
         description="End date filter (inclusive)",
         alias="to",
     ),
-    timeframe: str | None = Query(
-        default=None,
-        description="Timeframe filter: '1h', '1d', or '1w'",
-        pattern="^(1h|1d|1w)$",
-    ),
+    timeframe: OptionalTimeframeQuery = None,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> list[PredictionHistoryResponse]:
@@ -97,11 +102,7 @@ async def get_prediction_history(
 
 @router.get("/pnl", response_model=PnlResponse)
 async def get_total_pnl(
-    timeframe: str = Query(
-        default=DEFAULT_TIMEFRAME,
-        description="Timeframe filter: '1h', '1d', or '1w'",
-        pattern="^(1h|1d|1w)$",
-    ),
+    timeframe: TimeframeQuery = DEFAULT_TIMEFRAME,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> PnlResponse:
@@ -156,11 +157,7 @@ async def get_total_pnl(
 
 @router.get("/strategies", response_model=StrategiesResponse)
 async def get_strategies_comparison(
-    timeframe: str = Query(
-        default=DEFAULT_TIMEFRAME,
-        description="Timeframe filter: '1h', '1d', or '1w'",
-        pattern="^(1h|1d|1w)$",
-    ),
+    timeframe: TimeframeQuery = DEFAULT_TIMEFRAME,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> StrategiesResponse:
