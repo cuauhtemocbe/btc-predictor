@@ -349,6 +349,7 @@
                 <p>No {{ asset.symbol }} models have been trained yet, so there is nothing to compare.</p>
                 <p style="margin-top: 16px;">To train models, run:</p>
                 <code>docker compose exec api python scripts/train_all_models.py</code>
+                <p style="margin-top: 16px;">Models are saved inactive. Add <code>--activate</code> to make the best one the active model.</p>
             </div>
             {% else %}
             <!-- Model Comparison Table -->

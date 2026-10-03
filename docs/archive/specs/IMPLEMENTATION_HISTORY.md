@@ -559,7 +559,7 @@ backtest_results (
 **Key Decisions**:
 - Train all 4 models (Linear, LSTM, XGBoost, ARIMA) with same training data
 - Validation split: 70 days training, 20 days validation
-- Auto-activate best model based on validation MAPE (Mean Absolute Percentage Error)
+- Activate the best model by validation MAPE (Mean Absolute Percentage Error); since #160 only with `--activate`
 - Only one model can be active at a time
 - Model activation/deactivation via CLI scripts
 
@@ -572,7 +572,7 @@ backtest_results (
 
 **Usage**:
 ```bash
-# Train all models
+# Train all models (saved inactive; add --activate to activate the best one)
 docker compose exec api python scripts/train_all_models.py
 
 # List available models
@@ -584,7 +584,7 @@ docker compose exec api python scripts/activate_model.py --model-id=42
 
 **Testing**: 185 passing tests for multi-model training, activation logic, and edge cases
 - Test all 4 models train with same data
-- Test auto-activation of best performer
+- Test activation of best performer (opt-in since #160)
 - Test manual activation/deactivation
 - Test graceful failure handling
 

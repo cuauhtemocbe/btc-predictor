@@ -203,7 +203,7 @@ class TestTrainAllModels:
         When train_all_models runs with the configured window
         Then it returns the linear model and the LSTM, XGBoost and ARIMA models
         """
-        models = train_all_models(db_session)
+        models = train_all_models(db_session, activate=True)
 
         # Linear, LSTM, XGBoost and ARIMA all trained (200 days >= 60 for ARIMA)
         assert {m.name for m in models} == {
@@ -236,7 +236,7 @@ class TestTrainAllModels:
 
         Lowest validation error.
         """
-        models = train_all_models(db_session)
+        models = train_all_models(db_session, activate=True)
 
         # Get active model
         active = get_active_model(db_session)
@@ -251,6 +251,33 @@ class TestTrainAllModels:
             if model.id != active.id:
                 # Other models should have equal or higher error
                 assert model.params["validation_error_pct"] > active_error
+
+    @pytest.mark.usefixtures("model_registry")
+    def test_train_all_models_default_activates_nothing(
+        self, db_session, sample_prices
+    ):
+        """By default every model is saved inactive and the active one is untouched."""
+        previous = Model(
+            name="linear_v0",
+            version="v0",
+            params={},
+            artifact=b"",
+            trained_at=datetime.now(UTC),
+            train_from=date(2024, 1, 1),
+            train_to=date(2024, 6, 1),
+            timeframe="1d",
+            is_active=True,
+        )
+        db_session.add(previous)
+        db_session.commit()
+
+        models = train_all_models(db_session)
+
+        assert len(models) == 2
+        assert all(not m.is_active for m in models)
+        active = get_active_model(db_session)
+        assert active is not None
+        assert active.id == previous.id
 
     @pytest.mark.usefixtures("model_registry")
     def test_train_all_models_uses_same_data(self, db_session, sample_prices):
@@ -272,7 +299,7 @@ class TestTrainAllModels:
         """Test that train_all_models continues if one model fails."""
         model_registry["broken"] = _BrokenModel
 
-        models = train_all_models(db_session)
+        models = train_all_models(db_session, activate=True)
 
         model_names = [m.name for m in models]
         assert any("linear" in name for name in model_names)

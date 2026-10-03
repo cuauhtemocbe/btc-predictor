@@ -2,7 +2,7 @@
 
 **Decision: drop for now.** A 1h return model predicts direction slightly better than the baselines, but the gain per trade is about 10 times smaller than the fees. Revisit only if fees fall below about 1 bp per side.
 
-Date: 2026-10-02. Script: `scripts/spike_intraday.py`. Nothing is written to the database.
+Date: 2026-10-02. Script: deleted after the spike, recover it with `git show 79c6d2c:scripts/spike_intraday.py`. Nothing is written to the database.
 
 ## Method
 
@@ -73,8 +73,10 @@ No follow-up user stories are drafted, because the recommendation is not "pursue
 
 ## Reproduce
 
+The script was removed once the decision was made (#160). Recover it from git:
+
 ```bash
-docker compose exec api python scripts/spike_intraday.py --intervals 1d 1h --start 2017-08-01
+git show 79c6d2c:scripts/spike_intraday.py > /tmp/spike_intraday.py
 ```
 
-It downloads a few MB of monthly zips into `/tmp/spike_intraday_cache` and takes about 6 minutes for 1h.
+It downloaded a few MB of monthly zips and took about 6 minutes for 1h.
