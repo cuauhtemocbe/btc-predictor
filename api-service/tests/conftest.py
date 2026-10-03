@@ -3,6 +3,7 @@ Pytest configuration and fixtures for API service tests.
 """
 
 import pickle
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -19,7 +20,7 @@ from shared.db.models import Model, Prediction, Price
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncIterator[AsyncClient]:
     """
     Async HTTP client for testing FastAPI endpoints.
     """
@@ -30,7 +31,7 @@ async def client():
 
 
 @pytest.fixture(scope="function")
-def db_session(db_session):
+def db_session(db_session: Session) -> Iterator[Session]:
     """
     Extends the root conftest.py db_session fixture (SAVEPOINT-based
     isolation, with pre-test table cleanup) by also overriding FastAPI's
@@ -38,7 +39,7 @@ def db_session(db_session):
     through this same test session/transaction.
     """
 
-    def override_get_db():
+    def override_get_db() -> Iterator[Session]:
         try:
             yield db_session
         finally:
@@ -52,7 +53,7 @@ def db_session(db_session):
 
 
 @pytest.fixture
-def sample_prices(db_session):
+def sample_prices(db_session: Session) -> Callable[..., list[Price]]:
     """
     Factory fixture for creating multiple sample Price records.
     Automatically cleans up after test (via db_session rollback).
@@ -65,13 +66,13 @@ def sample_prices(db_session):
     def _create_prices(
         count: int = 10,
         base_price: float = 42000.0,
-        base_time: datetime = None,
+        base_time: datetime | None = None,
         source: str = "test",
     ) -> list[Price]:
         if base_time is None:
             base_time = datetime.now(UTC)
 
-        prices = []
+        prices: list[Price] = []
         for i in range(count):
             price = Price(
                 timestamp=base_time - timedelta(hours=i),
@@ -125,7 +126,9 @@ def sample_model(db_session: Session) -> Model:
 
 
 @pytest.fixture
-def sample_predictions_factory(db_session: Session, sample_model: Model):
+def sample_predictions_factory(
+    db_session: Session, sample_model: Model
+) -> Callable[..., list[Prediction]]:
     """
     Factory fixture for creating prediction records.
 
@@ -133,8 +136,10 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
         sample_predictions_factory(count=10, evaluated=True)
     """
 
-    def _create_predictions(count: int = 10, evaluated: bool = True):
-        predictions = []
+    def _create_predictions(
+        count: int = 10, evaluated: bool = True
+    ) -> list[Prediction]:
+        predictions: list[Prediction] = []
         base_date = date.today()
 
         for i in range(count):

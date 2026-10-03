@@ -8,6 +8,7 @@ Tests the /api/predictions/history endpoint with various scenarios:
 """
 
 import pickle
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -49,7 +50,9 @@ def sample_model(db_session: Session) -> Model:
 
 
 @pytest.fixture
-def sample_predictions_factory(db_session: Session, sample_model: Model):
+def sample_predictions_factory(
+    db_session: Session, sample_model: Model
+) -> Callable[..., list[Prediction]]:
     """
     Factory fixture for creating prediction records.
 
@@ -60,7 +63,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
 
     def _create_predictions(
         count: int = 10, evaluated: bool = True, start_days_ago: int = 0
-    ):
+    ) -> list[Prediction]:
         predictions = []
         base_date = date.today() - timedelta(days=start_days_ago)
 
@@ -129,8 +132,8 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
 async def test_fetch_all_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 30 evaluated records (actual_price != NULL)
     And 5 unevaluated records (actual_price = NULL)
@@ -182,8 +185,8 @@ async def test_fetch_all_evaluated_predictions(
 async def test_no_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given all predictions have actual_price = NULL
     When I send GET /api/predictions/history
@@ -208,8 +211,8 @@ async def test_no_evaluated_predictions(
 async def test_filter_by_date_range(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering predictions by date range.
 
@@ -248,8 +251,8 @@ async def test_filter_by_date_range(
 async def test_filter_from_date_only(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering with only from_date parameter.
     Should return all predictions from that date forward.
@@ -280,8 +283,8 @@ async def test_filter_from_date_only(
 async def test_filter_to_date_only(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering with only to_date parameter.
     Should return all predictions up to that date.
@@ -316,8 +319,8 @@ async def test_filter_to_date_only(
 async def test_get_total_pnl_with_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 30 evaluated records
     And the sum of pnl_simulated is 12345.67
@@ -329,7 +332,7 @@ async def test_get_total_pnl_with_evaluated_predictions(
     predictions = sample_predictions_factory(count=30, evaluated=True)
 
     # Calculate expected total PnL (predictions have pnl_simulated already set)
-    expected_pnl = sum(float(p.pnl_simulated) for p in predictions)
+    expected_pnl = sum(float(p.pnl_simulated or 0) for p in predictions)
     expected_count = 30
 
     # Act: Fetch total PnL
@@ -354,8 +357,8 @@ async def test_get_total_pnl_with_evaluated_predictions(
 async def test_get_total_pnl_no_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given all predictions have pnl_simulated = NULL
     When I send GET /api/predictions/pnl
@@ -380,8 +383,8 @@ async def test_get_total_pnl_no_evaluated_predictions(
 async def test_get_total_pnl_mixed_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that PnL endpoint only counts evaluated predictions and ignores unevaluated.
     """
@@ -391,7 +394,7 @@ async def test_get_total_pnl_mixed_predictions(
     sample_predictions_factory(count=10, evaluated=False, start_days_ago=20)
 
     # Calculate expected PnL (only from evaluated predictions)
-    expected_pnl = sum(float(p.pnl_simulated) for p in evaluated)
+    expected_pnl = sum(float(p.pnl_simulated or 0) for p in evaluated)
     expected_count = 20
 
     # Act
@@ -411,7 +414,7 @@ async def test_get_total_pnl_with_losses(
     client: AsyncClient,
     db_session: Session,
     sample_model: Model,
-):
+) -> None:
     """
     Test that PnL endpoint correctly handles negative total PnL.
     """
@@ -467,7 +470,9 @@ async def test_get_total_pnl_with_losses(
 
 
 @pytest.fixture
-def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
+def sample_predictions_with_pnl(
+    db_session: Session, sample_model: Model
+) -> list[Prediction]:
     """Create sample predictions with all 4 PnL strategy values."""
     predictions = [
         Prediction(
@@ -548,8 +553,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
 async def test_get_strategies_endpoint(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     Given the predictions table has 5 evaluated predictions with PnL values
     When I send GET /api/predictions/strategies
@@ -592,8 +597,8 @@ async def test_get_strategies_endpoint(
 async def test_strategies_metrics_calculation(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     Given predictions with pnl_long_short values: [100, -50, 200, -30, 150]
     When the backend calculates metrics for "Long/Short" strategy
@@ -625,8 +630,8 @@ async def test_strategies_metrics_calculation(
 async def test_cumulative_pnl_chart_data(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     When I fetch strategies endpoint
     Then cumulative_pnl is a list of objects with date and cumulative_pnl
@@ -658,7 +663,7 @@ async def test_cumulative_pnl_chart_data(
 async def test_strategies_with_zero_trades(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given there are no evaluated predictions
     When I fetch strategies endpoint
@@ -687,8 +692,8 @@ async def test_strategies_with_zero_trades(
 async def test_all_four_strategies_returned(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     When I fetch strategies endpoint
     Then I receive 4 strategies: Simple, Long/Short, Threshold, Realistic
@@ -725,7 +730,9 @@ async def test_all_four_strategies_returned(
 
 
 @pytest.fixture
-def sample_predictions_with_timeframes(db_session: Session, sample_model: Model):
+def sample_predictions_with_timeframes(
+    db_session: Session, sample_model: Model
+) -> tuple[list[Prediction], list[Prediction]]:
     """
     Create predictions with different timeframes (daily and weekly).
 
@@ -793,8 +800,8 @@ def sample_predictions_with_timeframes(db_session: Session, sample_model: Model)
 async def test_filter_predictions_by_timeframe_1w(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Gherkin: Filter predictions by timeframe=1w.
 
@@ -824,8 +831,8 @@ async def test_filter_predictions_by_timeframe_1w(
 async def test_filter_predictions_by_timeframe_1d(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Gherkin: Filter predictions by timeframe=1d.
 
@@ -855,8 +862,8 @@ async def test_filter_predictions_by_timeframe_1d(
 async def test_no_timeframe_filter_returns_all(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Gherkin: No timeframe filter returns all predictions.
 
@@ -887,8 +894,8 @@ async def test_no_timeframe_filter_returns_all(
 async def test_timeframe_filter_with_date_range(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Gherkin: Combine timeframe filter with date range.
 
@@ -932,8 +939,8 @@ async def test_timeframe_filter_with_date_range(
 async def test_total_pnl_does_not_mix_timeframes(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Scenario: Total PnL does not mix timeframes
 
@@ -958,8 +965,8 @@ async def test_total_pnl_does_not_mix_timeframes(
 async def test_total_pnl_missing_timeframe_applies_default(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Scenario: Missing timeframe applies the documented default
 
@@ -994,8 +1001,8 @@ async def test_total_pnl_invalid_timeframe_is_rejected(client: AsyncClient) -> N
 async def test_strategies_does_not_mix_timeframes(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_predictions_with_timeframes: tuple[list[Prediction], list[Prediction]],
+) -> None:
     """
     Given a model has daily and weekly PnL records
     When strategy metrics are requested for one timeframe

@@ -8,9 +8,10 @@ Tests the /api/backtesting/metrics endpoint with various scenarios:
 - Metrics calculations (win rate, Sharpe ratio, max drawdown, etc.)
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -20,7 +21,9 @@ from shared.db.models import BacktestResult
 
 
 @pytest.fixture
-def sample_backtest_results_factory(db_session: Session):
+def sample_backtest_results_factory(
+    db_session: Session,
+) -> Callable[..., list[BacktestResult]]:
     """
     Factory fixture for creating backtest result records.
 
@@ -28,7 +31,9 @@ def sample_backtest_results_factory(db_session: Session):
         sample_backtest_results_factory(count=30, backtest_run_id=uuid4())
     """
 
-    def _create_backtest_results(count: int = 30, backtest_run_id=None):
+    def _create_backtest_results(
+        count: int = 30, backtest_run_id: UUID | None = None
+    ) -> list[BacktestResult]:
         if backtest_run_id is None:
             backtest_run_id = uuid4()
 
@@ -90,8 +95,8 @@ def sample_backtest_results_factory(db_session: Session):
 async def test_fetch_backtest_metrics_success(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given there is a backtest run with 30 results
     And each result has all 4 PnL strategies calculated
@@ -155,7 +160,7 @@ async def test_fetch_backtest_metrics_success(
 async def test_fetch_backtest_metrics_empty_data(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the backtest_results table is empty
     When I send GET /api/backtesting/metrics
@@ -179,8 +184,8 @@ async def test_fetch_backtest_metrics_empty_data(
 async def test_fetch_backtest_metrics_date_filter(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given backtest results from May 1-30 (30 days)
     When I send GET /api/backtesting/metrics?start=2024-05-10&end=2024-05-20
@@ -232,7 +237,7 @@ async def test_fetch_backtest_metrics_date_filter(
 async def test_calculate_win_rate(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with mixed wins and losses
     When the dashboard calculates Win Rate for each strategy
@@ -293,7 +298,7 @@ async def test_calculate_win_rate(
 async def test_calculate_max_drawdown(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with PnL values: [100, -450, 200, -30, 150]
     When the dashboard calculates Max Drawdown
@@ -347,7 +352,7 @@ async def test_calculate_max_drawdown(
 async def test_best_and_worst_day(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with PnL values: [100, -50, 320, -30, 150]
     When the dashboard displays Best/Worst Day
@@ -401,8 +406,8 @@ async def test_best_and_worst_day(
 async def test_backtesting_dashboard_page_loads(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given there is a backtest run with results
     When I navigate to GET /backtesting
@@ -429,7 +434,7 @@ async def test_backtesting_dashboard_page_loads(
 async def test_backtesting_dashboard_empty_state(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the backtest_results table is empty
     When I visit /backtesting
@@ -452,7 +457,7 @@ async def test_backtesting_dashboard_empty_state(
 async def test_fetch_most_recent_backtest_run(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given there are 2 backtest runs (run_1 created yesterday, run_2 created today)
     When I send GET /api/backtesting/metrics

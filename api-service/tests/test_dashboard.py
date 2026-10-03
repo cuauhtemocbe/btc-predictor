@@ -7,15 +7,17 @@ Tests the GET / endpoint that renders the dashboard HTML:
 - Dashboard displays model name and version
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
+from soup_helpers import attribute, find_tag
 from sqlalchemy.orm import Session
 
-from shared.db.models import Prediction
+from shared.db.models import Model, Prediction
 
 
 # Gherkin Scenario 1: Render dashboard with predictions
@@ -23,8 +25,8 @@ from shared.db.models import Prediction
 async def test_dashboard_with_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 10 evaluated records
     When I navigate to GET /
@@ -92,7 +94,7 @@ async def test_dashboard_with_predictions(
 async def test_dashboard_with_no_data(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the predictions table is empty
     When I navigate to GET /
@@ -128,8 +130,8 @@ async def test_dashboard_with_no_data(
 async def test_dashboard_shows_model_name(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given a prediction was made by model "linear_v1"
     When I navigate to GET /
@@ -163,8 +165,8 @@ async def test_dashboard_shows_model_name(
 async def test_dashboard_direction_indicators(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that direction correctness is visualized with checkmarks and X marks.
     """
@@ -199,8 +201,8 @@ async def test_dashboard_direction_indicators(
 async def test_dashboard_stats_summary(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that dashboard shows summary statistics cards.
     """
@@ -222,7 +224,9 @@ async def test_dashboard_stats_summary(
     assert len(stat_cards) == 4, "Should show 4 stat cards"
 
     # Verify stat labels
-    stat_labels = [card.find(class_="stat-label").get_text() for card in stat_cards]
+    stat_labels = [
+        find_tag(card, class_="stat-label").get_text() for card in stat_cards
+    ]
     expected_labels = [
         "Total Predictions",
         "Correct Direction",
@@ -234,7 +238,7 @@ async def test_dashboard_stats_summary(
         assert expected in stat_labels, f"Missing stat card: {expected}"
 
     # Verify first stat shows total count
-    first_value = stat_cards[0].find(class_="stat-value").get_text()
+    first_value = find_tag(stat_cards[0], class_="stat-value").get_text()
     assert "10" in first_value, "Total predictions should be 10"
 
 
@@ -243,7 +247,7 @@ async def test_dashboard_stats_summary(
 async def test_dashboard_responsive_meta_tag(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Verify that dashboard includes viewport meta tag for responsive design.
     """
@@ -256,7 +260,7 @@ async def test_dashboard_responsive_meta_tag(
     # Find viewport meta tag
     viewport = soup.find("meta", attrs={"name": "viewport"})
     assert viewport is not None, "Dashboard should have viewport meta tag"
-    assert "width=device-width" in viewport.get("content", "")
+    assert "width=device-width" in attribute(viewport, "content")
 
 
 # Gherkin: Redundant non-color signal for PnL indicators (accessibility)
@@ -264,8 +268,8 @@ async def test_dashboard_responsive_meta_tag(
 async def test_pnl_glyphs_are_redundant_non_color_signal(
     client: AsyncClient,
     db_session: Session,
-    sample_model,
-):
+    sample_model: Model,
+) -> None:
     """
     Given a strategy row with total_pnl >= 0 and another with total_pnl < 0
     When dashboard.html renders the positive-pnl/negative-pnl cells
