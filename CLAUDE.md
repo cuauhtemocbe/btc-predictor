@@ -75,7 +75,7 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 - **Stored data:** one closed UTC daily bar per symbol in `prices` (`symbol`, `timestamp` = 00:00 UTC open, OHLCV, `source`), UNIQUE on `(symbol, timestamp)`.
 - **History:** `scripts/load_binance_history.py` loads the monthly files once (`BTCUSDT` from 2017-08, `PAXGUSDT` from 2020-08), verifying each SHA256 checksum.
 - **Daily ingest:** `fetch-price` (6am UTC) reads the `daily/` file of each symbol and falls back to REST if the file is not published yet. It backfills missed days and never stores the still-open day.
-- **No intraday data is stored.** The spike on whether to add 1h/15m data is #109.
+- **No intraday data is stored.** The spike on 1h data (#109, `docs/spikes/109-intraday-prediction.md`) found a ~1 pp direction edge worth ~2 bps per trade against 20 bps of fees, so intraday was dropped.
 
 ### 6. Daily Bars and Return-Based Features
 

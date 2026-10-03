@@ -151,7 +151,7 @@ Cómo leerlo:
 - **Ninguna ventaja es significativa.** Un +0.51 pp sobre 974 días es indistinguible de ruido, y con 100 días una diferencia de varios puntos también lo es.
 - **El PnL positivo del test largo no es mérito del modelo.** El mercado subió en ese periodo; always-up (comprar y mantener) gana casi lo mismo ($36,298 contra $38,486), y el modelo pierde dinero en el tramo de validación mientras always-up gana.
 - **Las exactitudes rondan el 50%** porque la dirección diaria de BTC es casi un volado; la referencia histórica de 2017 a 2026 es 51.1% para always-up y 46.5% para persistence.
-- **Limitaciones:** un solo modelo, una sola semilla, un solo activo (`BTCUSDT`), sin fees en el PnL simple ni costos de slippage. No hay resultados de LSTM, XGBoost ni ARIMA (desactivados hasta #124) y no se probaron frecuencias intradía (spike [#109](https://github.com/cuauhtemocbe/btc-predictor/issues/109)).
+- **Limitaciones:** un solo modelo, una sola semilla, un solo activo (`BTCUSDT`), sin fees en el PnL simple ni costos de slippage. No hay resultados de LSTM, XGBoost ni ARIMA (desactivados hasta #124) y la frecuencia horaria se probó y se descartó: la ventaja de dirección es de ~1 pp pero vale ~2 bps por operación contra 20 bps de comisiones ([spike #109](docs/spikes/109-intraday-prediction.md)).
 
 Para reproducirlo:
 
