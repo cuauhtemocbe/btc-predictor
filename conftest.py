@@ -51,50 +51,6 @@ def _point_tests_at_test_database() -> None:
     os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
 
 
-NON_LINEAR_SKIP_REASON = (
-    "Out of scope for the Linear-only reboot; re-enable with "
-    "--run-non-linear (tracked in #124)"
-)
-
-
-# These modules import TensorFlow/XGBoost/statsmodels at the top, so merely
-# collecting them costs ~20 s even when every test in them is skipped.
-NON_LINEAR_MODULES = frozenset(
-    {
-        "test_lstm_model.py",
-        "test_xgboost_model.py",
-        "test_arima_model.py",
-        "test_all_models.py",
-    }
-)
-
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--run-non-linear",
-        action="store_true",
-        default=False,
-        help="Run the LSTM/XGBoost/ARIMA tests disabled during the reboot (#124)",
-    )
-
-
-def pytest_ignore_collect(collection_path, config):
-    """Do not even import the non-linear test modules unless asked to."""
-    if config.getoption("--run-non-linear"):
-        return None
-    return collection_path.name in NON_LINEAR_MODULES or None
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip tests marked ``non_linear`` unless --run-non-linear is given."""
-    if config.getoption("--run-non-linear"):
-        return
-    skip = pytest.mark.skip(reason=NON_LINEAR_SKIP_REASON)
-    for item in items:
-        if "non_linear" in item.keywords:
-            item.add_marker(skip)
-
-
 _limit_threads_per_xdist_worker()
 _point_tests_at_test_database()
 

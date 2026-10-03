@@ -1,9 +1,10 @@
 """
-LSTM model for BTC price prediction.
+LSTM model for BTC next-day return prediction.
 
 This module implements a concrete ML model using LSTM (Long Short-Term Memory)
-neural networks with Keras/TensorFlow. LSTM excels at capturing temporal
-patterns and dependencies in sequential data like time series.
+neural networks with Keras/TensorFlow, over the return features of
+``shared.features``. LSTM excels at capturing temporal patterns and dependencies
+in sequential data like time series.
 """
 
 import pickle
@@ -34,14 +35,18 @@ from workers.daily.models.base import BaseModel  # noqa: E402
 
 class LSTMModel(BaseModel):
     """
-    LSTM model for predicting next-day BTC close price.
+    LSTM model over a sliding window of features.
 
-    Uses a sliding window approach where the last N days of close prices
-    are fed into an LSTM neural network to predict the next day's close price.
-    LSTM networks can capture temporal dependencies and patterns in sequential data.
+    Like ``LinearRegressionModel`` it is agnostic to what the columns mean: the
+    feature columns are fed to the LSTM as a sequence of ``n_features`` steps with
+    one channel. The trainers give it the return features of shared.features and a
+    log-return target, so predict() returns a log return (it is not clipped at
+    zero, because returns can be negative); the predictor turns it into a price
+    with shared.features.price_from_return().
 
     Attributes:
         window_days: Number of historical days used as features (default: 30)
+        n_features: Number of feature columns (default: window_days)
         lstm_units: Number of LSTM units in the layer (default: 50)
         dropout: Dropout rate for regularization (default: 0.2)
         epochs: Number of training epochs (default: 50)
@@ -58,11 +63,11 @@ class LSTMModel(BaseModel):
         >>> X = np.array([prices[i:i+30] for i in range(30)])
         >>> y = np.array([prices[i+30] for i in range(30)])
         >>>
-        >>> # Train and predict
+        >>> # Train and predict (with raw windows and a price target the
+        >>> # prediction is a price; with shared.features it is a log return)
         >>> model.train(X, y)
         >>> X_new = prices[-30:].reshape(1, -1)
-        >>> predicted_price = model.predict(X_new)
-        >>> print(f"Predicted: ${predicted_price:.2f}")
+        >>> prediction = model.predict(X_new)
         >>>
         >>> # Serialize for storage
         >>> model_bytes = model.serialize()
@@ -76,6 +81,7 @@ class LSTMModel(BaseModel):
         dropout: float = 0.2,
         epochs: int = 50,
         batch_size: int = 32,
+        n_features: int | None = None,
     ):
         """
         Initialize a new LSTMModel.
@@ -87,6 +93,9 @@ class LSTMModel(BaseModel):
             dropout: Dropout rate (0.0 to 0.9). Default is 0.2.
             epochs: Number of training epochs. Must be >= 1. Default is 50.
             batch_size: Batch size for training. Must be >= 1. Default is 32.
+            n_features: Number of feature columns. Defaults to window_days (one
+                        column per day). Models trained on the return features of
+                        shared.features pass feature_count(window_days).
 
         Raises:
             ValueError: If any hyperparameter is out of valid range.
@@ -107,6 +116,7 @@ class LSTMModel(BaseModel):
             raise ValueError("batch_size must be >= 1")
 
         self.window_days = window_days
+        self.n_features = window_days if n_features is None else n_features
         self.lstm_units = lstm_units
         self.dropout = dropout
         self.epochs = epochs
@@ -124,8 +134,8 @@ class LSTMModel(BaseModel):
         """
         model = keras.Sequential(
             [
-                # Input layer: (batch_size, window_days, 1) for time series
-                layers.Input(shape=(self.window_days, 1)),
+                # Input layer: (batch_size, n_features, 1) for time series
+                layers.Input(shape=(self.n_features, 1)),
                 # LSTM layer with dropout for regularization
                 layers.LSTM(units=self.lstm_units, dropout=self.dropout),
                 # Output layer: single neuron for regression
@@ -143,10 +153,9 @@ class LSTMModel(BaseModel):
         Train the model with historical price data.
 
         Args:
-            X: Feature matrix of shape (n_samples, window_days).
-               Each row contains window_days consecutive close prices.
-            y: Target vector of shape (n_samples,).
-               Each value is the next day's close price.
+            X: Feature matrix of shape (n_samples, n_features).
+            y: Target vector of shape (n_samples,): the next day's log return
+               (or price, with raw close windows).
 
         Raises:
             ValueError: If X or y have invalid shapes.
@@ -173,10 +182,9 @@ class LSTMModel(BaseModel):
                 f"Got X.shape[0]={X.shape[0]}, y.shape[0]={y.shape[0]}"
             )
 
-        if X.shape[1] != self.window_days:
+        if X.shape[1] != self.n_features:
             raise ValueError(
-                f"X must have {self.window_days} features (window_days), "
-                f"got {X.shape[1]}"
+                f"X must have {self.n_features} features, got {X.shape[1]}"
             )
 
         # Check for insufficient data
@@ -199,12 +207,12 @@ class LSTMModel(BaseModel):
         if np.isinf(y).any():
             raise ValueError("y contains infinite values")
 
-        # Reshape X for LSTM: (n_samples, window_days) -> (n_samples, window_days, 1)
-        X_reshaped = X.reshape(X.shape[0], X.shape[1], 1)
+        # Reshape X for LSTM: (n_samples, n_features) -> (n_samples, n_features, 1)
+        x_reshaped = X.reshape(X.shape[0], X.shape[1], 1)
 
         # Train the model (verbose=0 to suppress output)
         self.model.fit(
-            X_reshaped,
+            x_reshaped,
             y,
             epochs=self.epochs,
             batch_size=self.batch_size,
@@ -216,14 +224,13 @@ class LSTMModel(BaseModel):
 
     def predict(self, X: npt.NDArray[np.float64]) -> float:
         """
-        Predict the next day's BTC close price.
+        Predict the target of the next day.
 
         Args:
-            X: Feature vector of shape (1, window_days) or (window_days,).
-               Contains the most recent window_days close prices.
+            X: Feature vector of shape (1, n_features) or (n_features,).
 
         Returns:
-            Predicted close price as a float (in USD).
+            Predicted next-day log return (a price with raw close windows).
 
         Raises:
             ValueError: If model is not trained yet.
@@ -233,28 +240,27 @@ class LSTMModel(BaseModel):
             >>> model = LSTMModel(window_days=30)
             >>> # ... train model first ...
             >>> last_30_days = np.random.rand(1, 30) * 50000
-            >>> predicted_price = model.predict(last_30_days)
-            >>> assert predicted_price > 0
+            >>> prediction = model.predict(last_30_days)
         """
         # Check if model is trained
         if not self._is_trained:
             raise ValueError("Model must be trained before making predictions")
 
-        # Reshape if needed (accept both (window_days,) and (1, window_days))
+        # Reshape if needed (accept both (n_features,) and (1, n_features))
         if X.ndim == 1:
-            if X.shape[0] != self.window_days:
+            if X.shape[0] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[0]}"
+                    f"X must have {self.n_features} features, got {X.shape[0]}"
                 )
             X = X.reshape(1, -1)
         elif X.ndim == 2:
             if X.shape[0] != 1:
                 raise ValueError(
-                    f"X must have shape (1, {self.window_days}), got {X.shape}"
+                    f"X must have shape (1, {self.n_features}), got {X.shape}"
                 )
-            if X.shape[1] != self.window_days:
+            if X.shape[1] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[1]}"
+                    f"X must have {self.n_features} features, got {X.shape[1]}"
                 )
         else:
             raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
@@ -266,17 +272,12 @@ class LSTMModel(BaseModel):
         if np.isinf(X).any():
             raise ValueError("X contains infinite values")
 
-        # Reshape for LSTM: (1, window_days) -> (1, window_days, 1)
-        X_reshaped = X.reshape(1, self.window_days, 1)
+        # Reshape for LSTM: (1, n_features) -> (1, n_features, 1)
+        x_reshaped = X.reshape(1, self.n_features, 1)
 
-        # Make prediction (verbose=0 to suppress output)
-        prediction = self.model.predict(X_reshaped, verbose=0)[0][0]
-
-        # Ensure prediction is positive (prices cannot be negative)
-        # Neural networks can output any value, so we need to clip
-        prediction = max(0.0, float(prediction))
-
-        return prediction
+        # Make prediction (verbose=0 to suppress output). Not clipped: a log
+        # return is negative on a down day.
+        return float(self.model.predict(x_reshaped, verbose=0)[0][0])
 
     def serialize(self) -> bytes:
         """
@@ -307,6 +308,7 @@ class LSTMModel(BaseModel):
             state = {
                 "weights": weights,
                 "window_days": self.window_days,
+                "n_features": self.n_features,
                 "lstm_units": self.lstm_units,
                 "dropout": self.dropout,
                 "epochs": self.epochs,
@@ -369,6 +371,7 @@ class LSTMModel(BaseModel):
             dropout=state["dropout"],
             epochs=state["epochs"],
             batch_size=state["batch_size"],
+            n_features=state.get("n_features"),
         )
 
         # Restore weights

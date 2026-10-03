@@ -217,3 +217,12 @@ def test_the_report_of_a_cron_run_shows_seed_and_retrain_every(
     out = capsys.readouterr().out
     assert "seed: 42" in out
     assert "retrain every: 1" in out
+
+
+def test_the_cron_backtests_the_linear_model(cron):
+    # Given the cron passes no --model, the script default decides the model
+    argv = cron(history(1000))
+
+    # Then it is the linear model that production trains (#124)
+    assert "--model" not in " ".join(argv)
+    assert worker_script.parse_arguments(argv[1:]).model == "linear"

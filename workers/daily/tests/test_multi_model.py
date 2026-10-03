@@ -233,7 +233,6 @@ class TestCheckExistingPrediction:
 class TestMultiModelPrediction:
     """Integration tests for multi-model prediction mode."""
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_generates_predictions_from_all_active_models(
         self,
         db_session: Session,
@@ -292,7 +291,6 @@ class TestMultiModelPrediction:
         predictions = db_session.query(Prediction).all()
         assert len(predictions) == 1
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_idempotency_with_multi_model(
         self,
         db_session: Session,
@@ -330,7 +328,6 @@ class TestMultiModelPrediction:
         predictions_count_2 = db_session.query(Prediction).count()
         assert predictions_count_2 == 2  # No duplicates
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_all_models_use_same_input_features(
         self,
         db_session: Session,

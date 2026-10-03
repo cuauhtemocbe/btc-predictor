@@ -20,7 +20,7 @@ from workers.daily.models.factory import (
 )
 
 
-def test_model_names_are_the_four_production_models():
+def test_model_names_are_the_four_model_families():
     assert MODEL_NAMES == ("linear", "xgboost", "lstm", "arima")
 
 
@@ -47,8 +47,9 @@ def test_model_name_matching_is_exact_not_by_prefix():
 
 def test_instantiate_model_matches_what_the_trainer_does_for_each_class():
     class Plain(BaseModel):
-        def __init__(self, window_days: int):
+        def __init__(self, window_days: int, n_features: int):
             self.window_days = window_days
+            self.n_features = n_features
 
         def train(self, X, y):  # pragma: no cover - not exercised
             ...
@@ -66,12 +67,12 @@ def test_instantiate_model_matches_what_the_trainer_does_for_each_class():
         def is_trained(self):  # pragma: no cover - not exercised
             ...
 
-    assert instantiate_model(Plain, "custom", 30, 61).window_days == 30
+    plain = instantiate_model(Plain, "custom", 30, 61)
+    assert (plain.window_days, plain.n_features) == (30, 61)
     linear = instantiate_model(LinearRegressionModel, "linear", 30, 61)
     assert (linear.window_days, linear.n_features) == (30, 61)
 
 
-@pytest.mark.non_linear
 @pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
 def test_every_model_name_resolves_to_a_base_model(name):
     model = build_model(name, 21, feature_count(21))
@@ -80,11 +81,18 @@ def test_every_model_name_resolves_to_a_base_model(name):
     assert type(model) is model_class_for(name)
 
 
-@pytest.mark.non_linear
-def test_arima_is_built_with_the_production_order():
+def test_arima_is_built_with_the_return_order_and_the_feature_count():
     model = build_model("arima", 21, feature_count(21))
 
-    assert model.order == (5, 1, 0)
+    assert model.order == (5, 0, 0)
+    assert (model.window_days, model.n_features) == (21, feature_count(21))
+
+
+@pytest.mark.parametrize("name", ["xgboost", "lstm"])
+def test_xgboost_and_lstm_are_built_with_the_feature_count(name):
+    model = build_model(name, 21, feature_count(21))
+
+    assert (model.window_days, model.n_features) == (21, feature_count(21))
 
 
 def test_building_linear_does_not_import_the_heavy_libraries():

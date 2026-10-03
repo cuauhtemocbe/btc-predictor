@@ -10,7 +10,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
-from shared.features import build_training_set, feature_count
+from shared.features import (
+    FeatureSet,
+    build_prediction_features,
+    build_training_set,
+    feature_count,
+)
 from workers.daily.models import LinearRegressionModel
 
 
@@ -100,6 +105,39 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
     return synthetic_prices_60_days[-30:].reshape(1, -1)
 
 
+RETURN_WINDOW = 10
+RETURN_FEATURES = feature_count(RETURN_WINDOW)
+
+
+def _return_walk(days: int = 120) -> tuple[np.ndarray, np.ndarray]:
+    """Closes and volumes of a noisy random walk (daily log returns ~ 2%)."""
+    rng = np.random.default_rng(7)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, days)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, days))
+    return closes, volumes
+
+
+@pytest.fixture
+def return_training_set() -> FeatureSet:
+    """Return features and next-day log return targets, as the trainers build them.
+
+    ``RETURN_WINDOW`` days of window give ``RETURN_FEATURES`` columns; 120 days of
+    history give 109 samples.
+    """
+    closes, volumes = _return_walk()
+    return build_training_set(closes, volumes, RETURN_WINDOW)
+
+
+@pytest.fixture
+def latest_return_features() -> np.ndarray:
+    """Features of the latest day, shape (1, RETURN_FEATURES), as the predictor gets.
+
+    Built with build_prediction_features, the code the predictor runs.
+    """
+    closes, volumes = _return_walk()
+    return build_prediction_features(closes, volumes, RETURN_WINDOW)
+
+
 # ============================================================================
 # Predictor test fixtures
 # ============================================================================
@@ -113,6 +151,14 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
 # Training happens ONCE per module, but each test gets a fresh DB record.
 
 
+def _cached_return_training_set(window_days: int) -> FeatureSet:
+    """Return features and log-return targets of a noisy 120-day series."""
+    rng = np.random.default_rng(42)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
+    return build_training_set(closes, volumes, window_days)
+
+
 @pytest.fixture(scope="module")
 def cached_linear_artifact() -> bytes:
     """
@@ -121,13 +167,8 @@ def cached_linear_artifact() -> bytes:
     Trains the model ONCE and caches the serialized bytes.
     Tests use this to create fresh DB records without re-training.
     """
-    # Return features of a noisy 120-day series (log-return target)
-    rng = np.random.default_rng(42)
-    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
-    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
-
     window_days = 30
-    training_set = build_training_set(closes, volumes, window_days)
+    training_set = _cached_return_training_set(window_days)
 
     # Train model ONCE
     lr_model = LinearRegressionModel(
@@ -147,25 +188,16 @@ def cached_xgboost_artifact() -> bytes:
     Trains the model ONCE and caches the serialized bytes.
     Tests use this to create fresh DB records without re-training.
     """
-    # Generate training data (same as sliding_window_data fixture)
-    base_prices = np.linspace(50000, 51500, 60)
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
-
     window_days = 30
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
+    training_set = _cached_return_training_set(window_days)
 
     # Train model ONCE
     from workers.daily.models import XGBoostModel  # heavy import, only if used
 
-    xgb_model = XGBoostModel(window_days=30)
-    xgb_model.train(X, y)
+    xgb_model = XGBoostModel(
+        window_days=window_days, n_features=feature_count(window_days)
+    )
+    xgb_model.train(training_set.X, training_set.y)
 
     # Return serialized bytes (cached for all tests in this module)
     return xgb_model.serialize()
@@ -179,25 +211,16 @@ def cached_lstm_artifact() -> bytes:
     Trains the model ONCE and caches the serialized bytes.
     Tests use this to create fresh DB records without re-training.
     """
-    # Generate training data (same as sliding_window_data fixture)
-    base_prices = np.linspace(50000, 51500, 60)
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
-
     window_days = 30
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
+    training_set = _cached_return_training_set(window_days)
 
     # Train model ONCE
     from workers.daily.models import LSTMModel  # heavy import, only if used
 
-    lstm_model = LSTMModel(window_days=30, epochs=10)
-    lstm_model.train(X, y)
+    lstm_model = LSTMModel(
+        window_days=window_days, n_features=feature_count(window_days), epochs=10
+    )
+    lstm_model.train(training_set.X, training_set.y)
 
     # Return serialized bytes (cached for all tests in this module)
     return lstm_model.serialize()
@@ -253,7 +276,13 @@ def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) ->
     model_record = Model(
         name="xgboost_v1",
         version="1.0.0",
-        params={"window_days": 30, "n_estimators": 100, "learning_rate": 0.1},
+        params={
+            "window_days": 30,
+            "horizon_days": 1,
+            "target": "log_return",
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+        },
         artifact=cached_xgboost_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),

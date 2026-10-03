@@ -120,7 +120,7 @@ btc-predictor/
 
 - **Datos:** una vela diaria cerrada (UTC) por símbolo, de [data.binance.vision](https://data.binance.vision). Es gratis, trae volumen y tiene historial desde 2017-08 (BTC) y 2020-08 (PAXG). La fuente anterior se reemplazó (#102) porque solo daba 30 días de historial y no traía volumen.
 - **Features:** `W` retornos logarítmicos rezagados, su desviación estándar (volatilidad) y `W` cambios logarítmicos de volumen. `W` es `TRAINING_WINDOW_DAYS` (21 por defecto).
-- **Modelo:** regresión lineal que predice el retorno logarítmico del día siguiente; el precio predicho es `último cierre × exp(retorno predicho)`. XGBoost, LSTM y ARIMA existen pero están desactivados hasta la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124).
+- **Modelo:** regresión lineal que predice el retorno logarítmico del día siguiente; el precio predicho es `último cierre × exp(retorno predicho)`. XGBoost, LSTM y ARIMA están readaptados a los mismos features y target (issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124)), pero los crons siguen entrenando y prediciendo solo con regresión lineal.
 - **Evaluación honesta:** cada exactitud o PnL se muestra junto a tres baselines (*always-up*, *persistence* y *buy-and-hold*) sobre los mismos días, con el tamaño de muestra, la ventaja (edge) y un p-value binomial. El backtest usa el mismo código de features y modelos que producción y separa un tramo de validación de un tramo de test que nunca se usa para decidir nada.
 - **Oro vía PAXG:** Binance no tiene un par de oro spot (XAU). El dashboard muestra el oro con `PAXGUSDT`, el token PAX Gold (1 token = 1 onza troy de oro físico), que opera 24/7. Es un **proxy**, no XAU spot: puede cotizar con una prima o descuento sobre el oro y sigue el horario y la liquidez de un exchange de cripto, no el fixing de Londres. Su historial es más corto (desde 2020-08). Los workers `daily` y `weekly` solo entrenan y predicen `BTCUSDT`; PAXG se ingesta y se muestra en el dashboard.
 
@@ -151,7 +151,7 @@ Cómo leerlo:
 - **Ninguna ventaja es significativa.** Un +0.51 pp sobre 974 días es indistinguible de ruido, y con 100 días una diferencia de varios puntos también lo es.
 - **El PnL positivo del test largo no es mérito del modelo.** El mercado subió en ese periodo; always-up (comprar y mantener) gana casi lo mismo ($36,298 contra $38,486), y el modelo pierde dinero en el tramo de validación mientras always-up gana.
 - **Las exactitudes rondan el 50%** porque la dirección diaria de BTC es casi un volado; la referencia histórica de 2017 a 2026 es 51.1% para always-up y 46.5% para persistence.
-- **Limitaciones:** un solo modelo, una sola semilla, un solo activo (`BTCUSDT`), sin fees en el PnL simple ni costos de slippage. No hay resultados de LSTM, XGBoost ni ARIMA (desactivados hasta #124) y la frecuencia horaria se probó y se descartó: la ventaja de dirección es de ~1 pp pero vale ~2 bps por operación contra 20 bps de comisiones ([spike #109](docs/spikes/109-intraday-prediction.md)).
+- **Limitaciones:** un solo modelo, una sola semilla, un solo activo (`BTCUSDT`), sin fees en el PnL simple ni costos de slippage. No hay resultados de LSTM, XGBoost ni ARIMA (están en el código, pero producción solo usa regresión lineal) y la frecuencia horaria se probó y se descartó: la ventaja de dirección es de ~1 pp pero vale ~2 bps por operación contra 20 bps de comisiones ([spike #109](docs/spikes/109-intraday-prediction.md)).
 
 Para reproducirlo:
 
@@ -462,6 +462,7 @@ def db_session():
     session.rollback()  # Deshace cambios después del test
     session.close()
 
+
 @pytest.fixture
 def sample_data(db_session):
     """Crea datos de prueba, auto-eliminados al terminar"""
@@ -599,7 +600,7 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 - **Target:** retorno logarítmico del día siguiente
 - **Librería:** scikit-learn
 
-**Futuros modelos:** XGBoost, LSTM y ARIMA (gracias a `BaseModel` abstract) vuelven en la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124).
+**Otros modelos:** XGBoost, LSTM y ARIMA (gracias a `BaseModel` abstract) están readaptados en la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124); `scripts/train_all_models.py` los entrena a mano y los crons no los usan.
 
 ### Estrategia PnL
 

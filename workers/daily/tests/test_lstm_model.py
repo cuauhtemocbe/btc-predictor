@@ -7,7 +7,7 @@ This test suite validates all Gherkin acceptance criteria from US-023 for LSTM:
 3. Serialize and deserialize correctly
 4. Training time < 5 min for 90 days
 5. Loss decreases during training (convergence)
-6. Valid predictions (> 0, within sanity bounds)
+6. Valid predictions (a finite log return, negative ones included)
 """
 
 import pickle
@@ -17,8 +17,6 @@ import numpy as np
 import pytest
 
 from workers.daily.models import BaseModel, LSTMModel
-
-pytestmark = pytest.mark.non_linear
 
 
 class TestLSTMModel:
@@ -84,41 +82,51 @@ class TestLSTMModel:
         # Then: Model is trained successfully
         assert model.is_trained
 
-    def test_lstm_predict_returns_valid_float(self, sliding_window_data, last_30_days):
+    def test_lstm_predict_returns_valid_float(
+        self, return_training_set, latest_return_features
+    ):
         """
-        Gherkin Scenario: LSTM produces valid predictions
+        Gherkin Scenario: LSTM predicts the next-day log return
 
-        Given a trained LSTM model
-        And input features X with shape (1, 30)
-        When I call model.predict(X)
-        Then it returns a single float prediction
-        And the prediction is > 0 (price cannot be negative)
-        And the prediction is within 50% of the last known price (sanity check)
+        Given a trained LSTM model on return features and log return targets
+        When I call model.predict(X) with the features of the latest day
+        Then it returns a finite float log return
+        And the return is small (a day moves a few percent, not a price)
         """
-        # Given: Trained model
-        X, y = sliding_window_data
-        model = LSTMModel(window_days=30, epochs=10)  # Reduced for speed
+        # Given: Trained model on the return features of shared.features
+        X, y = return_training_set.X, return_training_set.y
+        model = LSTMModel(window_days=10, n_features=X.shape[1], epochs=10)
         model.train(X, y)
         assert model.is_trained
 
-        # When: Predict with new data
-        X_new = last_30_days
-        assert X_new.shape == (1, 30)
+        # When: Predict with the features of the latest day
+        predicted_return = model.predict(latest_return_features)
 
-        predicted_price = model.predict(X_new)
+        # Then: Returns a valid log return, not a price level
+        assert isinstance(predicted_return, float)
+        assert np.isfinite(predicted_return)
+        assert abs(predicted_return) < 1.0
 
-        # Then: Returns valid float
-        assert isinstance(predicted_price, float)
-        assert predicted_price >= 0  # Price must be non-negative
+    def test_lstm_prediction_is_not_clipped_at_zero(
+        self, return_training_set, latest_return_features, monkeypatch
+    ):
+        """
+        Gherkin Scenario: LSTM can predict a down day
 
-        # Note: With minimal training data (30 samples, 10 epochs), LSTM may
-        # not converge properly and could predict near-zero or unrealistic values.
-        # In production with full dataset (365+ days, 50+ epochs), predictions
-        # will be in proper range.
-        # Just verify it returns a valid float >= 0 for this test
-        # (actual prediction quality is tested in integration tests with more data)
+        Given a trained LSTM model whose network outputs a negative return
+        When I call model.predict(X)
+        Then the negative log return is returned as is
+        """
+        X, y = return_training_set.X, return_training_set.y
+        model = LSTMModel(window_days=10, n_features=X.shape[1], epochs=1)
+        model.train(X, y)
+        monkeypatch.setattr(model.model, "predict", lambda *_, **__: [[-0.03]])
 
-    def test_lstm_serialize_deserialize(self, sliding_window_data, last_30_days):
+        assert model.predict(latest_return_features) == pytest.approx(-0.03)
+
+    def test_lstm_serialize_deserialize(
+        self, return_training_set, latest_return_features
+    ):
         """
         Gherkin Scenario: LSTM model serializes and deserializes correctly
 
@@ -130,8 +138,8 @@ class TestLSTMModel:
         And predictions from the deserialized model match the original
         """
         # Given: Trained model
-        X, y = sliding_window_data
-        original_model = LSTMModel(window_days=30, epochs=10)
+        X, y = return_training_set.X, return_training_set.y
+        original_model = LSTMModel(window_days=10, n_features=X.shape[1], epochs=10)
         original_model.train(X, y)
 
         # When: Serialize
@@ -148,14 +156,14 @@ class TestLSTMModel:
         # Then: Returns trained model instance
         assert isinstance(restored_model, LSTMModel)
         assert restored_model.is_trained
-        assert restored_model.window_days == 30
+        assert restored_model.window_days == 10
+        assert restored_model.n_features == X.shape[1]
         assert restored_model.lstm_units == 50
 
         # Verify predictions match (allow small float differences)
-        X_new = last_30_days
-        original_prediction = original_model.predict(X_new)
-        restored_prediction = restored_model.predict(X_new)
-        assert np.isclose(original_prediction, restored_prediction, rtol=1e-3)
+        original_prediction = original_model.predict(latest_return_features)
+        restored_prediction = restored_model.predict(latest_return_features)
+        assert np.isclose(original_prediction, restored_prediction, atol=1e-6)
 
     @pytest.mark.slow
     def test_lstm_training_time_90_days(self):
@@ -188,6 +196,41 @@ class TestLSTMModel:
             f"Training took {training_time:.2f}s, expected < 300s"
         )
         assert model.is_trained
+
+    def test_trains_on_the_return_features_of_the_reboot(self, return_training_set):
+        """
+        Gherkin Scenario: LSTM trains on the reboot features and target
+
+        Given the return features of shared.features (2 * window + 1 columns)
+        And the next-day log return as target
+        When I train an LSTMModel built with that feature count
+        Then it trains, although the width differs from window_days
+        """
+        X, y = return_training_set.X, return_training_set.y
+        assert X.shape[1] == 2 * 10 + 1
+
+        model = LSTMModel(window_days=10, n_features=X.shape[1], epochs=2)
+        model.train(X, y)
+
+        assert model.is_trained
+        assert model.n_features == 21
+
+    def test_default_feature_count_is_the_window(self):
+        """Without n_features the model expects one column per day, as before."""
+        assert LSTMModel(window_days=30).n_features == 30
+
+    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+        """An artifact saved before n_features existed loads with n_features=window."""
+        X, y = sliding_window_data
+        model = LSTMModel(window_days=30, epochs=1)
+        model.train(X, y)
+        state = pickle.loads(model.serialize())
+        del state["n_features"]
+
+        restored = LSTMModel.deserialize(pickle.dumps(state))
+
+        assert restored.n_features == 30
+        assert restored.is_trained
 
 
 class TestLSTMModelEdgeCases:
