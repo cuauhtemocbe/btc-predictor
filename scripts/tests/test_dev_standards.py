@@ -83,7 +83,12 @@ def test_mypy_strict_configured_for_shared():
         "shared/shared",
         "shared/btc_shared",
         "shared/tests",
+        "workers",
+        "api",
+        "scripts",
     ]
+    # Test code outside shared/ is not type-checked yet (documented debt)
+    assert any("/tests/" in pattern for pattern in mypy_config["exclude"])
 
     test_overrides = [
         o for o in pyproject["tool"]["mypy"]["overrides"] if o["module"] == "tests.*"

@@ -1,8 +1,12 @@
+import re
+import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
-WORKFLOWS = Path(__file__).parents[2] / ".github" / "workflows"
+REPO_ROOT = Path(__file__).parents[2]
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 
 def read_workflow(name: str) -> str:
@@ -23,10 +27,77 @@ def test_ci_runs_docker_quality_gate_on_push_and_pull_request():
     assert "pull_request:" in workflow
     assert "branches:" in workflow
     assert "docker compose up -d --wait" in workflow
-    assert "ruff check shared api workers" in workflow
-    assert "ruff format --check shared api workers" in workflow
     assert "python -m mypy" in workflow
     assert "pytest --cov" in workflow
+
+
+PRODUCTION_PACKAGES = ["shared", "api", "workers", "scripts"]
+MYPY_PATHS = [
+    "shared/shared",
+    "shared/btc_shared",
+    "shared/tests",
+    "workers",
+    "api",
+    "scripts",
+]
+
+
+def tokens_after(command: str, marker: str) -> list[str]:
+    """The words that follow ``marker`` in a shell command."""
+    assert marker in command, f"{marker!r} not in {command!r}"
+    return command.split(marker, 1)[1].split()
+
+
+def test_ci_lints_and_formats_every_production_package():
+    # Scenario "CI checks all production packages"
+    runs = quality_runs()
+    lint = next(run for run in runs if "ruff check" in run)
+    fmt = next(run for run in runs if "ruff format --check" in run)
+
+    assert tokens_after(lint, "ruff check") == PRODUCTION_PACKAGES
+    assert tokens_after(fmt, "ruff format --check") == PRODUCTION_PACKAGES
+
+
+def test_ci_type_checks_every_production_package():
+    # Scenario "CI checks all production packages"
+    mypy = next(run for run in quality_runs() if "python -m mypy" in run)
+
+    assert tokens_after(mypy, "python -m mypy") == MYPY_PATHS
+
+
+def test_ci_and_pyproject_type_check_the_same_paths():
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+
+    assert pyproject["tool"]["mypy"]["files"] == MYPY_PATHS
+
+
+def test_the_local_gate_matches_ci_static_checks():
+    validate = " ".join((REPO_ROOT / "scripts" / "validate.sh").read_text().split())
+    mypy_hook = " ".join(
+        (REPO_ROOT / "scripts" / "hooks" / "run-mypy.sh").read_text().split()
+    )
+
+    assert " ".join(PRODUCTION_PACKAGES) in validate
+    assert "ruff format --check " + " ".join(PRODUCTION_PACKAGES) in validate
+    assert " ".join(MYPY_PATHS) in validate
+    assert " ".join(MYPY_PATHS) in mypy_hook
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "shared/shared/utils.py",
+        "api-service/api/main.py",
+        "workers/daily/trainer.py",
+        "scripts/backtest_engine.py",
+    ],
+)
+def test_pre_commit_lints_and_type_checks_every_production_package(path):
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
+    hooks = {h["id"]: h for repo in config["repos"] for h in repo["hooks"]}
+
+    for hook_id in ("ruff", "ruff-format", "mypy-docker"):
+        assert re.search(hooks[hook_id]["files"], path), (hook_id, path)
 
 
 def test_ci_checks_per_module_coverage_right_after_the_coverage_run():

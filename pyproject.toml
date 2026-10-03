@@ -149,10 +149,29 @@ plugins = ["pydantic.mypy"]
 # "btc_shared.*" and shared/tests/* as "tests.*" without adding __init__.py
 # files there (which would break pytest test collection for sibling
 # "tests" dirs elsewhere in the monorepo, e.g. workers/daily/tests).
-mypy_path = "shared"
+mypy_path = "shared:api"
 explicit_package_bases = true
-files = ["shared/shared", "shared/btc_shared", "shared/tests"]
-exclude = ["shared/alembic/", "shared/\\.venv/", "shared/poetry\\.lock"]
+files = [
+    "shared/shared",
+    "shared/btc_shared",
+    "shared/tests",
+    "workers",
+    "api",
+    "scripts",
+]
+exclude = [
+    "shared/alembic/",
+    "shared/\\.venv/",
+    "shared/poetry\\.lock",
+    # Test code of the workers, the API and the scripts is not type-checked yet
+    # (hundreds of untyped fixtures and test functions); shared/tests is.
+    "^(workers/[^/]+|api|api-service|scripts)/tests/",
+]
+
+[[tool.mypy.overrides]]
+# These libraries ship neither stubs nor a py.typed marker.
+module = ["sklearn.*", "statsmodels.*", "xgboost.*", "tensorflow.*", "keras.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"

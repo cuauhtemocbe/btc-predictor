@@ -34,15 +34,18 @@ jobs:
         run: docker compose up -d --wait
 
       - name: Run Ruff lint
-        run: docker compose exec -T api ruff check shared api workers
+        run: docker compose exec -T api ruff check shared api workers scripts
 
       - name: Check Ruff formatting
-        run: docker compose exec -T api ruff format --check shared api workers
+        run: docker compose exec -T api ruff format --check shared api workers scripts
 
+      # shared, workers, api and scripts: all production packages, strict.
+      # The test code of workers, api and scripts is left out (see
+      # [tool.mypy] exclude in pyproject.toml); shared/tests is checked.
       - name: Run mypy strict checks
         run: >-
           docker compose exec -T api python -m mypy
-          shared/shared shared/btc_shared shared/tests
+          shared/shared shared/btc_shared shared/tests workers api scripts
 
       - name: Run tests with coverage
         run: >-

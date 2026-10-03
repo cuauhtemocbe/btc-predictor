@@ -235,9 +235,10 @@ docker compose exec api pytest -n auto
 
 GitHub Actions ejecuta la misma validación dentro de Docker en cada push y pull request:
 
-- Ruff lint y formato
-- mypy estricto sobre `shared/`
+- Ruff lint y formato sobre `shared`, `api`, `workers` y `scripts`
+- mypy estricto sobre `shared`, `workers`, `api` y `scripts` (sin los tests de workers, api y scripts)
 - pytest con cobertura mínima del proyecto
+- Cobertura mínima por módulo crítico (`[tool.coverage_thresholds]` en `pyproject.toml`)
 - Reporte de cobertura como artefacto del workflow
 
 El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
