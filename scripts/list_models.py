@@ -18,6 +18,7 @@ Usage:
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 # Add parent directory to path to allow imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def format_validation_error(params: dict) -> str:
+def format_validation_error(params: dict[str, Any]) -> str:
     """Format validation error from params dict."""
     if "validation_error_pct" in params:
         return f"{params['validation_error_pct']:.2f}%"

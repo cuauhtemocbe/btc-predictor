@@ -140,10 +140,11 @@ class ARIMAModel(BaseModel):
         self.seasonal_order = seasonal_order
         self.window_days = window_days
         self.n_features = n_features
-        self.model = None
-        self.fitted_model = None
+        self.model: Any = None
+        self.fitted_model: Any = None
         self._is_trained = False
-        self._training_data = None  # Return series the model was fitted on
+        # Return series the model was fitted on
+        self._training_data: npt.NDArray[np.float64] | None = None
 
     def train(self, X: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> None:
         """

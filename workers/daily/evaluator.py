@@ -22,6 +22,7 @@ import sys
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from itertools import groupby
+from typing import TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -154,6 +155,8 @@ def fetch_actual_price(
     result = session.execute(stmt).first()
 
     if result:
+        price: Decimal
+        timestamp: datetime
         price, timestamp = result
         logger.info(
             f"Fetched actual price for {target_date}: ${price} (timestamp: {timestamp})"
@@ -218,9 +221,21 @@ def calculate_direction_correct(
         return actual_price < price_at_prediction
 
 
+class EvaluationMetrics(TypedDict):
+    """The values ``update_prediction`` writes on an evaluated prediction."""
+
+    error_abs: Decimal
+    error_pct: Decimal
+    direction_correct: bool
+    pnl_simulated: Decimal
+    pnl_long_short: Decimal
+    pnl_threshold: Decimal
+    pnl_realistic: Decimal
+
+
 def calculate_metrics(
     prediction: Prediction, actual_price: Decimal
-) -> dict[str, Decimal | bool]:
+) -> EvaluationMetrics:
     """
     Calculate all evaluation metrics for a prediction.
 
@@ -309,7 +324,7 @@ def update_prediction(
     session: Session,
     prediction: Prediction,
     actual_price: Decimal,
-    metrics: dict[str, Decimal | bool],
+    metrics: EvaluationMetrics,
 ) -> None:
     """
     Update a prediction record with evaluation results.
