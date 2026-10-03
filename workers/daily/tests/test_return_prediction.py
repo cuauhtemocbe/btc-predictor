@@ -88,6 +88,24 @@ class TestLinearModelTrainsOnReturns:
         restored = LinearRegressionModel.deserialize(model.artifact)
         assert restored.n_features == features.feature_count(21)
 
+    def test_the_daily_cron_trains_only_the_linear_model(
+        self, use_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """LSTM, XGBoost and ARIMA are re-enabled in train_all_models (#124), but
+        the cron's trainer.main must keep training Linear Regression only."""
+
+        def forbidden(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("the daily cron must not train non-linear models")
+
+        monkeypatch.setattr(trainer, "train_all_models", forbidden)
+        monkeypatch.setattr(trainer, "model_registry", forbidden)
+        _add_random_walk(use_session, 300)
+
+        exit_code = trainer.main()
+
+        assert exit_code == 0
+        assert [m.name for m in use_session.query(Model)] == ["linear_v1"]
+
     def test_trainer_feeds_return_features_not_price_levels(
         self, use_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -337,6 +337,11 @@ def model_registry(days_available: int) -> dict[str, type[BaseModel]]:
     ARIMA requires at least 60 days of data. The LSTM, XGBoost and ARIMA
     classes are imported here, not at module level, because importing them
     loads TensorFlow, XGBoost and statsmodels.
+
+    Only ``train_all_models`` uses this registry, and only
+    ``scripts/train_all_models.py`` (a manual run) calls that. The crons do not:
+    ``main()`` here and the weekly trainer train the linear model alone, so
+    production does not train or predict with the other models (#124).
     """
     from workers.daily.models import ARIMAModel, LSTMModel, XGBoostModel
 
