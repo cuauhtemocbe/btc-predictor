@@ -73,7 +73,6 @@ def test_instantiate_model_matches_what_the_trainer_does_for_each_class():
     assert (linear.window_days, linear.n_features) == (30, 61)
 
 
-@pytest.mark.non_linear
 @pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
 def test_every_model_name_resolves_to_a_base_model(name):
     model = build_model(name, 21, feature_count(21))
@@ -82,7 +81,6 @@ def test_every_model_name_resolves_to_a_base_model(name):
     assert type(model) is model_class_for(name)
 
 
-@pytest.mark.non_linear
 def test_arima_is_built_with_the_return_order_and_the_feature_count():
     model = build_model("arima", 21, feature_count(21))
 
@@ -90,7 +88,6 @@ def test_arima_is_built_with_the_return_order_and_the_feature_count():
     assert (model.window_days, model.n_features) == (21, feature_count(21))
 
 
-@pytest.mark.non_linear
 @pytest.mark.parametrize("name", ["xgboost", "lstm"])
 def test_xgboost_and_lstm_are_built_with_the_feature_count(name):
     model = build_model(name, 21, feature_count(21))

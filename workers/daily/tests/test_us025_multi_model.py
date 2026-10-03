@@ -53,7 +53,7 @@ def three_active_models(
     model1 = Model(
         name="linear_v1",
         version="1.0.0",
-        params={"window_days": 30},
+        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
         artifact=cached_linear_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
@@ -67,7 +67,12 @@ def three_active_models(
     model2 = Model(
         name="xgboost_v1",
         version="1.0.0",
-        params={"window_days": 30, "n_estimators": 100},
+        params={
+            "window_days": 30,
+            "horizon_days": 1,
+            "target": "log_return",
+            "n_estimators": 100,
+        },
         artifact=cached_xgboost_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
@@ -81,7 +86,12 @@ def three_active_models(
     model3 = Model(
         name="lstm_v1",
         version="1.0.0",
-        params={"window_days": 30, "epochs": 10},
+        params={
+            "window_days": 30,
+            "horizon_days": 1,
+            "target": "log_return",
+            "epochs": 10,
+        },
         artifact=cached_lstm_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=date.today() - timedelta(days=60),
@@ -108,7 +118,6 @@ def three_active_models(
 class TestMultiModelPredictions:
     """Test that multi-model mode generates predictions from ALL active models."""
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_mode_generates_predictions_for_all_active_models(
         self,
         db_session: Session,
@@ -181,7 +190,6 @@ class TestMultiModelPredictions:
 class TestCLIFlag:
     """Test that --multi-model flag controls behavior correctly."""
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_single_model_mode_uses_only_first_active_model(
         self,
         db_session: Session,
@@ -223,7 +231,6 @@ class TestCLIFlag:
         finally:
             predictor.parse_args = original_parse_args
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_flag_enabled_uses_all_active_models(
         self,
         db_session: Session,
@@ -368,7 +375,6 @@ class TestEvaluatorMultiModel:
 class TestMultiModelFailureHandling:
     """Test that multi-model mode handles individual model failures gracefully."""
 
-    @pytest.mark.non_linear  # XGBoost/LSTM predict on returns after #124
     def test_multi_model_handles_individual_model_failure(
         self,
         db_session: Session,

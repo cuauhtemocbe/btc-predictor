@@ -18,8 +18,6 @@ import pytest
 
 from workers.daily.models import BaseModel, LSTMModel
 
-pytestmark = pytest.mark.non_linear
-
 
 class TestLSTMModel:
     """Tests for LSTMModel implementation."""

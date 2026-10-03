@@ -16,8 +16,6 @@ import pytest
 
 from workers.daily.models import ARIMAModel, BaseModel
 
-pytestmark = pytest.mark.non_linear
-
 
 class TestARIMAModel:
     """Tests for ARIMAModel implementation."""

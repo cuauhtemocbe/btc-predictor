@@ -67,8 +67,8 @@ class _BrokenModel(LinearRegressionModel):
 def model_registry(monkeypatch):
     """Replace the trained models with cheap ones (no TensorFlow/XGBoost).
 
-    The real LSTM/XGBoost/ARIMA are covered by their own tests
-    (``--run-non-linear``, #124); these tests are about the orchestration.
+    The real LSTM/XGBoost/ARIMA are covered by their own tests and by
+    ``test_train_all_models_success``; these tests are about the orchestration.
     Returns the registry dict so a test can add models to it.
     """
     registry = {"linear": LinearRegressionModel, "biased": _BiasedModel}
@@ -195,7 +195,6 @@ class TestTrainSingleModel:
 class TestTrainAllModels:
     """Test train_all_models function."""
 
-    @pytest.mark.non_linear
     def test_train_all_models_success(self, db_session, sample_prices):
         """
         Gherkin Scenario: The trainer covers every enabled model again
@@ -300,7 +299,6 @@ class TestTrainAllModels:
         with pytest.raises(ValueError, match=r"need 110 daily rows.*have 29"):
             train_all_models(db_session)
 
-    @pytest.mark.non_linear
     def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
         """
         Gherkin Scenario: ARIMA is excluded below its minimum data threshold

@@ -20,8 +20,6 @@ from workers.daily.models import (
     XGBoostModel,
 )
 
-pytestmark = pytest.mark.non_linear
-
 WINDOW_DAYS = 10
 N_FEATURES = 2 * WINDOW_DAYS + 1
 
