@@ -4,20 +4,14 @@
 
 **BTC Predictor** is a data science web application that predicts Bitcoin's price for the next day using machine learning models. It tracks predictions, calculates historical errors, and simulates profit/loss (PnL) based on predicted direction.
 
-**Status:** ✅ **All User Stories Complete** (US-001 to US-024 implemented and deployed to Railway)
-
 ---
 
 ## Tech Stack
 
-- **Language:** Python 3.13
-- **Framework:** FastAPI + Jinja2 (HTML templates)
-- **Database:** PostgreSQL + SQLAlchemy 2.0 + Alembic (migrations)
-- **ML:** scikit-learn (Linear Regression on log returns), pandas, numpy. XGBoost, LSTM and ARIMA are re-enabled in code and tests (#124) but the crons train and predict with Linear Regression only.
-- **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback. Free, no API key.
-- **Assets:** `BTCUSDT` and `PAXGUSDT` (proxy for gold, see Design Decision 6)
-- **Deployment:** Railway (6 services: postgres, api, fetch-price, daily, weekly and monthly-backtest crons)
-- **Dependency Management:** Poetry (workspace with 3 packages: shared, api-service, workers)
+Python 3.13, FastAPI + Jinja2, PostgreSQL + SQLAlchemy 2.0 + Alembic, Poetry workspace (shared, api-service, workers). Versions and dependencies are in the `pyproject.toml` files.
+
+- **ML:** the crons train and predict with Linear Regression only. XGBoost, LSTM and ARIMA are enabled in code and tests (#124).
+- **Data:** Binance only, free, no API key (Design Decision 5). Assets: `BTCUSDT` and `PAXGUSDT` (gold proxy, Design Decision 6b).
 
 ---
 
@@ -25,19 +19,6 @@
 
 **For complete architecture details and implementation history, see:**
 - `docs/archive/specs/IMPLEMENTATION_HISTORY.md` — Full implementation journey, decisions, and lessons learned
-
-**Key structure:**
-
-```
-btc-predictor/
-├── shared/              # Common package (config, DB, utils)
-├── api-service/         # Web service (always on)
-└── workers/
-    ├── fetch_price/     # Daily cron: ingest the closed daily bar of each symbol
-    ├── daily/           # Daily cron: evaluate → train → predict (1d horizon)
-    ├── weekly/          # Weekly cron: evaluate → train → predict (7d horizon)
-    └── backtest/        # Monthly cron: production-parity walk-forward backtest
-```
 
 **Railway Services:**
 - `postgres` — Shared database
@@ -98,20 +79,8 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 
 ### 8. Docker Image Hardening
 
-- **Production `Dockerfile`:** base image pinned by immutable `sha256` digest
-  (`python:3.13-slim@sha256:...`) so prod builds are byte-for-byte
-  reproducible and can't silently pick up an upstream base image change.
-- **`Dockerfile.dev`:** intentionally keeps the floating `python:3.13-slim`
-  tag — dev images rebuild often and should track the latest patch release
-  instead of requiring a manual digest bump for every security fix.
-- **API healthcheck:** the `api` stage of `Dockerfile` (and the `api`
-  service in `docker-compose.yml`) declare a `HEALTHCHECK` against the
-  existing `GET /health` endpoint (`api-service/api/main.py`), using
-  Python's stdlib `urllib` since the slim base image ships neither `curl`
-  nor `wget`.
-- **`fetch` and `ml-worker` stages:** intentionally have no `HEALTHCHECK` —
-  they're one-shot Railway cron jobs, not long-running processes, so there's
-  nothing for a container healthcheck to probe.
+- The production `Dockerfile` pins the base image by `sha256` digest so builds are reproducible. `Dockerfile.dev` keeps the floating `python:3.13-slim` tag on purpose: dev images should track patch releases.
+- The `api` stage has a `HEALTHCHECK` on `GET /health` using stdlib `urllib` (the slim image ships neither `curl` nor `wget`). The `fetch` and `ml-worker` stages have none on purpose: they are one-shot cron jobs.
 
 ---
 
@@ -151,158 +120,23 @@ docker compose exec api pytest workers/daily/tests/
 docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
 ```
 
-**Current Coverage:** 95% across all packages
-
-### Per-module coverage thresholds (#68)
-
-The global `--cov-fail-under=90` can hide a weak module, so each critical module also has its own
-minimum in `[tool.coverage_thresholds]` of `pyproject.toml` (keys are repo-relative paths, values are
-percent). `scripts/check_coverage_thresholds.py` reads the `coverage.xml` of the full run and exits
-non-zero naming every module that is below its minimum or absent from the report (a worker no test
-imports counts as missing). It runs in CI right after the coverage step and at the end of
-`scripts/validate.sh` (pre-push), on the same `coverage.xml`, so the suite is never run twice.
-
-```bash
-# Same sequence as CI
-docker compose exec api pytest --cov --cov-report=term-missing --cov-report=xml:/tmp/coverage.xml
-docker compose exec api python scripts/check_coverage_thresholds.py /tmp/coverage.xml
-```
-
-- **Setting a value:** measure the module, then take the largest multiple of 5 at least 2 points below it.
-  Raise it after adding tests (same rule). Never lower it to pass: add the tests or explain the drop in the PR.
-- **When it fails:** the `FAIL` rows and the last lines name the module, its coverage and its minimum.
-  `not in the coverage report` means no test imports it or its path in the config is wrong (renames:
-  update the key; `scripts/tests/test_check_coverage_thresholds.py` fails on orphan keys).
-- **New critical module:** add its path to the table; `api/` paths in `coverage.xml` are mapped to `api-service/`.
-
-### Test Performance
-
-**Execution Time:** ~94 seconds (1 min 34 seg) for 515 tests
-
-**Optimizations Applied** (May 2026):
-- ✅ **Cached model artifacts** (module-scoped): Linear, XGBoost, LSTM models train ONCE per test module instead of per test
-- ✅ **Cached price data** (module-scoped): Pre-calculated price datasets (180-720 records) generated once per module
-- ✅ **Pytest markers**: Registered `slow`, `integration`, `unit`, `db` for selective test execution
-
-**Performance History:**
-- Baseline (May 23, 2026): 127.74s (2 min 7 seg)
-- After optimization (May 24, 2026): 93.67s (1 min 33 seg)
-- **Improvement**: 26.7% faster ⚡
-
-**Commands:**
-```bash
-# Run all tests (optimized)
-docker compose exec api pytest
-
-# Run without slow tests (faster feedback)
-docker compose exec api pytest -m "not slow"
-```
+Per-module coverage minimums live in `[tool.coverage_thresholds]` of `pyproject.toml`; the rules for setting them are in `scripts/CLAUDE.md`.
 
 ### Mutation Testing (Advanced Quality Check)
 
-Mutation testing evaluates test **quality**, not just coverage. It introduces bugs (mutations) in code and checks if tests detect them.
-
-**Framework:** Cosmic Ray 8.3 (configured in `cosmic-ray.toml` and `pyproject.toml`)
-
-```bash
-# IMPORTANT: All commands run inside api container
-docker compose exec api <command>
-
-# Initialize mutation testing session
-cosmic-ray init cosmic-ray.toml session.sqlite
-
-# Execute mutation testing (run mutants against tests)
-cosmic-ray exec cosmic-ray.toml session.sqlite
-
-# Generate report
-cr-report session.sqlite
-
-# View detailed results
-cr-html session.sqlite > mutation-report.html
-
-# Continue interrupted session
-cosmic-ray exec cosmic-ray.toml session.sqlite --no-local-import
-
-# Baseline test (verify tests pass before mutating)
-cosmic-ray --verbosity=INFO baseline cosmic-ray.toml
-```
-
-**How it works:**
-1. Cosmic Ray changes code (e.g., `>` → `>=`, `True` → `False`, remove lines)
-2. Runs tests against each mutated version
-3. ✅ **Mutant killed** = Tests detected the bug (good)
-4. ❌ **Mutant survived** = Tests didn't detect the bug (bad - need more tests)
-
-**Metrics Goal:**
-- Coverage: >90% ✅
-- Mutation Score: >85% (target)
-
-**Latest Results:** 100% mutation score on `shared/db/crud.py` (274/274 mutants killed - see `mutation_testing_report.md`)
+Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85%. Latest: 100% on `shared/db/crud.py` (274/274 mutants killed, see `mutation_testing_report.md`).
 
 ---
 
 ## Development Philosophy: Container-First
 
-**IMPORTANT:** All development and testing MUST be done inside Docker containers.
-
-### Why Containers?
-
-- **Consistency:** Same environment for all developers and CI/CD
-- **No "works on my machine":** Postgres version, Python version, dependencies are identical
-- **Production parity:** Development environment matches Railway deployment
-
-### DO NOT:
-❌ Install Python dependencies locally (`poetry install` on host)  
-❌ Run pytest on host machine  
-❌ Run migrations from host  
-❌ Install PostgreSQL on host
-
-### DO:
-✅ Execute all commands via `docker compose exec`  
-✅ Use volumes for code hot-reload  
-✅ Keep host machine clean (only Docker, IDE, git)
+**IMPORTANT:** All development and testing MUST be done inside Docker containers (`docker compose exec ...`): never `poetry install`, pytest, migrations or PostgreSQL on the host. See Anti-patterns below.
 
 ---
 
 ## Git Hooks (Pre-commit Framework)
 
-**IMPORTANT:** This project uses [pre-commit](https://pre-commit.com/) framework for git hooks.
-
-### First-time Setup (per developer)
-
-```bash
-# Install pre-commit (only once per machine)
-pip install pre-commit
-
-# Install git hooks (only once per repo clone)
-pre-commit install --install-hooks
-pre-commit install --hook-type pre-push
-```
-
-### What Gets Checked Automatically
-
-**Pre-commit** (runs on `git commit`):
-- ✅ Ruff lint (auto-fixes when possible)
-- ✅ Ruff format (code style)
-
-**Pre-push** (runs on `git push`):
-- ✅ Pytest with 90% coverage requirement
-- ✅ Auto-starts Docker Compose if needed
-
-### Manual Hook Execution
-
-```bash
-# Run all pre-commit hooks manually
-pre-commit run --all-files
-
-# Run only pre-push hooks (tests)
-pre-commit run --hook-stage push --all-files
-
-# Update hook versions
-pre-commit autoupdate
-```
-
-See `scripts/hooks/README.md` for full documentation.
+Hooks come from the pre-commit framework (`.pre-commit-config.yaml`): ruff lint and format on commit, pytest with 90% coverage on push. Once per clone: `pre-commit install --install-hooks && pre-commit install --hook-type pre-push`. Full documentation: `scripts/hooks/README.md`.
 
 ---
 
@@ -330,11 +164,8 @@ docker compose build
 ### Testing (inside container)
 
 ```bash
-# Run all tests (inside api container)
-docker compose exec api pytest
-
-# Run tests with coverage
-docker compose exec api pytest --cov --cov-report=term-missing
+# Skip slow tests (faster feedback)
+docker compose exec api pytest -m "not slow"
 
 # Run tests in parallel with pytest-xdist. Each worker gets its own database
 # (btcpredictor_test_gw0, _gw1, ...); serial runs use btcpredictor_test.
@@ -358,26 +189,12 @@ docker compose exec api ruff check shared api workers scripts
 # Format code
 docker compose exec api ruff format shared api workers scripts
 
-# Types: mypy --strict on shared, workers, api and scripts (test code of
-# workers/api/scripts is excluded, shared/tests is checked)
+# Types: mypy --strict on shared, workers, api and scripts. Test code is
+# checked everywhere except scripts/tests (still excluded, #158)
 docker compose exec api python -m mypy shared/shared shared/btc_shared shared/tests workers api scripts
 ```
 
-### Database Migrations (inside container)
-
-```bash
-# Run migrations
-docker compose exec api sh -c "cd shared && alembic upgrade head"
-
-# Create new migration
-docker compose exec api sh -c "cd shared && alembic revision --autogenerate -m 'description'"
-
-# Downgrade migration
-docker compose exec api sh -c "cd shared && alembic downgrade -1"
-
-# View migration history
-docker compose exec api sh -c "cd shared && alembic history"
-```
+Migration commands (`alembic upgrade head`, `revision --autogenerate`): see `shared/CLAUDE.md`.
 
 ### Manual Job Execution (inside container)
 
@@ -387,16 +204,6 @@ docker compose exec api python -m workers.fetch_price.main
 
 # Manually run daily job
 docker compose exec api python -m workers.daily
-```
-
-### Shell Access (for debugging)
-
-```bash
-# Open shell inside api container
-docker compose exec api bash
-
-# Open PostgreSQL psql shell
-docker compose exec postgres psql -U btcpredictor -d btcpredictor
 ```
 
 ### Railway Deploy
@@ -434,8 +241,8 @@ require.
 
 ❌ **DON'T** run pytest or any commands directly on host (always use `docker compose exec`)  
 ❌ **DON'T** install Python dependencies on host machine  
-❌ **DON'T** duplicate database connection logic (use `shared/btc_shared/db/database.py`)  
-❌ **DON'T** hardcode configuration (use `pydantic-settings` in `shared/btc_shared/config.py`)  
+❌ **DON'T** duplicate database connection logic (use `shared/shared/db/database.py`)  
+❌ **DON'T** hardcode configuration (use `pydantic-settings` in `shared/shared/config.py`)  
 ❌ **DON'T** commit `.env` file (use `.env.example` as template)  
 ❌ **DON'T** bypass UNIQUE constraints (they're for idempotency)  
 ❌ **DON'T** skip tests ("I'll add them later" never happens)
@@ -449,33 +256,11 @@ require.
 
 ---
 
-## Project Context Links
-
-- **GitHub Repository:** https://github.com/cuauhtemocbe/btc-predictor
-- **Project Board:** https://github.com/users/cuauhtemocbe/projects/1/views/1
-- **Implementation History:** `docs/archive/specs/IMPLEMENTATION_HISTORY.md`
-- **User Stories:** GitHub Issues #2 to #17 (all closed ✅)
-- **License:** [MIT](LICENSE)
-- **Changelog:** [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format)
-
----
-
-## Owner
-
-**Name:** Cuauhtémoc (cuauhtemocbe)  
-**Email:** cuauhtemocbe@gmail.com  
-**GitHub:** https://github.com/cuauhtemocbe  
-**Timezone:** America/Mexico_City
-
----
-
 ## Notes for Future Sessions
 
 - User prefers Spanish for communication (but code/docs in English is OK)
+- Timezone: America/Mexico_City
 - User follows agile methodology with User Stories
-- All 16 User Stories (US-001 to US-016) are complete and deployed to Railway
-- User is comfortable with command-line tools (gh, docker, poetry)
-- User has engram memory plugin active (save important decisions to engram)
 
 ### Engram Memory
 
