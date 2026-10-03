@@ -95,9 +95,7 @@ markers = [
 # and apply the same rule. Never lower one to make a failing run pass: add the
 # missing tests or explain the drop in the PR.
 #
-# Not listed, on purpose: `__init__.py` files without logic, test code, and the
-# operational CLIs no test imports yet (scripts/activate_model.py,
-# scripts/list_models.py, scripts/train_all_models.py, scripts/spike_intraday.py).
+# Not listed, on purpose: `__init__.py` files without logic and test code.
 "api-service/api/main.py" = 95
 "api-service/api/models/backtesting.py" = 95
 "api-service/api/models/predictions.py" = 95
@@ -108,10 +106,13 @@ markers = [
 "api-service/api/routers/prices.py" = 95
 "api-service/api/routers/routes.py" = 95
 "api-service/api/symbols.py" = 95
+"scripts/activate_model.py" = 95
 "scripts/backtest.py" = 95
 "scripts/backtest_engine.py" = 95
 "scripts/backtest_report.py" = 90
+"scripts/list_models.py" = 95
 "scripts/load_binance_history.py" = 90
+"scripts/train_all_models.py" = 95
 "shared/btc_shared/strategies.py" = 95
 "shared/shared/assets.py" = 95
 "shared/shared/baselines.py" = 95

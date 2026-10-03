@@ -17,6 +17,7 @@ Usage:
 
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -41,13 +42,17 @@ def format_validation_error(params: dict[str, Any]) -> str:
     return "N/A"
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """
     Main entry point for list models script.
+
+    Args:
+        argv: Command-line arguments; the script takes none, so they are ignored
 
     Returns:
         Exit code (0 = success, 1 = failure)
     """
+    del argv
     session = SessionLocal()
 
     try:

@@ -601,7 +601,7 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 - **Target:** retorno logarítmico del día siguiente
 - **Librería:** scikit-learn
 
-**Otros modelos:** XGBoost, LSTM y ARIMA (gracias a `BaseModel` abstract) están readaptados en la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124); `scripts/train_all_models.py` los entrena a mano y los crons no los usan.
+**Otros modelos:** XGBoost, LSTM y ARIMA (gracias a `BaseModel` abstract) están readaptados en la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124); `scripts/train_all_models.py` los entrena a mano y los crons no los usan. El script no activa ningún modelo salvo que se pase `--activate`; sin él imprime el comando `activate_model.py` del mejor.
 
 ### Estrategia PnL
 

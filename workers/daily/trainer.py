@@ -428,6 +428,7 @@ def _next_version_number(session: Session, model_name: str) -> int:
 def train_all_models(
     session: Session,
     window_days: int | None = None,
+    activate: bool = False,
 ) -> list[Model]:
     """
     Train all available ML models with the same training data.
@@ -441,11 +442,13 @@ def train_all_models(
     4. Trains available models (3-4 models depending on data)
     5. Calculates validation error (MAPE) for each
     6. Saves all models to database with is_active=False
-    7. Activates the model with lowest validation error
+    7. Activates the model with lowest validation error, only if ``activate``
 
     Args:
         session: Database session
         window_days: Size of sliding window (settings.training_window_days if None)
+        activate: Activate the best model. Off by default so a manual run cannot
+            replace the active model (the daily predictor uses it) by accident.
 
     Returns:
         List of created Model records
@@ -562,16 +565,21 @@ def train_all_models(
         f"Best model: {best_model.name} with {best_error:.2f}% validation error"
     )
 
-    # Activate best model (commits internally, scoped to its own timeframe)
-    crud_activate_model(session, best_model.id)
-
-    logger.info(f"✓ Activated {best_model.name}")
+    if activate:
+        # Commits internally, scoped to its own timeframe
+        crud_activate_model(session, best_model.id)
+        logger.info(f"✓ Activated {best_model.name}")
+    else:
+        logger.info(
+            f"Not activating {best_model.name} (pass activate=True to activate it)"
+        )
 
     # Log summary
     logger.info("=" * 60)
     logger.info("Multi-model training summary:")
     for model_record, val_error in saved_models:
-        active_marker = "✓ ACTIVE" if model_record.id == best_model.id else ""
+        is_best = model_record.id == best_model.id
+        active_marker = "✓ ACTIVE" if activate and is_best else ""
         logger.info(f"  - {model_record.name}: {val_error:.2f}% error {active_marker}")
     logger.info("=" * 60)
 

@@ -20,6 +20,7 @@ Example:
 import argparse
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 # Add parent directory to path to allow imports
@@ -37,9 +38,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """
     Main entry point for model activation script.
+
+    Args:
+        argv: Command-line arguments (``sys.argv[1:]`` if None)
 
     Returns:
         Exit code (0 = success, 1 = failure)
@@ -52,7 +56,7 @@ def main() -> int:
         required=True,
         help="ID of the model to activate (get from list_models.py)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     model_id = args.model_id
 
@@ -72,6 +76,12 @@ def main() -> int:
         logger.info(f"  Name:      {activated_model.name}")
         logger.info(f"  Version:   {activated_model.version}")
         logger.info(f"  Trained:   {activated_model.trained_at}")
+
+        if not activated_model.name.startswith("linear"):
+            logger.warning(
+                "  The daily and weekly crons only train 'linear'; "
+                "this model will not be retrained."
+            )
 
         # Show validation error if available
         if "validation_error_pct" in activated_model.params:
