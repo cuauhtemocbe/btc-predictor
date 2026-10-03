@@ -414,9 +414,9 @@ def train_all_models(
     train_set = build_training_set(train_closes, train_volumes, window_days)
     val_set = build_training_set(val_closes, val_volumes, window_days)
     X_train, y_train = train_set.X, train_set.y
-    X_val, y_val = val_set.X, val_set.y
+    x_val, y_val = val_set.X, val_set.y
 
-    logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
+    logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(x_val)}")
 
     # Train all models
     successful_models: list[tuple[str, BaseModel, float]] = []
@@ -427,7 +427,7 @@ def train_all_models(
             model_name=model_name,
             X_train=X_train,
             y_train=y_train,
-            X_val=X_val,
+            X_val=x_val,
             y_val=y_val,
             window_days=window_days,
             base_close_val=val_set.base_close,
@@ -487,7 +487,7 @@ def train_all_models(
                 "target": LOG_RETURN_TARGET,
                 "validation_error_pct": round(validation_error, 2),
                 "training_samples": len(X_train),
-                "validation_samples": len(X_val),
+                "validation_samples": len(x_val),
             },
             artifact=model_artifact,
             trained_at=datetime.now(UTC),

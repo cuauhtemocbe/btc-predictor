@@ -2,7 +2,7 @@ IMAGE = btc-predictor
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up up-d down logs test test-v lint validate install-local test-local lint-local
+.PHONY: help build up up-d down logs test test-v lint validate sonar-coverage install-local test-local lint-local
 
 help: ## Show this help message
 	@echo "BTC Predictor"
@@ -41,6 +41,13 @@ lint: ## Lint shared/api-service/workers with ruff in Docker
 
 validate: ## Run the full local quality gate: lockfile + lint + format + tests
 	./scripts/validate.sh
+
+# api-service is mounted as /app/api in the container, so coverage reports it as
+# api/...; SonarQube needs the repo path api-service/...
+sonar-coverage: ## Write coverage.xml with repo-relative paths for SonarQube
+	docker compose up -d --wait postgres
+	docker compose run --rm api pytest --cov --cov-report=xml:coverage.xml
+	sed -i 's|filename="api/|filename="api-service/|' coverage.xml
 
 ##@ Local, no Docker, best-effort (requires Python 3.13 + Poetry active)
 

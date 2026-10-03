@@ -129,10 +129,10 @@ class TestMigration:
                 .all()
             )
         assert slices == [None]
-        with pytest.raises(IntegrityError), engine.begin() as connection:
-            connection.execute(
-                text("UPDATE backtest_results SET evaluation_slice = 'train'")
-            )
+        set_train_slice = text("UPDATE backtest_results SET evaluation_slice = 'train'")
+        transaction = engine.begin()
+        with pytest.raises(IntegrityError), transaction as connection:
+            connection.execute(set_train_slice)
 
     def test_downgrade_drops_the_column_and_upgrade_restores_it(self, migration_db):
         url, engine = migration_db

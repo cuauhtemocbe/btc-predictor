@@ -185,11 +185,13 @@ class TestChecksumVerification:
     ):
         vision.add_month("BTCUSDT", 2025, 1, checksum="0" * 64)
 
+        today = date(2025, 2, 10)
+
         with pytest.raises(ChecksumMismatchError) as error:
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
@@ -201,11 +203,13 @@ class TestChecksumVerification:
         vision.add_month("BTCUSDT", 2024, 12)
         vision.add_month("BTCUSDT", 2025, 1, checksum="f" * 64)
 
+        today = date(2025, 2, 10)
+
         with pytest.raises(ChecksumMismatchError):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2024, 12),
             )
@@ -218,11 +222,12 @@ class TestMissingAndCorruptFiles:
 
     def test_missing_month_file_raises_clear_error(self, db_session, vision):
         vision.add_month("BTCUSDT", 2025, 2)  # January is missing, February is last
+        today = date(2025, 3, 10)
         with pytest.raises(MonthFileNotFoundError, match="BTCUSDT-1d-2025-01.zip"):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 3, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
@@ -259,11 +264,13 @@ class TestMissingAndCorruptFiles:
     def test_corrupt_zip_raises_clear_error(self, db_session, vision):
         vision.add_month("BTCUSDT", 2025, 1, archive=b"this is not a zip")
 
+        today = date(2025, 2, 10)
+
         with pytest.raises(CorruptArchiveError, match="BTCUSDT-1d-2025-01.zip"):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
@@ -324,8 +331,10 @@ class TestGoldSymbol:
             load_history_calls.append(url)
             return vision(url)
 
+        today = date(2021, 1, 5)
+
         with pytest.raises(MonthFileNotFoundError):
-            load_history(db_session, "PAXGUSDT", today=date(2021, 1, 5), fetch=spy)
+            load_history(db_session, "PAXGUSDT", today=today, fetch=spy)
         assert load_history_calls[0] == month_file_url("PAXGUSDT", 2020, 8)
 
 
@@ -424,8 +433,10 @@ class TestReachability:
         def blocked(url):
             raise HttpStatusError(url, status)
 
+        today = date(2025, 6, 20)
+
         with pytest.raises(HttpStatusError) as error:
-            check_reachability(blocked, today=date(2025, 6, 20))
+            check_reachability(blocked, today=today)
         assert error.value.status == status
 
 

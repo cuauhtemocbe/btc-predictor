@@ -105,20 +105,18 @@ class TestPredictorSymbolIsolation:
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The newest row in the table is PAXG; the prediction must still be BTC."""
         _add_bar(db_session, PAXG, datetime.now(UTC), PAXG_CLOSE)
         db_session.commit()
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = lambda: Namespace(multi_model=False)
-        try:
-            assert predictor.main() == 0
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(
+            predictor, "parse_args", lambda: Namespace(multi_model=False)
+        )
+
+        assert predictor.main() == 0
 
         prediction = db_session.query(Prediction).one()
         assert prediction.price_at_prediction > 50000
@@ -145,5 +143,7 @@ class TestBacktestWindowSymbolIsolation:
         _add_daily_series(db_session, BTC, BTC_CLOSE, days=10)
         _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=290)
 
+        history = load_daily_history(db_session)
+
         with pytest.raises(InsufficientHistoryError):
-            plan_range(load_daily_history(db_session), 21)
+            plan_range(history, 21)
