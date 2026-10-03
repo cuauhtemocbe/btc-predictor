@@ -334,7 +334,7 @@ def test_one_active_version_per_name_timeframe_constraint(
 ):
     """
     Test partial unique index ix_models_one_active_version_per_name_timeframe:
-    two active rows with the same (name, timeframe) must be rejected at the
+    two active rows with the same (family, timeframe) must be rejected at the
     database level, not just by application code (issue #66).
     """
     model1 = Model(
