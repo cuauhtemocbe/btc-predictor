@@ -81,6 +81,66 @@ markers = [
     "asyncio: marks async tests (automatically detected)"
 ]
 
+[tool.coverage_thresholds]
+# Minimum line coverage, in percent, for each critical module. Checked by
+# `scripts/check_coverage_thresholds.py` against the coverage.xml of the full
+# pytest run (CI "Docker quality gate", `make validate`, pre-push hook), on top
+# of the global `--cov-fail-under` above. A module listed here that is missing
+# from the report fails the gate too (no test imports it, or it was renamed).
+#
+# Keys are repo-relative paths. How a value is chosen: measure the module, then
+# take the largest multiple of 5 that is at least 2 points below the measured
+# coverage. To raise a threshold after adding tests, re-measure with
+#   docker compose exec api pytest --cov --cov-report=xml:/tmp/coverage.xml
+# and apply the same rule. Never lower one to make a failing run pass: add the
+# missing tests or explain the drop in the PR.
+#
+# Not listed, on purpose: `__init__.py` files without logic, test code, and the
+# operational CLIs no test imports yet (scripts/activate_model.py,
+# scripts/list_models.py, scripts/train_all_models.py, scripts/spike_intraday.py).
+"api-service/api/main.py" = 95
+"api-service/api/models/backtesting.py" = 95
+"api-service/api/models/predictions.py" = 95
+"api-service/api/models/responses.py" = 95
+"api-service/api/routers/backtesting.py" = 95
+"api-service/api/routers/models.py" = 95
+"api-service/api/routers/predictions.py" = 95
+"api-service/api/routers/prices.py" = 95
+"api-service/api/routers/routes.py" = 95
+"api-service/api/symbols.py" = 95
+"scripts/backtest.py" = 95
+"scripts/backtest_engine.py" = 95
+"scripts/backtest_report.py" = 90
+"scripts/load_binance_history.py" = 90
+"shared/btc_shared/strategies.py" = 95
+"shared/shared/assets.py" = 95
+"shared/shared/baselines.py" = 95
+"shared/shared/binance_vision.py" = 95
+"shared/shared/config.py" = 95
+"shared/shared/db/crud.py" = 95
+"shared/shared/db/database.py" = 95
+"shared/shared/db/models.py" = 95
+"shared/shared/features.py" = 90
+"shared/shared/model_baselines.py" = 95
+"shared/shared/utils.py" = 95
+"workers/backtest/main.py" = 90
+"workers/daily/__main__.py" = 90
+"workers/daily/evaluator.py" = 90
+"workers/daily/models/__init__.py" = 85
+"workers/daily/models/arima_model.py" = 80
+"workers/daily/models/base.py" = 70
+"workers/daily/models/factory.py" = 95
+"workers/daily/models/linear.py" = 95
+"workers/daily/models/lstm_model.py" = 80
+"workers/daily/models/xgboost_model.py" = 80
+"workers/daily/predictor.py" = 90
+"workers/daily/trainer.py" = 90
+"workers/fetch_price/main.py" = 90
+"workers/weekly/__main__.py" = 90
+"workers/weekly/evaluator.py" = 85
+"workers/weekly/predictor.py" = 80
+"workers/weekly/trainer.py" = 90
+
 [tool.mypy]
 python_version = "3.13"
 strict = true
