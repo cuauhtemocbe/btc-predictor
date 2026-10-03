@@ -75,6 +75,11 @@ def test_gitleaks_hook_configured_in_pre_commit() -> None:
     assert "id: gitleaks" in config
 
 
+def _modules(override: dict[str, Any]) -> list[str]:
+    module = override["module"]
+    return [module] if isinstance(module, str) else list(module)
+
+
 def test_mypy_strict_configured_for_shared() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     mypy_config = pyproject["tool"]["mypy"]
@@ -92,12 +97,9 @@ def test_mypy_strict_configured_for_shared() -> None:
     # are type-checked with the rest (#158)
     assert not any("tests" in pattern for pattern in mypy_config["exclude"])
 
-    test_overrides = [
-        o for o in pyproject["tool"]["mypy"]["overrides"] if o["module"] == "tests.*"
-    ]
-    assert test_overrides, "Expected a relaxed [[tool.mypy.overrides]] for tests.*"
-    assert test_overrides[0]["disallow_untyped_defs"] is False
-    assert test_overrides[0]["strict_optional"] is False
+    # The relaxed tests.* override is gone: shared/tests is strict too (#170)
+    overrides = pyproject["tool"]["mypy"]["overrides"]
+    assert not any("tests.*" in _modules(o) for o in overrides)
 
 
 def test_mypy_hook_configured_in_pre_commit() -> None:

@@ -15,7 +15,9 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from shared.config import settings
 from shared.db.models import Price
@@ -32,7 +34,9 @@ class TestBtcPricesTableMigration:
     And (symbol, timestamp) has a UNIQUE constraint
     """
 
-    def test_migration_creates_prices_table(self, db_engine, apply_migrations):
+    def test_migration_creates_prices_table(
+        self, db_engine: Engine, apply_migrations: None
+    ) -> None:
         """Test that Alembic migration creates prices table with correct schema."""
         # Note: apply_migrations fixture ensures migrations are applied
 
@@ -82,7 +86,9 @@ class TestInsertValidRecord:
     And querying by timestamp returns the record
     """
 
-    def test_insert_valid_ohlcv_record(self, db_session, apply_migrations):
+    def test_insert_valid_ohlcv_record(
+        self, db_session: Session, apply_migrations: None
+    ) -> None:
         """Test inserting a valid OHLCV record via SQLAlchemy ORM."""
         # Arrange
         test_timestamp = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
@@ -136,8 +142,8 @@ class TestDuplicateTimestampRejected:
     """
 
     def test_duplicate_timestamp_raises_integrity_error(
-        self, db_engine, apply_migrations
-    ):
+        self, db_engine: Engine, apply_migrations: None
+    ) -> None:
         """Test that inserting duplicate timestamp raises IntegrityError."""
         from sqlalchemy.orm import sessionmaker
 
@@ -212,7 +218,9 @@ class TestDowngradeMigrationRemovesTable:
             "Tested manually."
         )
     )
-    def test_downgrade_removes_prices_table(self, db_engine, apply_migrations):
+    def test_downgrade_removes_prices_table(
+        self, db_engine: Engine, apply_migrations: None
+    ) -> None:
         """Test that downgrading migration removes prices table.
 
         NOTE: This test is skipped in automated runs because it would break
@@ -245,7 +253,9 @@ class TestDowngradeMigrationRemovesTable:
 class TestBtcPriceModelEdgeCases:
     """Additional tests for edge cases from ZOMBIES analysis."""
 
-    def test_zero_volume_is_valid(self, db_session, apply_migrations):
+    def test_zero_volume_is_valid(
+        self, db_session: Session, apply_migrations: None
+    ) -> None:
         """Test that volume=0.0 is valid (ZOMBIES: Zero case)."""
         price = Price(
             timestamp=datetime.now(UTC),
@@ -260,7 +270,9 @@ class TestBtcPriceModelEdgeCases:
         db_session.commit()
         assert price.id is not None, "Should save record with zero volume"
 
-    def test_null_timestamp_raises_error(self, db_session, apply_migrations):
+    def test_null_timestamp_raises_error(
+        self, db_session: Session, apply_migrations: None
+    ) -> None:
         """Test that NULL timestamp violates NOT NULL constraint (ZOMBIES: Exceptions)."""  # noqa: E501
         price = Price(
             timestamp=None,  # NULL timestamp should fail
@@ -278,7 +290,9 @@ class TestBtcPriceModelEdgeCases:
 
         db_session.rollback()
 
-    def test_default_source_is_binance(self, db_session, apply_migrations):
+    def test_default_source_is_binance(
+        self, db_session: Session, apply_migrations: None
+    ) -> None:
         """Test that source defaults to 'binance' if not specified."""
         # Note: SQLAlchemy requires explicit default in Python, not just DB default
         # So this test verifies the model definition includes default="binance"

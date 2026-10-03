@@ -8,12 +8,13 @@ import hashlib
 import io
 import json
 import zipfile
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from shared.binance_vision import (
     REST_SOURCE,
@@ -66,7 +67,7 @@ def _zip_bytes(day: date, volume: str = "12.5") -> bytes:
 class FakeBinance:
     """In-memory data.binance.vision and REST endpoint; records every request."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.rest_days: set[date] = set()
         self.down = False
@@ -74,7 +75,7 @@ class FakeBinance:
 
     def publish_file(
         self, day: date, symbol: str = SYMBOL, checksum: str | None = None
-    ):
+    ) -> None:
         url = daily_file_url(symbol, day)
         archive = _zip_bytes(day)
         self.files[url] = archive
@@ -96,11 +97,11 @@ class FakeBinance:
 
 
 @pytest.fixture
-def binance():
+def binance() -> FakeBinance:
     return FakeBinance()
 
 
-def _seed(db_session, day: date, symbol: str = SYMBOL):
+def _seed(db_session: Session, day: date, symbol: str = SYMBOL) -> None:
     db_session.add(
         Price(
             symbol=symbol,
@@ -116,19 +117,21 @@ def _seed(db_session, day: date, symbol: str = SYMBOL):
     db_session.commit()
 
 
-def _days(db_session, symbol: str = SYMBOL) -> list[date]:
+def _days(db_session: Session, symbol: str = SYMBOL) -> list[date]:
     stamps = db_session.execute(
         select(Price.timestamp).where(Price.symbol == symbol).order_by(Price.timestamp)
     ).scalars()
     return [stamp.astimezone(UTC).date() for stamp in stamps]
 
 
-def _count(db_session) -> int:
+def _count(db_session: Session) -> int:
     return int(db_session.execute(select(func.count()).select_from(Price)).scalar_one())
 
 
 class TestClosedBarOfYesterday:
-    def test_yesterday_is_ingested_with_volume(self, db_session, binance):
+    def test_yesterday_is_ingested_with_volume(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: The closed daily bar of yesterday is ingested."""
         yesterday = TODAY - timedelta(days=1)
         _seed(db_session, TODAY - timedelta(days=2))
@@ -147,7 +150,9 @@ class TestClosedBarOfYesterday:
         assert row.volume == Decimal("12.5")
         assert row.source == SOURCE
 
-    def test_every_symbol_gets_its_own_bar(self, db_session, binance):
+    def test_every_symbol_gets_its_own_bar(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: ... exactly one new bar ... per configured symbol."""
         yesterday = TODAY - timedelta(days=1)
         for symbol in ("BTCUSDT", "PAXGUSDT"):
@@ -163,7 +168,13 @@ class TestClosedBarOfYesterday:
 
 class TestOpenDayNeverStored:
     @pytest.mark.parametrize("hour", [0, 6, 23])
-    def test_no_bar_dated_today(self, db_session, binance, hour, monkeypatch):
+    def test_no_bar_dated_today(
+        self,
+        db_session: Session,
+        binance: FakeBinance,
+        hour: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Scenario: The current, still-open day is never stored."""
         _seed(db_session, TODAY - timedelta(days=3))
         for offset in (1, 2):
@@ -174,8 +185,8 @@ class TestOpenDayNeverStored:
 
         class _Now(datetime):
             @classmethod
-            def now(cls, tz=None):
-                return datetime(2026, 3, 10, hour, 30, tzinfo=tz)
+            def now(cls, tz: tzinfo | None = None) -> Self:
+                return cls(2026, 3, 10, hour, 30, tzinfo=tz)
 
         monkeypatch.setattr("shared.binance_vision.datetime", _Now)
         ingest_new_days(db_session, SYMBOL, fetch=binance)
@@ -185,7 +196,9 @@ class TestOpenDayNeverStored:
 
 
 class TestRestFallback:
-    def test_falls_back_when_file_is_404(self, db_session, binance):
+    def test_falls_back_when_file_is_404(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: Falls back to REST when the daily file is not published yet."""
         yesterday = TODAY - timedelta(days=1)
         _seed(db_session, TODAY - timedelta(days=2))
@@ -203,7 +216,7 @@ class TestRestFallback:
         assert row.source == REST_SOURCE
         assert row.volume == Decimal("12.5")
 
-    def test_checksum_mismatch_does_not_fall_back(self, binance):
+    def test_checksum_mismatch_does_not_fall_back(self, binance: FakeBinance) -> None:
         """A published but corrupt file is a real error, not a source switch."""
         day = TODAY - timedelta(days=1)
         binance.publish_file(day, checksum="0" * 64)
@@ -213,19 +226,21 @@ class TestRestFallback:
             fetch_day(SYMBOL, day, binance)
         assert not any("data-api" in url for url in binance.requests)
 
-    def test_rest_ignores_a_bar_of_another_day(self):
+    def test_rest_ignores_a_bar_of_another_day(self) -> None:
         day = TODAY - timedelta(days=1)
         other = json.dumps([_kline(day + timedelta(days=1))]).encode()
 
         assert fetch_day_rest(SYMBOL, day, lambda url: other) == []
 
-    def test_rest_rejects_a_malformed_answer(self):
+    def test_rest_rejects_a_malformed_answer(self) -> None:
         with pytest.raises(BinanceVisionError, match="Unexpected klines answer"):
             fetch_day_rest(SYMBOL, TODAY, lambda url: b'{"code": -1121}')
 
 
 class TestIdempotence:
-    def test_second_run_changes_nothing(self, db_session, binance):
+    def test_second_run_changes_nothing(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: Running the job twice is idempotent."""
         _seed(db_session, TODAY - timedelta(days=2))
         binance.publish_file(TODAY - timedelta(days=1))
@@ -238,7 +253,9 @@ class TestIdempotence:
 
 
 class TestBackfill:
-    def test_missed_days_are_stored(self, db_session, binance):
+    def test_missed_days_are_stored(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: A missed day is backfilled on the next run."""
         _seed(db_session, TODAY - timedelta(days=3))
         for offset in (1, 2):
@@ -252,7 +269,9 @@ class TestBackfill:
 
 
 class TestFailures:
-    def test_both_sources_down_raises(self, db_session, binance):
+    def test_both_sources_down_raises(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         """Scenario: Both sources unavailable fails the job visibly."""
         _seed(db_session, TODAY - timedelta(days=2))
         binance.down = True
@@ -260,12 +279,16 @@ class TestFailures:
         with pytest.raises(DownloadError):
             ingest_new_days(db_session, SYMBOL, TODAY, binance)
 
-    def test_missing_day_on_both_sources_raises(self, db_session, binance):
+    def test_missing_day_on_both_sources_raises(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         _seed(db_session, TODAY - timedelta(days=2))
 
         with pytest.raises(BinanceVisionError, match="no bar returned"):
             ingest_new_days(db_session, SYMBOL, TODAY, binance)
 
-    def test_symbol_without_history_raises(self, db_session, binance):
+    def test_symbol_without_history_raises(
+        self, db_session: Session, binance: FakeBinance
+    ) -> None:
         with pytest.raises(NoHistoryError, match="load_binance_history"):
             ingest_new_days(db_session, SYMBOL, TODAY, binance)

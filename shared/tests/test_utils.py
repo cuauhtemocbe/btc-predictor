@@ -5,12 +5,15 @@ Covers all Gherkin scenarios from US-013:
 - Calculate PnL for different prediction/outcome combinations
 """
 
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 
 import numpy as np
 import pytest
+from sqlalchemy.orm import Session
 
+from shared.db.models import Model, Prediction
 from shared.utils import (
     calculate_accuracy,
     calculate_mape,
@@ -33,7 +36,7 @@ from shared.utils import (
 class TestCalculatePnl:
     """Test calculate_pnl function with Gherkin scenarios and edge cases."""
 
-    def test_predicted_up_actual_up_profit(self):
+    def test_predicted_up_actual_up_profit(self) -> None:
         """
         Scenario: Predicted UP, actual UP → profit
         Given predicted_price=68000
@@ -49,7 +52,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("1500.00")
 
-    def test_predicted_up_actual_down_loss(self):
+    def test_predicted_up_actual_down_loss(self) -> None:
         """
         Scenario: Predicted UP, actual DOWN → loss
         Given predicted_price=68000
@@ -65,7 +68,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("-1000.00")
 
-    def test_predicted_down_actual_down_no_trade(self):
+    def test_predicted_down_actual_down_no_trade(self) -> None:
         """
         Scenario: Predicted DOWN, actual DOWN → no trade (0 PnL)
         Given predicted_price=66000
@@ -81,7 +84,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("0.00")
 
-    def test_predicted_down_actual_up_no_trade(self):
+    def test_predicted_down_actual_up_no_trade(self) -> None:
         """
         Scenario: Predicted DOWN, actual UP → no trade (0 PnL)
         Given predicted_price=66000
@@ -97,7 +100,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("0.00")
 
-    def test_all_prices_equal(self):
+    def test_all_prices_equal(self) -> None:
         """Edge case: All prices are equal → 0 PnL."""
         result = calculate_pnl(
             predicted_price=Decimal("67000"),
@@ -106,7 +109,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("0.00")
 
-    def test_predicted_equal_to_before(self):
+    def test_predicted_equal_to_before(self) -> None:
         """Edge case: predicted == before (no directional signal) → 0 PnL."""
         result = calculate_pnl(
             predicted_price=Decimal("67000"),
@@ -115,7 +118,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("0.00")
 
-    def test_large_profit(self):
+    def test_large_profit(self) -> None:
         """Edge case: Large price movement upward → large profit."""
         result = calculate_pnl(
             predicted_price=Decimal("70000"),
@@ -124,7 +127,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("15000.00")
 
-    def test_large_loss(self):
+    def test_large_loss(self) -> None:
         """Edge case: Large price movement downward after long → large loss."""
         result = calculate_pnl(
             predicted_price=Decimal("70000"),
@@ -133,7 +136,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("-10000.00")
 
-    def test_small_price_differences(self):
+    def test_small_price_differences(self) -> None:
         """Edge case: Very small price movements → small PnL."""
         result = calculate_pnl(
             predicted_price=Decimal("67000.50"),
@@ -142,7 +145,7 @@ class TestCalculatePnl:
         )
         assert result == Decimal("0.25")
 
-    def test_decimal_precision(self):
+    def test_decimal_precision(self) -> None:
         """Edge case: Ensure Decimal precision is maintained."""
         result = calculate_pnl(
             predicted_price=Decimal("67123.456"),
@@ -156,7 +159,7 @@ class TestCalculatePnl:
 class TestCalculatePnlLongShort:
     """Test calculate_pnl_long_short function with Gherkin scenarios from US-017."""
 
-    def test_predicted_up_actual_up_long_profit(self):
+    def test_predicted_up_actual_up_long_profit(self) -> None:
         """
         Scenario: Calculate long/short symmetric PnL - Long profit
         Given predicted_price=67000 (UP)
@@ -172,7 +175,7 @@ class TestCalculatePnlLongShort:
         )
         assert result == Decimal("1500.00")
 
-    def test_predicted_down_actual_down_short_profit(self):
+    def test_predicted_down_actual_down_short_profit(self) -> None:
         """
         Scenario: Calculate long/short symmetric PnL - Short profit
         Given predicted_price=65000 (DOWN)
@@ -189,7 +192,7 @@ class TestCalculatePnlLongShort:
         )
         assert result == Decimal("2000.00")
 
-    def test_predicted_up_actual_down_long_loss(self):
+    def test_predicted_up_actual_down_long_loss(self) -> None:
         """
         Scenario: Long position, price goes down → loss
         Given predicted_price=67000 (UP)
@@ -205,7 +208,7 @@ class TestCalculatePnlLongShort:
         )
         assert result == Decimal("-1000.00")
 
-    def test_predicted_down_actual_up_short_loss(self):
+    def test_predicted_down_actual_up_short_loss(self) -> None:
         """
         Scenario: Short position, price goes up → loss
         Given predicted_price=65000 (DOWN)
@@ -221,7 +224,7 @@ class TestCalculatePnlLongShort:
         )
         assert result == Decimal("-1000.00")
 
-    def test_all_prices_equal(self):
+    def test_all_prices_equal(self) -> None:
         """Edge case: All prices equal → 0 PnL."""
         result = calculate_pnl_long_short(
             predicted_price=Decimal("66000"),
@@ -234,7 +237,7 @@ class TestCalculatePnlLongShort:
 class TestCalculatePnlThreshold:
     """Test calculate_pnl_threshold function with Gherkin scenarios from US-017."""
 
-    def test_below_threshold_no_trade(self):
+    def test_below_threshold_no_trade(self) -> None:
         """
         Scenario: Calculate PnL with threshold (only trade if predicted change > 1%)
         Given price_at_prediction=66000
@@ -250,7 +253,7 @@ class TestCalculatePnlThreshold:
         )
         assert result == Decimal("0.00")
 
-    def test_above_threshold_long_profit(self):
+    def test_above_threshold_long_profit(self) -> None:
         """
         Scenario Outline: Calculate PnL with threshold - above threshold UP
         Given price_at_prediction=66000
@@ -267,7 +270,7 @@ class TestCalculatePnlThreshold:
         )
         assert result == Decimal("1500.00")
 
-    def test_above_threshold_short_profit(self):
+    def test_above_threshold_short_profit(self) -> None:
         """
         Scenario Outline: Calculate PnL with threshold - above threshold DOWN
         Given price_at_prediction=66000
@@ -284,7 +287,7 @@ class TestCalculatePnlThreshold:
         )
         assert result == Decimal("2000.00")
 
-    def test_exactly_at_threshold(self):
+    def test_exactly_at_threshold(self) -> None:
         """Edge case: Exactly at 1% threshold → trade executes (>= threshold)."""
         # 1% of 66000 = 660, so 66660 is exactly 1%
         result = calculate_pnl_threshold(
@@ -296,7 +299,7 @@ class TestCalculatePnlThreshold:
         # At exactly 1%, trade executes (change_pct >= threshold)
         assert result == Decimal("1000.00")
 
-    def test_custom_threshold_2_percent(self):
+    def test_custom_threshold_2_percent(self) -> None:
         """Edge case: Custom threshold of 2% filters out 1.5% moves."""
         result = calculate_pnl_threshold(
             predicted_price=Decimal("67000"),  # 1.5% change
@@ -306,7 +309,7 @@ class TestCalculatePnlThreshold:
         )
         assert result == Decimal("0.00")
 
-    def test_custom_threshold_0_5_percent(self):
+    def test_custom_threshold_0_5_percent(self) -> None:
         """Edge case: Lower threshold 0.5% allows 0.76% move."""
         result = calculate_pnl_threshold(
             predicted_price=Decimal("66500"),  # 0.76% change
@@ -320,7 +323,7 @@ class TestCalculatePnlThreshold:
 class TestCalculatePnlRealistic:
     """Test calculate_pnl_realistic function with Gherkin scenarios from US-017."""
 
-    def test_realistic_pnl_with_fees(self):
+    def test_realistic_pnl_with_fees(self) -> None:
         """
         Scenario: Calculate realistic PnL with fees and stop-loss
         Given trading fee is 0.1% per trade (entry + exit)
@@ -341,7 +344,7 @@ class TestCalculatePnlRealistic:
         # Net: 1500 - 132 = 1368
         assert result == Decimal("1368.00")
 
-    def test_realistic_pnl_applies_stop_loss(self):
+    def test_realistic_pnl_applies_stop_loss(self) -> None:
         """
         Scenario: Realistic PnL applies stop-loss when loss exceeds limit
         Given predicted_price=67000 (long position)
@@ -362,7 +365,7 @@ class TestCalculatePnlRealistic:
         # Net: -1320 - 132 = -1452
         assert result == Decimal("-1452.00")
 
-    def test_realistic_pnl_small_loss_no_stop_loss(self):
+    def test_realistic_pnl_small_loss_no_stop_loss(self) -> None:
         """
         Scenario: Small loss below stop-loss threshold
         Given predicted_price=67000 (long)
@@ -381,7 +384,7 @@ class TestCalculatePnlRealistic:
         # Net: -500 - 132 = -632
         assert result == Decimal("-632.00")
 
-    def test_realistic_pnl_short_profit(self):
+    def test_realistic_pnl_short_profit(self) -> None:
         """Edge case: Short position profit with fees."""
         result = calculate_pnl_realistic(
             predicted_price=Decimal("65000"),  # Predicted DOWN
@@ -392,7 +395,7 @@ class TestCalculatePnlRealistic:
         # Net: 2000 - 132 = 1868
         assert result == Decimal("1868.00")
 
-    def test_realistic_pnl_stop_loss_on_short(self):
+    def test_realistic_pnl_stop_loss_on_short(self) -> None:
         """Edge case: Short position with stop-loss triggered."""
         result = calculate_pnl_realistic(
             predicted_price=Decimal("65000"),  # Predicted DOWN
@@ -404,7 +407,7 @@ class TestCalculatePnlRealistic:
         # Net: -1320 - 132 = -1452
         assert result == Decimal("-1452.00")
 
-    def test_realistic_pnl_custom_fees(self):
+    def test_realistic_pnl_custom_fees(self) -> None:
         """Edge case: Custom fee percentage."""
         result = calculate_pnl_realistic(
             predicted_price=Decimal("67000"),
@@ -416,7 +419,7 @@ class TestCalculatePnlRealistic:
         # Net: 1500 - 264 = 1236
         assert result == Decimal("1236.00")
 
-    def test_realistic_pnl_custom_stop_loss(self):
+    def test_realistic_pnl_custom_stop_loss(self) -> None:
         """Edge case: Custom stop-loss percentage."""
         result = calculate_pnl_realistic(
             predicted_price=Decimal("67000"),
@@ -438,7 +441,7 @@ class TestCalculatePnlRealistic:
 class TestSplitTrainValidation:
     """Test split_train_validation function for model training."""
 
-    def test_split_train_validation_correct_sizes(self):
+    def test_split_train_validation_correct_sizes(self) -> None:
         """Test that split returns correct array sizes (70/20/10)."""
         # 100 data points → 70 train, 20 val, 10 buffer (discarded)
         prices = np.arange(100, dtype=float) + 50000  # 50000-50099
@@ -447,7 +450,7 @@ class TestSplitTrainValidation:
         assert len(train) == 70
         assert len(val) == 20
 
-    def test_split_train_validation_chronological_order(self):
+    def test_split_train_validation_chronological_order(self) -> None:
         """Test that chronological order is preserved in splits."""
         prices = np.array(
             [50000, 51000, 52000, 53000, 54000, 55000, 56000, 57000, 58000, 59000],
@@ -465,21 +468,21 @@ class TestSplitTrainValidation:
         assert val[0] == 57000
         assert val[-1] == 58000
 
-    def test_split_train_validation_raises_on_invalid_percentages(self):
+    def test_split_train_validation_raises_on_invalid_percentages(self) -> None:
         """Test that ValueError is raised if train_pct + val_pct > 1.0."""
         prices = np.arange(100, dtype=float)
 
         with pytest.raises(ValueError, match="must be <= 1.0"):
             split_train_validation(prices, train_pct=0.8, val_pct=0.5)
 
-    def test_split_train_validation_raises_on_insufficient_data(self):
+    def test_split_train_validation_raises_on_insufficient_data(self) -> None:
         """Test that ValueError is raised if < 10 data points."""
         prices = np.array([50000, 51000], dtype=float)  # Only 2 points
 
         with pytest.raises(ValueError, match="Need at least 10 data points"):
             split_train_validation(prices)
 
-    def test_split_train_validation_custom_percentages(self):
+    def test_split_train_validation_custom_percentages(self) -> None:
         """Test split with custom train/val percentages."""
         prices = np.arange(100, dtype=float)
         train, val = split_train_validation(prices, train_pct=0.6, val_pct=0.3)
@@ -487,7 +490,7 @@ class TestSplitTrainValidation:
         assert len(train) == 60
         assert len(val) == 30  # Remaining 10% discarded
 
-    def test_split_train_validation_returns_numpy_arrays(self):
+    def test_split_train_validation_returns_numpy_arrays(self) -> None:
         """Test that returned values are numpy arrays."""
         prices = np.arange(100, dtype=float)
         train, val = split_train_validation(prices)
@@ -499,7 +502,7 @@ class TestSplitTrainValidation:
 class TestCalculateMAPE:
     """Test calculate_mape function for validation error calculation."""
 
-    def test_calculate_mape_correct_value(self):
+    def test_calculate_mape_correct_value(self) -> None:
         """Test MAPE calculation with known values."""
         y_true = np.array([50000, 51000, 52000], dtype=float)
         y_pred = np.array([50500, 50800, 52100], dtype=float)
@@ -515,7 +518,7 @@ class TestCalculateMAPE:
         # = 0.01584 / 3 * 100 = 0.528%
         assert abs(mape - 0.528) < 0.01  # Allow small floating point error
 
-    def test_calculate_mape_handles_zeros(self):
+    def test_calculate_mape_handles_zeros(self) -> None:
         """Test that MAPE raises error when y_true contains zeros."""
         y_true = np.array([50000, 0, 52000], dtype=float)
         y_pred = np.array([50500, 50800, 52100], dtype=float)
@@ -523,7 +526,7 @@ class TestCalculateMAPE:
         with pytest.raises(ValueError, match="y_true contains zeros"):
             calculate_mape(y_true, y_pred)
 
-    def test_calculate_mape_perfect_prediction(self):
+    def test_calculate_mape_perfect_prediction(self) -> None:
         """Test MAPE with perfect predictions (error = 0)."""
         y_true = np.array([50000, 51000, 52000], dtype=float)
         y_pred = np.array([50000, 51000, 52000], dtype=float)
@@ -532,7 +535,7 @@ class TestCalculateMAPE:
 
         assert mape == 0.0
 
-    def test_calculate_mape_raises_on_length_mismatch(self):
+    def test_calculate_mape_raises_on_length_mismatch(self) -> None:
         """Test that ValueError is raised if array lengths differ."""
         y_true = np.array([50000, 51000], dtype=float)
         y_pred = np.array([50500, 50800, 52100], dtype=float)
@@ -540,7 +543,7 @@ class TestCalculateMAPE:
         with pytest.raises(ValueError, match="Arrays must have same length"):
             calculate_mape(y_true, y_pred)
 
-    def test_calculate_mape_raises_on_empty_arrays(self):
+    def test_calculate_mape_raises_on_empty_arrays(self) -> None:
         """Test that ValueError is raised for empty arrays."""
         y_true = np.array([], dtype=float)
         y_pred = np.array([], dtype=float)
@@ -548,7 +551,7 @@ class TestCalculateMAPE:
         with pytest.raises(ValueError, match="Cannot calculate MAPE on empty"):
             calculate_mape(y_true, y_pred)
 
-    def test_calculate_mape_returns_percentage(self):
+    def test_calculate_mape_returns_percentage(self) -> None:
         """Test that MAPE is returned on 0-100 scale."""
         y_true = np.array([50000, 50000], dtype=float)
         y_pred = np.array([51000, 49000], dtype=float)
@@ -570,8 +573,11 @@ class TestCalculateAccuracy:
     """Test calculate_accuracy function for model comparison dashboard."""
 
     def test_accuracy_with_all_correct_predictions(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test 100% accuracy when all predictions are correct."""
         model = sample_model(name="linear_v1")
 
@@ -588,8 +594,11 @@ class TestCalculateAccuracy:
         assert accuracy == 1.0  # 100%
 
     def test_accuracy_with_mixed_predictions(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test accuracy calculation with mix of correct/incorrect predictions."""
         model = sample_model(name="lstm_v1")
 
@@ -612,8 +621,11 @@ class TestCalculateAccuracy:
         assert accuracy == 0.6  # 60% (3/5)
 
     def test_accuracy_returns_none_for_no_evaluated_predictions(
-        self, db_session, sample_model, sample_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        sample_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test that None is returned when no evaluated predictions exist."""
         model = sample_model(name="xgboost_v1")
 
@@ -626,8 +638,11 @@ class TestCalculateAccuracy:
         assert accuracy is None
 
     def test_accuracy_with_date_filter(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test accuracy calculation with date range filter."""
         model = sample_model(name="arima_v1")
 
@@ -666,8 +681,11 @@ class TestCalculateModelMape:
     """Test calculate_model_mape function."""
 
     def test_mape_calculation_from_database(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test MAPE calculation from database predictions."""
         model = sample_model(name="linear_v1")
 
@@ -692,7 +710,9 @@ class TestCalculateModelMape:
         assert mape is not None
         assert 1.4 < mape < 1.6
 
-    def test_mape_returns_none_for_no_predictions(self, db_session, sample_model):
+    def test_mape_returns_none_for_no_predictions(
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         """Test that None is returned when no predictions exist."""
         model = sample_model(name="lstm_v1")
 
@@ -705,8 +725,11 @@ class TestCalculateTotalPnl:
     """Test calculate_total_pnl function."""
 
     def test_total_pnl_sums_all_predictions(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test total PnL calculation sums all predictions."""
         model = sample_model(name="xgboost_v1")
 
@@ -731,7 +754,9 @@ class TestCalculateTotalPnl:
 
         assert total_pnl == 250.0  # 100 - 50 + 200
 
-    def test_total_pnl_returns_none_for_no_predictions(self, db_session, sample_model):
+    def test_total_pnl_returns_none_for_no_predictions(
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         """Test that None is returned when no predictions exist."""
         model = sample_model(name="arima_v1")
 
@@ -740,8 +765,11 @@ class TestCalculateTotalPnl:
         assert total_pnl is None
 
     def test_total_pnl_with_date_filter(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test total PnL with date range filter."""
         model = sample_model(name="linear_v1")
 
@@ -781,7 +809,12 @@ class TestCalculateTotalPnl:
 class TestCalculateWinRate:
     """Test calculate_win_rate function."""
 
-    def test_win_rate_calculation(self, db_session, sample_model, evaluated_prediction):
+    def test_win_rate_calculation(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test win rate calculation: % of positive PnL predictions."""
         model = sample_model(name="lstm_v1")
 
@@ -817,8 +850,11 @@ class TestCalculateWinRate:
         assert win_rate == 0.6  # 60% (3/5)
 
     def test_win_rate_with_zero_pnl(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test that zero PnL counts as a loss."""
         model = sample_model(name="xgboost_v1")
 
@@ -842,8 +878,11 @@ class TestCalculateSharpeRatio:
     """Test calculate_sharpe_ratio function."""
 
     def test_sharpe_ratio_calculation(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test Sharpe ratio calculation with multiple predictions."""
         model = sample_model(name="arima_v1")
 
@@ -863,8 +902,11 @@ class TestCalculateSharpeRatio:
         assert isinstance(sharpe, float)
 
     def test_sharpe_ratio_returns_none_for_insufficient_data(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test that None is returned when < 2 predictions."""
         model = sample_model(name="linear_v1")
 
@@ -884,8 +926,11 @@ class TestCalculateMaxDrawdown:
     """Test calculate_max_drawdown function."""
 
     def test_max_drawdown_calculation(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test max drawdown calculation."""
         model = sample_model(name="lstm_v1")
 
@@ -925,8 +970,8 @@ class TestCalculateMaxDrawdown:
         assert max_dd == -120.0
 
     def test_max_drawdown_returns_none_for_no_predictions(
-        self, db_session, sample_model
-    ):
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         """Test that None is returned when no predictions exist."""
         model = sample_model(name="xgboost_v1")
 
@@ -939,8 +984,11 @@ class TestGetCumulativePnl:
     """Test get_cumulative_pnl function."""
 
     def test_cumulative_pnl_time_series(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test cumulative PnL time series generation."""
         model = sample_model(name="linear_v1")
 
@@ -969,8 +1017,8 @@ class TestGetCumulativePnl:
         assert cumulative[2] == {"date": "2024-05-03", "cumulative_pnl": 250.0}
 
     def test_cumulative_pnl_returns_empty_list_for_no_predictions(
-        self, db_session, sample_model
-    ):
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         """Test that empty list is returned when no predictions exist."""
         model = sample_model(name="arima_v1")
 
@@ -983,8 +1031,11 @@ class TestGetAllModelsMetrics:
     """Test get_all_models_metrics function."""
 
     def test_get_metrics_for_multiple_models(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Test getting metrics for all models in one call."""
         # Create 2 models with predictions
         model1 = sample_model(name="linear_v1", version="1.0.0", is_active=True)
@@ -1030,15 +1081,15 @@ class TestGetAllModelsMetrics:
         assert m2["total_pnl"] == -30.0
         assert m2["is_active"] is False
 
-    def test_get_metrics_with_no_models(self, db_session):
+    def test_get_metrics_with_no_models(self, db_session: Session) -> None:
         """Test that empty list is returned when no models exist."""
         metrics = get_all_models_metrics(db_session)
 
         assert metrics == []
 
     def test_get_metrics_handles_models_without_predictions(
-        self, db_session, sample_model
-    ):
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         """Test that models without predictions show None for metrics."""
         sample_model(name="xgboost_v1")
 
@@ -1059,7 +1110,11 @@ class TestMetricsRespectTimeframe:
     one timeframe instead of always mixing them.
     """
 
-    def _seed_daily_and_weekly(self, sample_model, evaluated_prediction):
+    def _seed_daily_and_weekly(
+        self,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> Model:
         model = sample_model(name="linear_v1")
 
         # Daily: 3 correct, 1 incorrect, total pnl = 100+100+100-50 = 250
@@ -1091,8 +1146,11 @@ class TestMetricsRespectTimeframe:
         return model
 
     def test_daily_metrics_include_only_daily_predictions(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Given a model has evaluated daily and weekly predictions in the
         same date range
@@ -1106,8 +1164,11 @@ class TestMetricsRespectTimeframe:
         assert calculate_win_rate(db_session, model.id, timeframe="1d") == 0.75
 
     def test_weekly_metrics_include_only_weekly_predictions(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Given the same mixed data
         When weekly metrics are requested for timeframe "1w"
@@ -1120,8 +1181,11 @@ class TestMetricsRespectTimeframe:
         assert calculate_win_rate(db_session, model.id, timeframe="1w") == 1.0
 
     def test_missing_timeframe_mixes_both(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Without a timeframe filter, utils functions mix every timeframe --
         the API layer is what applies DEFAULT_TIMEFRAME (see
@@ -1132,8 +1196,11 @@ class TestMetricsRespectTimeframe:
         assert calculate_total_pnl(db_session, model.id) == 1250.0  # 250 + 1000
 
     def test_cumulative_pnl_does_not_mix_timeframes(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Scenario: Cumulative PnL does not mix timeframes
 
@@ -1153,8 +1220,11 @@ class TestMetricsRespectTimeframe:
         assert weekly_series[-1]["cumulative_pnl"] == 1000.0
 
     def test_sharpe_and_drawdown_respect_timeframe(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Sharpe ratio and max drawdown must also isolate one timeframe."""
         model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
 
@@ -1170,8 +1240,11 @@ class TestMetricsRespectTimeframe:
         assert weekly_dd == 0.0  # single positive data point, no drawdown
 
     def test_get_all_models_metrics_respects_timeframe(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """get_all_models_metrics() must thread timeframe through every metric."""
         model = self._seed_daily_and_weekly(sample_model, evaluated_prediction)
 
@@ -1198,8 +1271,11 @@ class TestCapitalNormalizedMetrics:
     """
 
     def test_sharpe_ratio_normalized_by_capital_not_spot_price(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Scenario: Returns are normalized by invested capital, not by spot price
 
@@ -1244,8 +1320,11 @@ class TestCapitalNormalizedMetrics:
         assert sharpe_low_price == pytest.approx(sharpe_high_price)
 
     def test_sharpe_ratio_with_nonzero_risk_free_rate_depends_on_capital(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         With risk_free_rate=0 (the default), Sharpe = mean/stdev is scale
         invariant -- any constant reference capital cancels out of the
@@ -1275,8 +1354,11 @@ class TestCapitalNormalizedMetrics:
         assert sharpe_large_capital != pytest.approx(sharpe_small_capital)
 
     def test_sharpe_ratio_rejects_invalid_capital(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Scenario: Invalid capital configuration is rejected
 
@@ -1295,8 +1377,11 @@ class TestCapitalNormalizedMetrics:
             calculate_sharpe_ratio(db_session, model.id, capital=-500.0)
 
     def test_max_drawdown_pct_rejects_invalid_capital(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """Scenario: Invalid capital configuration is rejected, for drawdown too."""
         model = sample_model(name="linear_v1")
         evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
@@ -1305,8 +1390,11 @@ class TestCapitalNormalizedMetrics:
             calculate_max_drawdown_pct(db_session, model.id, capital=0.0)
 
     def test_max_drawdown_pct_computed_from_capital_based_equity_curve(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Scenario: Drawdown is calculated from a capital-based equity curve,
         as a percentage
@@ -1338,14 +1426,19 @@ class TestCapitalNormalizedMetrics:
         # Percentage drawdown: (900 - 1200) / 1200 * 100 = -25%
         assert pct_dd == pytest.approx(-25.0)
 
-    def test_max_drawdown_pct_returns_none_with_no_data(self, db_session, sample_model):
+    def test_max_drawdown_pct_returns_none_with_no_data(
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
         model = sample_model(name="linear_v1")
 
         assert calculate_max_drawdown_pct(db_session, model.id) is None
 
     def test_get_all_models_metrics_includes_capital_normalized_fields(
-        self, db_session, sample_model, evaluated_prediction
-    ):
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
         """
         Scenario: Capital normalization is applied consistently across metrics
 

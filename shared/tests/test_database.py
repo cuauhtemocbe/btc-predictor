@@ -7,7 +7,7 @@ Covers all Gherkin scenarios from US-001:
 - Session lifecycle management
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -19,7 +19,7 @@ from shared.db.database import SessionLocal, engine, get_db
 class TestDatabaseEngine:
     """Test SQLAlchemy engine creation."""
 
-    def test_engine_is_created(self):
+    def test_engine_is_created(self) -> None:
         """
         Scenario: Create SQLAlchemy engine
         Given a valid DATABASE_URL is configured
@@ -31,12 +31,12 @@ class TestDatabaseEngine:
         assert engine is not None
         assert "postgresql://" in str(engine.url)
 
-    def test_engine_has_connection_pooling_enabled(self):
+    def test_engine_has_connection_pooling_enabled(self) -> None:
         """Verify that engine has connection pooling configured."""
         assert engine.pool is not None
         # pool_pre_ping should be enabled (verified via engine creation)
 
-    def test_engine_url_is_postgresql(self):
+    def test_engine_url_is_postgresql(self) -> None:
         """Verify engine uses PostgreSQL (not SQLite or other DB)."""
         assert str(engine.url).startswith("postgresql://")
         assert engine.dialect.name == "postgresql"
@@ -45,7 +45,7 @@ class TestDatabaseEngine:
 class TestSessionFactory:
     """Test SessionLocal session factory."""
 
-    def test_session_local_creates_sessions(self, mock_database_url):
+    def test_session_local_creates_sessions(self, mock_database_url: str) -> None:
         """
         Scenario: SessionLocal creates sessions
         Given the database engine is initialized
@@ -62,7 +62,7 @@ class TestSessionFactory:
         # Cleanup
         session.close()
 
-    def test_session_can_be_closed(self, mock_database_url):
+    def test_session_can_be_closed(self, mock_database_url: str) -> None:
         """Verify sessions can be properly closed."""
         # Given
         session = SessionLocal()
@@ -77,7 +77,7 @@ class TestSessionFactory:
 class TestGetDbDependency:
     """Test FastAPI dependency for database sessions."""
 
-    def test_get_db_yields_session(self, mock_database_url):
+    def test_get_db_yields_session(self, mock_database_url: str) -> None:
         """
         Scenario: Get database session
         Given the database engine is initialized
@@ -98,7 +98,7 @@ class TestGetDbDependency:
         except StopIteration:
             pass  # Expected - generator should close
 
-    def test_get_db_closes_session_after_use(self, mock_database_url):
+    def test_get_db_closes_session_after_use(self, mock_database_url: str) -> None:
         """
         Scenario: Session is automatically closed after use
         Given I have called get_db() and received a session
@@ -111,7 +111,7 @@ class TestGetDbDependency:
 
         # Mock the close method to verify it's called
         session_close_mock = Mock(wraps=session.close)
-        session.close = session_close_mock
+        session.close = session_close_mock  # type: ignore[method-assign]  # spy on the real close
 
         # When - simulate context exit
         try:
@@ -122,7 +122,9 @@ class TestGetDbDependency:
         # Then
         session_close_mock.assert_called_once()
 
-    def test_get_db_closes_session_even_on_exception(self, mock_database_url):
+    def test_get_db_closes_session_even_on_exception(
+        self, mock_database_url: str
+    ) -> None:
         """
         Scenario: Session closed even if exception occurs (ZOMBIES: Exceptions)
         Given I have a session from get_db()
@@ -135,7 +137,7 @@ class TestGetDbDependency:
 
         # Mock close to verify it's called
         session_close_mock = Mock(wraps=session.close)
-        session.close = session_close_mock
+        session.close = session_close_mock  # type: ignore[method-assign]  # spy on the real close
 
         # When - throw exception into generator
         try:
@@ -146,7 +148,9 @@ class TestGetDbDependency:
         # Then - close should still be called
         session_close_mock.assert_called_once()
 
-    def test_get_db_can_be_used_in_fastapi_dependency(self, mock_database_url):
+    def test_get_db_can_be_used_in_fastapi_dependency(
+        self, mock_database_url: str
+    ) -> None:
         """
         Scenario: get_db() works as FastAPI Depends()
         Given I use get_db with FastAPI Depends
@@ -171,7 +175,9 @@ class TestDatabaseConnectionErrors:
     """Test error handling for database connection issues."""
 
     @patch("shared.db.database.settings")
-    def test_invalid_database_url_raises_clear_error(self, mock_settings):
+    def test_invalid_database_url_raises_clear_error(
+        self, mock_settings: MagicMock
+    ) -> None:
         """
         Scenario: Invalid DATABASE_URL format (ZOMBIES: Exceptions)
         Given an invalid DATABASE_URL format
@@ -194,7 +200,7 @@ class TestDatabaseConnectionErrors:
             for keyword in ["connection", "database", "could not", "unable", "invalid"]
         )
 
-    def test_connection_pool_pre_ping_enabled(self, mock_database_url):
+    def test_connection_pool_pre_ping_enabled(self, mock_database_url: str) -> None:
         """
         Verify pool_pre_ping is enabled to catch stale connections.
         This prevents errors from dead connections in the pool.

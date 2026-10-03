@@ -6,6 +6,7 @@ Run with: docker compose exec api python shared/tests/run_btc_prices_tests.py
 """
 
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -17,7 +18,7 @@ from shared.config import settings
 from shared.db.models import Price
 
 
-def run_test(name, test_func):
+def run_test(name: str, test_func: Callable[[], None]) -> bool:
     """Run a single test and report result."""
     try:
         test_func()
@@ -31,7 +32,7 @@ def run_test(name, test_func):
         return False
 
 
-def test_scenario_1_table_exists():
+def test_scenario_1_table_exists() -> None:
     """Gherkin Scenario 1: Table structure is correct."""
     engine = create_engine(settings.database_url)
     inspector = inspect(engine)
@@ -68,7 +69,7 @@ def test_scenario_1_table_exists():
     engine.dispose()
 
 
-def test_scenario_2_insert_valid_record():
+def test_scenario_2_insert_valid_record() -> None:
     """Gherkin Scenario 2: Insert and query valid OHLCV record."""
     engine = create_engine(settings.database_url)
     connection = engine.connect()
@@ -106,7 +107,7 @@ def test_scenario_2_insert_valid_record():
         engine.dispose()
 
 
-def test_scenario_3_duplicate_timestamp():
+def test_scenario_3_duplicate_timestamp() -> None:
     """Gherkin Scenario 3: Duplicate timestamp is rejected."""
     engine = create_engine(settings.database_url)
     connection = engine.connect()
@@ -158,7 +159,7 @@ def test_scenario_3_duplicate_timestamp():
         engine.dispose()
 
 
-def test_edge_case_zero_volume():
+def test_edge_case_zero_volume() -> None:
     """ZOMBIES edge case: Zero volume is valid."""
     engine = create_engine(settings.database_url)
     connection = engine.connect()
@@ -188,7 +189,7 @@ def test_edge_case_zero_volume():
         engine.dispose()
 
 
-def main():
+def main() -> int:
     """Run all tests and report results."""
     print("=" * 70)
     print("BTC Prices Integration Tests - US-002 Gherkin Scenarios")

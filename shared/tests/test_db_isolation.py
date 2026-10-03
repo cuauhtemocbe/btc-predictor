@@ -10,12 +10,13 @@ import re
 import subprocess
 import sys
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, Engine, make_url
 
 from shared.config import settings
 from testdb import database_name_for_tests, ensure_database
@@ -58,11 +59,11 @@ PROBE_TESTS = textwrap.dedent(
 )
 
 
-def _probe_url(database: str):
+def _probe_url(database: str) -> URL:
     return make_url(settings.database_url).set(database=database)
 
 
-def _reset_tables(url, *tables: str) -> None:
+def _reset_tables(url: URL, *tables: str) -> None:
     """Empty a probe database by dropping tables.
 
     The probe databases are kept between runs (like ``<db>_test``) because
@@ -79,7 +80,7 @@ def _reset_tables(url, *tables: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def probe_dev_database():
+def probe_dev_database() -> Iterator[tuple[URL, Engine]]:
     """A stand-in for the dev database, holding a sentinel row."""
     dev_url = _probe_url(PROBE_DEV_DATABASE)
     _reset_tables(dev_url, "dev_sentinel")
@@ -103,7 +104,9 @@ class ProbeRun(NamedTuple):
 
 
 @pytest.fixture(scope="module")
-def parallel_probe_run(probe_dev_database, tmp_path_factory):
+def parallel_probe_run(
+    probe_dev_database: tuple[URL, Engine], tmp_path_factory: pytest.TempPathFactory
+) -> ProbeRun:
     """Run the probe tests once under ``pytest -n 2`` against the stand-in dev DB."""
     dev_url, _ = probe_dev_database
     workdir = tmp_path_factory.mktemp("probe")
@@ -150,10 +153,10 @@ def parallel_probe_run(probe_dev_database, tmp_path_factory):
 
 
 class TestDatabaseNaming:
-    def test_serial_run_uses_a_dedicated_test_database(self):
+    def test_serial_run_uses_a_dedicated_test_database(self) -> None:
         assert database_name_for_tests("btcpredictor", None) == "btcpredictor_test"
 
-    def test_each_worker_gets_its_own_database(self):
+    def test_each_worker_gets_its_own_database(self) -> None:
         names = {
             database_name_for_tests("btcpredictor", worker)
             for worker in ("gw0", "gw1", "gw2")
@@ -164,26 +167,28 @@ class TestDatabaseNaming:
             "btcpredictor_test_gw2",
         }
 
-    def test_naming_is_idempotent_for_inherited_urls(self):
+    def test_naming_is_idempotent_for_inherited_urls(self) -> None:
         """Workers inherit the controller's already-redirected DATABASE_URL."""
         assert (
             database_name_for_tests("btcpredictor_test", "gw0")
             == "btcpredictor_test_gw0"
         )
 
-    def test_suite_never_runs_against_the_dev_database(self):
-        assert "_test" in make_url(settings.database_url).database
+    def test_suite_never_runs_against_the_dev_database(self) -> None:
+        database = make_url(settings.database_url).database
+        assert database is not None
+        assert "_test" in database
 
 
 class TestParallelRun:
     @pytest.mark.slow
-    def test_parallel_run_is_green(self, parallel_probe_run):
+    def test_parallel_run_is_green(self, parallel_probe_run: ProbeRun) -> None:
         """Scenario: Parallel run is green."""
         assert parallel_probe_run.returncode == 0, parallel_probe_run.output
         assert "4 passed" in parallel_probe_run.output
 
     @pytest.mark.slow
-    def test_workers_do_not_share_data(self, parallel_probe_run):
+    def test_workers_do_not_share_data(self, parallel_probe_run: ProbeRun) -> None:
         """Scenario: Workers do not share data."""
         assert parallel_probe_run.returncode == 0, parallel_probe_run.output
         reports = re.findall(
@@ -199,7 +204,9 @@ class TestParallelRun:
             assert seen == f"['{worker}']"
 
     @pytest.mark.slow
-    def test_dev_data_is_untouched(self, probe_dev_database, parallel_probe_run):
+    def test_dev_data_is_untouched(
+        self, probe_dev_database: tuple[URL, Engine], parallel_probe_run: ProbeRun
+    ) -> None:
         """Scenario: Dev data is untouched."""
         _, engine = probe_dev_database
         assert parallel_probe_run.returncode == 0, parallel_probe_run.output

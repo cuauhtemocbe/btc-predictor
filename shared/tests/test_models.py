@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 from shared.db.models import Model
 
 
-def test_create_model_instance():
+def test_create_model_instance() -> None:
     """Test creating a Model instance with valid data."""
     trained_at = datetime(2024, 5, 17, 10, 30, 0, tzinfo=UTC)
     train_from = date(2024, 1, 1)
@@ -36,7 +36,7 @@ def test_create_model_instance():
     assert model.is_active is True
 
 
-def test_model_jsonb_params():
+def test_model_jsonb_params() -> None:
     """Test that JSONB params field serializes dict correctly."""
     complex_params = {
         "window_days": 30,
@@ -61,7 +61,7 @@ def test_model_jsonb_params():
     assert model.params["nested"]["optimizer"] == "adam"
 
 
-def test_model_bytea_artifact():
+def test_model_bytea_artifact() -> None:
     """Test that BYTEA artifact field accepts bytes."""
     large_artifact = b"x" * 1000  # Simulate a 1KB model
 
@@ -80,7 +80,7 @@ def test_model_bytea_artifact():
     assert len(model.artifact) == 1000
 
 
-def test_model_repr():
+def test_model_repr() -> None:
     """Test __repr__ method returns useful string."""
     trained_at = datetime(2024, 5, 17, 10, 30, 0, tzinfo=UTC)
 
@@ -103,7 +103,7 @@ def test_model_repr():
     assert str(trained_at) in repr_str
 
 
-def test_model_default_is_active():
+def test_model_default_is_active() -> None:
     """Test that is_active defaults to False when not specified."""
     model = Model(
         name="test",
