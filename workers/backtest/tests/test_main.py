@@ -4,11 +4,14 @@ Tests for the monthly backtest cron (#138).
 Gherkin: "Monthly backtest cron uses the production configuration".
 """
 
+import sys
 from contextlib import nullcontext
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from typing import Protocol
 
 import pytest
+from sqlalchemy.orm import Session
 
 import scripts.backtest as worker_script
 import workers.backtest.main as worker
@@ -33,8 +36,16 @@ def arguments_of(argv: list[str]) -> dict[str, str]:
     return dict(arg.removeprefix("--").split("=") for arg in argv[1:])
 
 
+class CronRunner(Protocol):
+    """Callable returned by the ``cron`` fixture."""
+
+    def __call__(self, daily_history: DailyHistory, exit_code: int = 0) -> list[str]:
+        """Run the cron against ``daily_history`` and return the argv it built."""
+        ...
+
+
 @pytest.fixture
-def cron(monkeypatch):
+def cron(monkeypatch: pytest.MonkeyPatch) -> CronRunner:
     """Run worker.main() against a given history; return the argv it passed on."""
     captured: dict[str, list[str]] = {}
 
@@ -43,7 +54,7 @@ def cron(monkeypatch):
         monkeypatch.setattr(worker, "load_daily_history", lambda db: daily_history)
 
         def fake_backtest() -> int:
-            captured["argv"] = list(worker.sys.argv)
+            captured["argv"] = list(sys.argv)
             return exit_code
 
         monkeypatch.setattr(worker, "run_backtest_main", fake_backtest)
@@ -56,7 +67,9 @@ def cron(monkeypatch):
 # --- Scenario: The cron uses the production training window ---
 
 
-def test_the_cron_passes_the_production_training_window(cron, monkeypatch):
+def test_the_cron_passes_the_production_training_window(
+    cron: CronRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Given TRAINING_WINDOW_DAYS is 21
     monkeypatch.setattr(settings, "training_window_days", 21)
 
@@ -67,7 +80,9 @@ def test_the_cron_passes_the_production_training_window(cron, monkeypatch):
     assert "--training-window=21" in argv
 
 
-def test_the_cron_follows_a_changed_production_window(cron, monkeypatch):
+def test_the_cron_follows_a_changed_production_window(
+    cron: CronRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings, "training_window_days", 30)
 
     assert "--training-window=30" in cron(history(1000))
@@ -76,7 +91,9 @@ def test_the_cron_follows_a_changed_production_window(cron, monkeypatch):
 # --- Scenario: The cron derives its range from the engine's history requirement ---
 
 
-def test_the_start_date_is_not_earlier_than_the_earliest_allowed(cron, monkeypatch):
+def test_the_start_date_is_not_earlier_than_the_earliest_allowed(
+    cron: CronRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Given 1000 loaded daily rows
     monkeypatch.setattr(settings, "training_window_days", 21)
     loaded = history(1000)
@@ -90,7 +107,7 @@ def test_the_start_date_is_not_earlier_than_the_earliest_allowed(cron, monkeypat
     assert date.fromisoformat(args["end-date"]) == loaded.dates[-1]
 
 
-def test_a_short_history_starts_exactly_at_the_earliest_allowed_date():
+def test_a_short_history_starts_exactly_at_the_earliest_allowed_date() -> None:
     loaded = history(required_training_days(21) + worker.TEST_DAYS + 5)
 
     start, _, _ = worker.plan_range(loaded, 21)
@@ -98,7 +115,7 @@ def test_a_short_history_starts_exactly_at_the_earliest_allowed_date():
     assert start == loaded.dates[required_training_days(21)]
 
 
-def test_a_long_history_is_limited_to_the_lookback(cron):
+def test_a_long_history_is_limited_to_the_lookback(cron: CronRunner) -> None:
     loaded = history(3000)
 
     args = arguments_of(cron(loaded))
@@ -111,8 +128,10 @@ def test_a_long_history_is_limited_to_the_lookback(cron):
 
 
 def test_too_little_history_exits_one_with_the_engine_message(
-    cron, monkeypatch, caplog
-):
+    cron: CronRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     # Given fewer daily rows than (window + 1) * 5
     monkeypatch.setattr(settings, "training_window_days", 21)
     too_short = history(required_training_days(21) - 1)
@@ -128,8 +147,8 @@ def test_too_little_history_exits_one_with_the_engine_message(
 
 
 def test_enough_rows_but_a_short_test_slice_exits_one_with_the_earliest_date(
-    cron, caplog
-):
+    cron: CronRunner, caplog: pytest.LogCaptureFixture
+) -> None:
     needed = required_training_days(21)
     loaded = history(needed + 50)
 
@@ -140,7 +159,9 @@ def test_enough_rows_but_a_short_test_slice_exits_one_with_the_earliest_date(
     assert str(loaded.dates[needed]) in caplog.text
 
 
-def test_no_prices_at_all_exits_one(cron, caplog):
+def test_no_prices_at_all_exits_one(
+    cron: CronRunner, caplog: pytest.LogCaptureFixture
+) -> None:
     with pytest.raises(SystemExit) as exit_info:
         cron(DailyHistory(dates=[], closes=[], volumes=[]))
 
@@ -148,7 +169,7 @@ def test_no_prices_at_all_exits_one(cron, caplog):
     assert "No BTCUSDT prices are loaded" in caplog.text
 
 
-def test_plan_range_raises_the_engine_error():
+def test_plan_range_raises_the_engine_error() -> None:
     with pytest.raises(InsufficientHistoryError):
         worker.plan_range(history(10), 21)
 
@@ -156,7 +177,7 @@ def test_plan_range_raises_the_engine_error():
 # --- Scenario: The range is long enough to report an out-of-sample result ---
 
 
-def test_the_test_slice_has_at_least_100_days(cron):
+def test_the_test_slice_has_at_least_100_days(cron: CronRunner) -> None:
     # Given enough history
     loaded = history(1000)
 
@@ -173,7 +194,9 @@ def test_the_test_slice_has_at_least_100_days(cron):
 # --- Scenario: The cron run is reproducible and labelled ---
 
 
-def test_the_cron_passes_an_explicit_seed_and_retrain_frequency(cron):
+def test_the_cron_passes_an_explicit_seed_and_retrain_frequency(
+    cron: CronRunner,
+) -> None:
     args = arguments_of(cron(history(1000)))
 
     assert args["seed"] == "42"
@@ -181,8 +204,10 @@ def test_the_cron_passes_an_explicit_seed_and_retrain_frequency(cron):
 
 
 def test_the_report_of_a_cron_run_shows_seed_and_retrain_every(
-    db_session, monkeypatch, capsys
-):
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     # Given a small history and a small test slice
     monkeypatch.setattr(settings, "training_window_days", 3)
     monkeypatch.setattr(worker, "TEST_DAYS", 5)
@@ -219,7 +244,7 @@ def test_the_report_of_a_cron_run_shows_seed_and_retrain_every(
     assert "retrain every: 1" in out
 
 
-def test_the_cron_backtests_the_linear_model(cron):
+def test_the_cron_backtests_the_linear_model(cron: CronRunner) -> None:
     # Given the cron passes no --model, the script default decides the model
     argv = cron(history(1000))
 
