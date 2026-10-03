@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
+from soup_helpers import find_tag
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction
@@ -25,7 +26,7 @@ from shared.db.models import Model, Prediction
 
 
 @pytest.fixture
-def sample_models_with_predictions(db_session: Session):
+def sample_models_with_predictions(db_session: Session) -> dict[str, Model]:
     """
     Create sample models with evaluated predictions for testing.
 
@@ -178,8 +179,10 @@ def sample_models_with_predictions(db_session: Session):
 
 @pytest.mark.asyncio
 async def test_models_dashboard_renders_with_models(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Access model comparison dashboard
 
@@ -209,7 +212,7 @@ async def test_models_dashboard_renders_with_models(
     assert table is not None, "Dashboard should contain a comparison table"
 
     # Verify table has 3 rows (one per model)
-    tbody = table.find("tbody")
+    tbody = find_tag(table, "tbody")
     rows = tbody.find_all("tr")
     assert len(rows) == 3, f"Expected 3 model rows, got {len(rows)}"
 
@@ -221,8 +224,10 @@ async def test_models_dashboard_renders_with_models(
 
 @pytest.mark.asyncio
 async def test_models_dashboard_shows_all_metrics(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Model comparison table shows key metrics
 
@@ -239,7 +244,7 @@ async def test_models_dashboard_shows_all_metrics(
     soup = BeautifulSoup(response.text, "html.parser")
 
     # Verify table headers
-    thead = soup.find("thead")
+    thead = find_tag(soup, "thead")
     headers = [th.text.strip() for th in thead.find_all("th")]
     expected_headers = [
         "Model",
@@ -258,7 +263,7 @@ async def test_models_dashboard_shows_all_metrics(
     assert headers == expected_headers
 
     # Verify each model has data in all columns
-    tbody = soup.find("tbody")
+    tbody = find_tag(soup, "tbody")
     rows = tbody.find_all("tr")
 
     for row in rows:
@@ -272,8 +277,10 @@ async def test_models_dashboard_shows_all_metrics(
 
 @pytest.mark.asyncio
 async def test_models_dashboard_highlights_best_model(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Highlight best performing model
 
@@ -293,7 +300,7 @@ async def test_models_dashboard_highlights_best_model(
     assert best_row is not None, "Best model row should have 'best-model' class"
 
     # Verify the best model is lstm_v1 (highest total PnL: $220)
-    model_name_cell = best_row.find("span", class_="model-name")
+    model_name_cell = find_tag(best_row, "span", class_="model-name")
     assert "lstm_v1" in model_name_cell.text
 
     # Verify the "🏆 Best Return" badge exists
@@ -305,7 +312,9 @@ async def test_models_dashboard_highlights_best_model(
 
 
 @pytest.mark.asyncio
-async def test_models_dashboard_empty_state(client: AsyncClient, db_session: Session):
+async def test_models_dashboard_empty_state(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Scenario: Empty state when no models exist
 
@@ -329,7 +338,7 @@ async def test_models_dashboard_empty_state(client: AsyncClient, db_session: Ses
     assert empty_state is not None, "Should show empty state when no models"
 
     # Verify message content
-    h2 = empty_state.find("h2")
+    h2 = find_tag(empty_state, "h2")
     assert "No Models Found" in h2.text
 
     # Verify instructions
@@ -340,8 +349,10 @@ async def test_models_dashboard_empty_state(client: AsyncClient, db_session: Ses
 
 @pytest.mark.asyncio
 async def test_models_dashboard_with_date_filter(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Filter model comparison by date range
 
@@ -363,10 +374,10 @@ async def test_models_dashboard_with_date_filter(
     assert filter_form is not None
 
     # Verify date inputs have correct values
-    start_input = soup.find("input", {"name": "start_date"})
+    start_input = find_tag(soup, "input", {"name": "start_date"})
     assert start_input["value"] == "2024-05-01"
 
-    end_input = soup.find("input", {"name": "end_date"})
+    end_input = find_tag(soup, "input", {"name": "end_date"})
     assert end_input["value"] == "2024-05-02"
 
     # Verify table still renders (with filtered data)
@@ -376,8 +387,10 @@ async def test_models_dashboard_with_date_filter(
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_returns_json(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: API endpoint returns model metrics as JSON
 
@@ -425,8 +438,10 @@ async def test_models_metrics_api_returns_json(
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_rejects_unsupported_pnl_column(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Unsupported metric columns are rejected
 
@@ -442,8 +457,10 @@ async def test_models_metrics_api_rejects_unsupported_pnl_column(
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_with_date_filter(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: API endpoint supports date filtering
 
@@ -471,8 +488,10 @@ async def test_models_metrics_api_with_date_filter(
 
 @pytest.mark.asyncio
 async def test_models_metrics_calculates_correctly(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Verify metrics calculations are correct
 
@@ -503,7 +522,9 @@ async def test_models_metrics_calculates_correctly(
 
 
 @pytest.mark.asyncio
-async def test_models_api_handles_empty_state(client: AsyncClient, db_session: Session):
+async def test_models_api_handles_empty_state(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Scenario: API returns empty list when no models exist
 
@@ -532,7 +553,7 @@ async def test_models_api_handles_empty_state(client: AsyncClient, db_session: S
 
 
 @pytest.fixture
-def sample_model_with_daily_and_weekly_predictions(db_session: Session):
+def sample_model_with_daily_and_weekly_predictions(db_session: Session) -> Model:
     """One model with 2 daily ($100 each) and 1 weekly ($1000) prediction."""
     model = Model(
         name="linear_v1",

@@ -150,7 +150,11 @@ plugins = ["pydantic.mypy"]
 # "btc_shared.*" and shared/tests/* as "tests.*" without adding __init__.py
 # files there (which would break pytest test collection for sibling
 # "tests" dirs elsewhere in the monorepo, e.g. workers/daily/tests).
-mypy_path = "shared:api"
+# api/tests is itself a base so its files are top-level modules ("conftest",
+# "test_main", ...) and do not clash with shared/tests ("Duplicate module named
+# tests.conftest"). The api tests import each other by those top-level names
+# (soup_helpers), which is also how pytest imports them.
+mypy_path = "shared:api:api/tests"
 explicit_package_bases = true
 files = [
     "shared/shared",
@@ -167,8 +171,8 @@ exclude = [
     # Test code still not type-checked (hundreds of untyped fixtures and test
     # functions), being typed package by package (#158). Typed already:
     # shared/tests, workers/fetch_price/tests, workers/backtest/tests,
-    # workers/weekly/tests.
-    "^(workers/daily|api|api-service|scripts)/tests/",
+    # workers/weekly/tests, api-service/tests (mounted as api/tests).
+    "^(workers/daily|scripts)/tests/",
 ]
 
 [[tool.mypy.overrides]]

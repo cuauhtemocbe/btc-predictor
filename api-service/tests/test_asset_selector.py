@@ -17,7 +17,8 @@ from decimal import Decimal
 
 import pytest
 from bs4 import BeautifulSoup
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
+from soup_helpers import attribute, find_tag
 from sqlalchemy.orm import Session
 
 from shared.db.models import BacktestResult, Model, Prediction, Price
@@ -135,7 +136,7 @@ def add_backtest_run(db: Session, symbol: str | None, created_at: datetime) -> N
     db.flush()
 
 
-def soup_of(response) -> BeautifulSoup:
+def soup_of(response: Response) -> BeautifulSoup:
     assert response.status_code == 200
     return BeautifulSoup(response.text, "html.parser")
 
@@ -166,7 +167,9 @@ def both_assets(db_session: Session) -> dict[str, Model]:
 
 # Scenario: The default view shows BTC
 @pytest.mark.asyncio
-async def test_default_dashboard_shows_btc(client: AsyncClient, both_assets):
+async def test_default_dashboard_shows_btc(
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     """
     When I open the dashboard
     Then it shows data for BTCUSDT
@@ -176,17 +179,17 @@ async def test_default_dashboard_shows_btc(client: AsyncClient, both_assets):
     rows = table_rows(soup)
     assert len(rows) == 10
     assert all(row[1].startswith("$67") for row in rows), "only BTC prices expected"
-    assert "Bitcoin" in soup.find("h1").get_text()
-    selected = soup.find("a", attrs={"aria-current": "page"})
-    assert selected["data-symbol"] == BTC
+    assert "Bitcoin" in find_tag(soup, "h1").get_text()
+    selected = find_tag(soup, "a", attrs={"aria-current": "page"})
+    assert attribute(selected, "data-symbol") == BTC
     assert soup.find(class_="asset-note") is None, "no caveat for BTC"
 
 
 # Scenario: Switching to gold shows only gold data
 @pytest.mark.asyncio
 async def test_gold_dashboard_shows_only_gold_and_states_the_proxy(
-    client: AsyncClient, both_assets
-):
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     """
     Given predictions exist for BTCUSDT and PAXGUSDT
     When I select gold
@@ -201,16 +204,19 @@ async def test_gold_dashboard_shows_only_gold_and_states_the_proxy(
     # The strategy chart and table are built from the same asset.
     strategies = soup.find(class_="strategy-table")
     assert strategies is not None
-    note = soup.find(class_="asset-note").get_text()
+    note = find_tag(soup, class_="asset-note").get_text()
     assert "gold-backed token" in note
     assert "not XAU spot" in note
-    assert soup.find("a", attrs={"aria-current": "page"})["data-symbol"] == GOLD
+    assert (
+        attribute(find_tag(soup, "a", attrs={"aria-current": "page"}), "data-symbol")
+        == GOLD
+    )
 
 
 @pytest.mark.asyncio
 async def test_gold_strategy_chart_data_has_only_gold_pnl(
-    client: AsyncClient, both_assets
-):
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     """The strategies JSON behind the chart only counts gold predictions."""
     gold = await client.get("/api/predictions/strategies", params={"symbol": GOLD})
     btc = await client.get("/api/predictions/strategies")
@@ -225,8 +231,8 @@ async def test_gold_strategy_chart_data_has_only_gold_pnl(
 
 @pytest.mark.asyncio
 async def test_json_endpoints_are_scoped_to_the_symbol(
-    client: AsyncClient, both_assets
-):
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     history = await client.get("/api/predictions/history", params={"symbol": GOLD})
     assert len(history.json()) == 10
     assert all(item["price_at_prediction"] < 5000 for item in history.json())
@@ -247,8 +253,8 @@ async def test_json_endpoints_are_scoped_to_the_symbol(
 
 @pytest.mark.asyncio
 async def test_prices_endpoint_returns_only_the_requested_symbol(
-    client: AsyncClient, both_assets
-):
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     gold = await client.get("/api/prices", params={"symbol": GOLD, "limit": 50})
     btc = await client.get("/api/prices", params={"limit": 50})
 
@@ -260,20 +266,20 @@ async def test_prices_endpoint_returns_only_the_requested_symbol(
 
 @pytest.mark.asyncio
 async def test_models_view_lists_only_the_selected_assets_models(
-    client: AsyncClient, both_assets
-):
+    client: AsyncClient, both_assets: dict[str, Model]
+) -> None:
     soup = soup_of(await client.get("/models/", params={"symbol": GOLD}))
 
     rows = table_rows(soup)
     assert len(rows) == 1
     assert "10" in rows[0][1]
-    assert "gold-backed token" in soup.find(class_="asset-note").get_text()
+    assert "gold-backed token" in find_tag(soup, class_="asset-note").get_text()
 
 
 @pytest.mark.asyncio
 async def test_backtesting_shows_the_latest_run_of_the_selected_symbol(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """A newer gold run never replaces the BTC view, and legacy rows count as BTC."""
     now = datetime.now(UTC)
     add_backtest_run(db_session, None, now - timedelta(days=2))  # legacy, BTC
@@ -290,14 +296,16 @@ async def test_backtesting_shows_the_latest_run_of_the_selected_symbol(
         btc.json()["metadata"]["backtest_run_id"]
         != (gold.json()["metadata"]["backtest_run_id"])
     )
-    assert "gold-backed token" in soup_of(page).find(class_="asset-note").get_text()
+    assert (
+        "gold-backed token" in find_tag(soup_of(page), class_="asset-note").get_text()
+    )
 
 
 # Scenario: Baselines are visible next to each model
 @pytest.mark.asyncio
 async def test_models_view_shows_baselines_next_to_each_model(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """
     When I open the models view
     Then each model row shows the always-up and persistence baseline accuracy for
@@ -332,7 +340,7 @@ async def test_models_view_shows_baselines_next_to_each_model(
 @pytest.mark.asyncio
 async def test_model_below_always_up_is_marked_as_not_beating(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """
     Given a model whose accuracy is below the always-up baseline
     When I open the models view
@@ -349,8 +357,8 @@ async def test_model_below_always_up_is_marked_as_not_beating(
 
     soup = soup_of(await client.get("/models/"))
 
-    cell = soup.find("td", class_="baseline-verdict")
-    assert cell["data-verdict"] == "not_beating"
+    cell = find_tag(soup, "td", class_="baseline-verdict")
+    assert attribute(cell, "data-verdict") == "not_beating"
     assert "Does not beat baseline" in cell.get_text()
     assert "✗" in cell.get_text(), "state must not rely on color alone"
     assert soup.find(class_="verdict-not-beating") is not None
@@ -362,7 +370,7 @@ async def test_model_below_always_up_is_marked_as_not_beating(
 @pytest.mark.asyncio
 async def test_small_edge_is_marked_not_significant(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """Above the baseline on 4 days is a coin-flip streak, not evidence."""
     closes = alternating(100, 110, 6)  # 4 evaluated days, 2 up
     model = add_model(db_session, BTC)
@@ -372,15 +380,15 @@ async def test_small_edge_is_marked_not_significant(
 
     soup = soup_of(await client.get("/models/"))
 
-    cell = soup.find("td", class_="baseline-verdict")
-    assert cell["data-verdict"] == "inconclusive"
+    cell = find_tag(soup, "td", class_="baseline-verdict")
+    assert attribute(cell, "data-verdict") == "inconclusive"
     assert "Not significant" in cell.get_text()
 
 
 @pytest.mark.asyncio
 async def test_weekly_timeframe_has_no_baseline(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """Persistence needs a daily horizon, so weekly shows N/A, never a number."""
     closes = alternating(100, 110, 12)
     model = add_model(db_session, BTC)
@@ -405,7 +413,7 @@ async def test_weekly_timeframe_has_no_baseline(
 )
 async def test_asset_without_predictions_shows_an_empty_state(
     client: AsyncClient, db_session: Session, path: str, needle: str
-):
+) -> None:
     """
     Given no predictions exist for the selected asset
     When I open its dashboard
@@ -420,14 +428,14 @@ async def test_asset_without_predictions_shows_an_empty_state(
     response = await client.get(path, params={"symbol": GOLD})
 
     soup = soup_of(response)
-    assert needle in soup.find(class_="empty-state").get_text()
-    assert "gold-backed token" in soup.find(class_="asset-note").get_text()
+    assert needle in find_tag(soup, class_="empty-state").get_text()
+    assert "gold-backed token" in find_tag(soup, class_="asset-note").get_text()
 
 
 @pytest.mark.asyncio
 async def test_empty_json_endpoints_return_empty_results_for_a_new_asset(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     history = await client.get("/api/predictions/history", params={"symbol": GOLD})
     metrics = await client.get("/models/metrics", params={"symbol": GOLD})
 
@@ -455,7 +463,7 @@ async def test_empty_json_endpoints_return_empty_results_for_a_new_asset(
 )
 async def test_unknown_symbol_is_a_validation_error(
     client: AsyncClient, db_session: Session, path: str
-):
+) -> None:
     """
     When I request the API with symbol "FOO"
     Then it responds with a validation error
@@ -469,7 +477,7 @@ async def test_unknown_symbol_is_a_validation_error(
 @pytest.mark.asyncio
 async def test_selector_links_keep_the_other_filters(
     client: AsyncClient, db_session: Session
-):
+) -> None:
     """Switching asset keeps dates and timeframe; links are relative."""
     soup = soup_of(
         await client.get(
@@ -477,7 +485,10 @@ async def test_selector_links_keep_the_other_filters(
         )
     )
 
-    links = {a["data-symbol"]: a["href"] for a in soup.select("a.asset-option")}
+    links = {
+        attribute(a, "data-symbol"): attribute(a, "href")
+        for a in soup.select("a.asset-option")
+    }
     assert set(links) == {BTC, GOLD}
     gold_href = links[GOLD]
     assert gold_href.startswith("?")
@@ -485,8 +496,8 @@ async def test_selector_links_keep_the_other_filters(
     assert "timeframe=1d" in gold_href
     assert "symbol=PAXGUSDT" in gold_href
     # The selected option is marked by a glyph and aria-current, not only by color.
-    selected = soup.find("a", attrs={"aria-current": "page"})
+    selected = find_tag(soup, "a", attrs={"aria-current": "page"})
     assert selected.get_text(strip=True).startswith("✓")
     # The date filter form keeps the asset when submitted.
-    hidden = soup.find("input", attrs={"name": "symbol", "type": "hidden"})
-    assert hidden["value"] == BTC
+    hidden = find_tag(soup, "input", attrs={"name": "symbol", "type": "hidden"})
+    assert attribute(hidden, "value") == BTC
