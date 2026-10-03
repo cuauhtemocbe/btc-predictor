@@ -208,11 +208,11 @@ class LSTMModel(BaseModel):
             raise ValueError("y contains infinite values")
 
         # Reshape X for LSTM: (n_samples, n_features) -> (n_samples, n_features, 1)
-        X_reshaped = X.reshape(X.shape[0], X.shape[1], 1)
+        x_reshaped = X.reshape(X.shape[0], X.shape[1], 1)
 
         # Train the model (verbose=0 to suppress output)
         self.model.fit(
-            X_reshaped,
+            x_reshaped,
             y,
             epochs=self.epochs,
             batch_size=self.batch_size,
@@ -273,11 +273,11 @@ class LSTMModel(BaseModel):
             raise ValueError("X contains infinite values")
 
         # Reshape for LSTM: (1, n_features) -> (1, n_features, 1)
-        X_reshaped = X.reshape(1, self.n_features, 1)
+        x_reshaped = X.reshape(1, self.n_features, 1)
 
         # Make prediction (verbose=0 to suppress output). Not clipped: a log
         # return is negative on a down day.
-        return float(self.model.predict(X_reshaped, verbose=0)[0][0])
+        return float(self.model.predict(x_reshaped, verbose=0)[0][0])
 
     def serialize(self) -> bytes:
         """
