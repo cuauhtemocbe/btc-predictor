@@ -6,7 +6,7 @@ This test suite validates all Gherkin acceptance criteria from US-023 for XGBoos
 2. Train with default hyperparameters
 3. Serialize and deserialize correctly
 4. Training time < 30s for 365 days
-5. Valid predictions (> 0, within sanity bounds)
+5. Valid predictions (a finite log return inside the range of the targets)
 """
 
 import pickle
@@ -80,38 +80,33 @@ class TestXGBoostModel:
         assert model.is_trained
 
     def test_xgboost_predict_returns_valid_float(
-        self, sliding_window_data, last_30_days
+        self, return_training_set, latest_return_features
     ):
         """
-        Gherkin Scenario: XGBoost produces valid predictions
+        Gherkin Scenario: XGBoost predicts the next-day log return
 
-        Given a trained XGBoost model
-        When I call model.predict(X) with shape (1, 30)
-        Then it returns a float price prediction
-        And prediction is > 0 (price cannot be negative)
-        And prediction is within 50% of last known price (sanity check)
+        Given a trained XGBoost model on return features and log return targets
+        When I call model.predict(X) with the features of the latest day
+        Then it returns a float log return
+        And the return is finite and inside the range of the training targets
         """
-        # Given: Trained model
-        X, y = sliding_window_data
-        model = XGBoostModel(window_days=30)
+        # Given: Trained model on the return features of shared.features
+        X, y = return_training_set.X, return_training_set.y
+        model = XGBoostModel(window_days=10, n_features=X.shape[1])
         model.train(X, y)
         assert model.is_trained
 
-        # When: Predict with new data
-        X_new = last_30_days
-        assert X_new.shape == (1, 30)
+        # When: Predict with the features of the latest day
+        predicted_return = model.predict(latest_return_features)
 
-        predicted_price = model.predict(X_new)
+        # Then: Returns a valid log return (trees never leave the target range)
+        assert isinstance(predicted_return, float)
+        assert np.isfinite(predicted_return)
+        assert y.min() <= predicted_return <= y.max()
 
-        # Then: Returns valid float
-        assert isinstance(predicted_price, float)
-        assert predicted_price > 0  # Price must be positive
-
-        # Sanity check: prediction within 50% of last price
-        last_price = X_new[0, -1]
-        assert 0.5 * last_price <= predicted_price <= 1.5 * last_price
-
-    def test_xgboost_serialize_deserialize(self, sliding_window_data, last_30_days):
+    def test_xgboost_serialize_deserialize(
+        self, return_training_set, latest_return_features
+    ):
         """
         Gherkin Scenario: XGBoost model serializes and deserializes correctly
 
@@ -123,8 +118,8 @@ class TestXGBoostModel:
         And predictions from the deserialized model match the original
         """
         # Given: Trained model
-        X, y = sliding_window_data
-        original_model = XGBoostModel(window_days=30)
+        X, y = return_training_set.X, return_training_set.y
+        original_model = XGBoostModel(window_days=10, n_features=X.shape[1])
         original_model.train(X, y)
 
         # When: Serialize
@@ -141,15 +136,15 @@ class TestXGBoostModel:
         # Then: Returns trained model instance
         assert isinstance(restored_model, XGBoostModel)
         assert restored_model.is_trained
-        assert restored_model.window_days == 30
+        assert restored_model.window_days == 10
+        assert restored_model.n_features == X.shape[1]
         assert restored_model.n_estimators == 100
         assert restored_model.max_depth == 5
         assert restored_model.learning_rate == 0.1
 
         # Verify predictions match
-        X_new = last_30_days
-        original_prediction = original_model.predict(X_new)
-        restored_prediction = restored_model.predict(X_new)
+        original_prediction = original_model.predict(latest_return_features)
+        restored_prediction = restored_model.predict(latest_return_features)
         assert np.isclose(original_prediction, restored_prediction, rtol=1e-5)
 
     def test_xgboost_training_time_365_days(self):
@@ -181,6 +176,41 @@ class TestXGBoostModel:
             f"Training took {training_time:.2f}s, expected < 30s"
         )
         assert model.is_trained
+
+    def test_trains_on_the_return_features_of_the_reboot(self, return_training_set):
+        """
+        Gherkin Scenario: XGBoost trains on the reboot features and target
+
+        Given the return features of shared.features (2 * window + 1 columns)
+        And the next-day log return as target
+        When I train an XGBoostModel built with that feature count
+        Then it trains, although the width differs from window_days
+        """
+        X, y = return_training_set.X, return_training_set.y
+        assert X.shape[1] == 2 * 10 + 1
+
+        model = XGBoostModel(window_days=10, n_features=X.shape[1])
+        model.train(X, y)
+
+        assert model.is_trained
+        assert model.n_features == 21
+
+    def test_default_feature_count_is_the_window(self):
+        """Without n_features the model expects one column per day, as before."""
+        assert XGBoostModel(window_days=30).n_features == 30
+
+    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+        """An artifact saved before n_features existed loads with n_features=window."""
+        X, y = sliding_window_data
+        model = XGBoostModel(window_days=30)
+        model.train(X, y)
+        state = pickle.loads(model.serialize())
+        del state["n_features"]
+
+        restored = XGBoostModel.deserialize(pickle.dumps(state))
+
+        assert restored.n_features == 30
+        assert restored.is_trained
 
 
 class TestXGBoostModelEdgeCases:

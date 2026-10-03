@@ -1,9 +1,9 @@
 """
-XGBoost model for BTC price prediction.
+XGBoost model for BTC next-day return prediction.
 
 This module implements a concrete ML model using XGBoost (Extreme Gradient Boosting)
-with sliding window feature engineering. XGBoost excels at capturing non-linear
-relationships and interactions between features.
+over the return features of ``shared.features``. XGBoost excels at capturing
+non-linear relationships and interactions between features.
 """
 
 import pickle
@@ -17,14 +17,17 @@ from workers.daily.models.base import BaseModel
 
 class XGBoostModel(BaseModel):
     """
-    XGBoost model for predicting next-day BTC close price.
+    XGBoost model over a sliding window of features.
 
-    Uses a sliding window approach where the last N days of close prices
-    are used as features to predict the next day's close price. XGBoost
-    builds an ensemble of decision trees using gradient boosting.
+    Like ``LinearRegressionModel`` it is agnostic to what the columns mean. The
+    trainers feed it the return features of shared.features and a log-return
+    target, so predict() returns a log return; the predictor turns it into a price
+    with shared.features.price_from_return(). XGBoost builds an ensemble of
+    decision trees using gradient boosting.
 
     Attributes:
         window_days: Number of historical days used as features (default: 30)
+        n_features: Number of feature columns (default: window_days)
         n_estimators: Number of boosting rounds (trees) (default: 100)
         max_depth: Maximum tree depth (default: 5)
         learning_rate: Step size shrinkage (default: 0.1)
@@ -40,11 +43,11 @@ class XGBoostModel(BaseModel):
         >>> X = np.array([prices[i:i+30] for i in range(30)])
         >>> y = np.array([prices[i+30] for i in range(30)])
         >>>
-        >>> # Train and predict
+        >>> # Train and predict (with raw windows and a price target the
+        >>> # prediction is a price; with shared.features it is a log return)
         >>> model.train(X, y)
         >>> X_new = prices[-30:].reshape(1, -1)
-        >>> predicted_price = model.predict(X_new)
-        >>> print(f"Predicted: ${predicted_price:.2f}")
+        >>> prediction = model.predict(X_new)
         >>>
         >>> # Serialize for storage
         >>> model_bytes = model.serialize()
@@ -57,6 +60,7 @@ class XGBoostModel(BaseModel):
         n_estimators: int = 100,
         max_depth: int = 5,
         learning_rate: float = 0.1,
+        n_features: int | None = None,
     ):
         """
         Initialize a new XGBoostModel.
@@ -68,6 +72,9 @@ class XGBoostModel(BaseModel):
                          Must be >= 1. Default is 100.
             max_depth: Maximum tree depth. Must be >= 1. Default is 5.
             learning_rate: Step size shrinkage. Must be > 0. Default is 0.1.
+            n_features: Number of feature columns. Defaults to window_days (one
+                        column per day). Models trained on the return features of
+                        shared.features pass feature_count(window_days).
 
         Raises:
             ValueError: If any hyperparameter is out of valid range.
@@ -86,6 +93,7 @@ class XGBoostModel(BaseModel):
             raise ValueError("learning_rate must be > 0")
 
         self.window_days = window_days
+        self.n_features = window_days if n_features is None else n_features
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.learning_rate = learning_rate
@@ -104,10 +112,9 @@ class XGBoostModel(BaseModel):
         Train the model with historical price data.
 
         Args:
-            X: Feature matrix of shape (n_samples, window_days).
-               Each row contains window_days consecutive close prices.
-            y: Target vector of shape (n_samples,).
-               Each value is the next day's close price.
+            X: Feature matrix of shape (n_samples, n_features).
+            y: Target vector of shape (n_samples,): the next day's log return
+               (or price, with raw close windows).
 
         Raises:
             ValueError: If X or y have invalid shapes.
@@ -134,10 +141,9 @@ class XGBoostModel(BaseModel):
                 f"Got X.shape[0]={X.shape[0]}, y.shape[0]={y.shape[0]}"
             )
 
-        if X.shape[1] != self.window_days:
+        if X.shape[1] != self.n_features:
             raise ValueError(
-                f"X must have {self.window_days} features (window_days), "
-                f"got {X.shape[1]}"
+                f"X must have {self.n_features} features, got {X.shape[1]}"
             )
 
         # Check for insufficient data
@@ -166,14 +172,13 @@ class XGBoostModel(BaseModel):
 
     def predict(self, X: npt.NDArray[np.float64]) -> float:
         """
-        Predict the next day's BTC close price.
+        Predict the target of the next day.
 
         Args:
-            X: Feature vector of shape (1, window_days) or (window_days,).
-               Contains the most recent window_days close prices.
+            X: Feature vector of shape (1, n_features) or (n_features,).
 
         Returns:
-            Predicted close price as a float (in USD).
+            Predicted next-day log return (a price with raw close windows).
 
         Raises:
             ValueError: If model is not trained yet.
@@ -183,28 +188,27 @@ class XGBoostModel(BaseModel):
             >>> model = XGBoostModel(window_days=30)
             >>> # ... train model first ...
             >>> last_30_days = np.random.rand(1, 30) * 50000
-            >>> predicted_price = model.predict(last_30_days)
-            >>> assert predicted_price > 0
+            >>> prediction = model.predict(last_30_days)
         """
         # Check if model is trained
         if not self._is_trained:
             raise ValueError("Model must be trained before making predictions")
 
-        # Reshape if needed (accept both (window_days,) and (1, window_days))
+        # Reshape if needed (accept both (n_features,) and (1, n_features))
         if X.ndim == 1:
-            if X.shape[0] != self.window_days:
+            if X.shape[0] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[0]}"
+                    f"X must have {self.n_features} features, got {X.shape[0]}"
                 )
             X = X.reshape(1, -1)
         elif X.ndim == 2:
             if X.shape[0] != 1:
                 raise ValueError(
-                    f"X must have shape (1, {self.window_days}), got {X.shape}"
+                    f"X must have shape (1, {self.n_features}), got {X.shape}"
                 )
-            if X.shape[1] != self.window_days:
+            if X.shape[1] != self.n_features:
                 raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[1]}"
+                    f"X must have {self.n_features} features, got {X.shape[1]}"
                 )
         else:
             raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
@@ -244,6 +248,7 @@ class XGBoostModel(BaseModel):
             state = {
                 "xgboost_model": self.model,
                 "window_days": self.window_days,
+                "n_features": self.n_features,
                 "n_estimators": self.n_estimators,
                 "max_depth": self.max_depth,
                 "learning_rate": self.learning_rate,
@@ -303,6 +308,7 @@ class XGBoostModel(BaseModel):
             n_estimators=state["n_estimators"],
             max_depth=state["max_depth"],
             learning_rate=state["learning_rate"],
+            n_features=state.get("n_features"),
         )
         instance.model = state["xgboost_model"]
         instance._is_trained = state["is_trained"]

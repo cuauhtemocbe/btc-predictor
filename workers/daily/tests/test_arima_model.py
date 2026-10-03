@@ -4,9 +4,9 @@ Tests for ARIMAModel implementation.
 This test suite validates all Gherkin acceptance criteria from US-023 for ARIMA:
 1. ARIMAModel implements BaseModel interface
 2. Train with default order
-3. Handle non-stationary data with differencing
+3. Fit the daily log return series, not price levels
 4. Serialize and deserialize correctly
-5. Valid predictions (> 0, within sanity bounds)
+5. Valid predictions (a finite log return)
 """
 
 import pickle
@@ -47,100 +47,97 @@ class TestARIMAModel:
         assert callable(model.serialize)
         assert callable(ARIMAModel.deserialize)
 
-    def test_train_with_default_order(self, sliding_window_data):
+    def test_train_with_default_order(self, return_training_set):
         """
         Gherkin Scenario: Train ARIMA model with default order
 
-        Given a time series of 60 daily BTC close prices
-        And ARIMA order = (5, 1, 0)
+        Given the daily log return series of 120 days
+        And ARIMA order = (5, 0, 0) (returns are already differenced)
         When I train the ARIMA model
-        Then it fits an ARIMA(5,1,0) model
+        Then it fits an ARIMA(5,0,0) model
         And I can predict 1 step ahead
-        And the prediction is a float price
         """
-        # Given: 60 days of price data
-        X, y = sliding_window_data
-        assert X.shape == (30, 30)
-        assert y.shape == (30,)
+        # Given: return features and next-day log return targets
+        X, y = return_training_set.X, return_training_set.y
 
-        # When: Create ARIMA model with default order (5, 1, 0) and train
-        model = ARIMAModel(order=(5, 1, 0))
+        # When: Create ARIMA model with default order and train
+        model = ARIMAModel(window_days=10, n_features=X.shape[1])
         assert not model.is_trained  # Not trained yet
 
         model.train(X, y)
 
         # Then: Model is trained successfully
         assert model.is_trained
-        assert model.order == (5, 1, 0)
+        assert model.order == (5, 0, 0)
 
-    def test_arima_handles_non_stationary_data(self):
+    def test_arima_is_fitted_on_the_return_series(self, return_training_set):
         """
-        Gherkin Scenario: ARIMA handles non-stationary data with differencing
+        Gherkin Scenario: ARIMA is fitted on log returns, not on price levels
 
-        Given BTC prices with a clear trend (non-stationary)
-        And ARIMA order = (5, 1, 0) with d=1 (first difference)
+        Given return features and next-day log return targets of consecutive days
         When I train the model
-        Then it applies differencing internally
-        And predictions are reasonable (within 10% of recent prices)
+        Then it fits the series: lagged returns of the first sample, then the targets
+        And the other feature columns (volatility, volume changes) are not used
         """
-        # Given: Non-stationary data with upward trend
-        window_days = 30
-        trend = np.linspace(50000, 55000, 90)  # Clear upward trend
-        noise = np.random.normal(0, 500, 90)
-        prices = trend + noise
+        X, y = return_training_set.X, return_training_set.y
+        model = ARIMAModel(window_days=10, n_features=X.shape[1])
 
-        # Create sliding window
-        n_samples = 90 - window_days
-        X = np.array([prices[i : i + window_days] for i in range(n_samples)])
-        y = np.array([prices[i + window_days] for i in range(n_samples)])
-
-        # When: Train ARIMA with d=1 (differencing)
-        model = ARIMAModel(order=(5, 1, 0))
         model.train(X, y)
 
-        # Make prediction
-        X_new = prices[-window_days:].reshape(1, -1)
-        prediction = model.predict(X_new)
+        assert np.allclose(model._training_data[:10], X[0, :10])
+        assert np.allclose(model._training_data[10:], y)
+        assert len(model._training_data) == 10 + len(y)
 
-        # Then: Prediction is reasonable
-        assert isinstance(prediction, float)
-        assert prediction > 0
-
-        # Within 10% of recent average price
-        recent_avg = np.mean(prices[-10:])
-        assert 0.9 * recent_avg <= prediction <= 1.1 * recent_avg
-
-    def test_arima_predict_returns_valid_float(self, sliding_window_data, last_30_days):
+    def test_arima_predict_returns_valid_float(
+        self, return_training_set, latest_return_features
+    ):
         """
-        Gherkin Scenario: ARIMA produces valid predictions
+        Gherkin Scenario: ARIMA predicts the next-day log return
 
         Given a trained ARIMA model
-        When I call model.predict(X) with shape (1, 30)
-        Then it returns a float price prediction
-        And the prediction is > 0 (price cannot be negative)
-        And the prediction is within 50% of the last known price (sanity check)
+        When I call model.predict(X) with the features of the latest day
+        Then it returns a finite float log return
+        And the return is small (a day moves a few percent, not a price)
         """
         # Given: Trained model
-        X, y = sliding_window_data
-        model = ARIMAModel(order=(5, 1, 0))
+        X, y = return_training_set.X, return_training_set.y
+        model = ARIMAModel(window_days=10, n_features=X.shape[1])
         model.train(X, y)
         assert model.is_trained
 
-        # When: Predict with new data
-        X_new = last_30_days
-        assert X_new.shape == (1, 30)
+        # When: Predict with the features of the latest day
+        predicted_return = model.predict(latest_return_features)
 
-        predicted_price = model.predict(X_new)
+        # Then: Returns a valid log return, not a price level
+        assert isinstance(predicted_return, float)
+        assert np.isfinite(predicted_return)
+        assert abs(predicted_return) < 1.0
 
-        # Then: Returns valid float
-        assert isinstance(predicted_price, float)
-        assert predicted_price > 0  # Price must be positive
+    def test_arima_predict_uses_the_latest_returns_without_refitting(
+        self, return_training_set, latest_return_features
+    ):
+        """
+        Gherkin Scenario: ARIMA forecasts from the latest returns
 
-        # Sanity check: prediction within 50% of last price
-        last_price = X_new[0, -1]
-        assert 0.5 * last_price <= predicted_price <= 1.5 * last_price
+        Given a trained ARIMA model
+        When I predict from two different windows of latest returns
+        Then the forecasts differ (the input matters)
+        And the fitted parameters do not change (no refit per prediction)
+        """
+        X, y = return_training_set.X, return_training_set.y
+        model = ARIMAModel(window_days=10, n_features=X.shape[1])
+        model.train(X, y)
+        params_before = np.array(model.fitted_model.params)
 
-    def test_arima_serialize_deserialize(self, sliding_window_data, last_30_days):
+        first = model.predict(latest_return_features)
+        second = model.predict(X[0:1])
+
+        assert first != second
+        assert np.array_equal(params_before, model.fitted_model.params)
+
+    def test_arima_serialize_deserialize(
+        self, return_training_set, latest_return_features
+    ):
         """
         Gherkin Scenario: ARIMA model serializes and deserializes correctly
 
@@ -152,8 +149,8 @@ class TestARIMAModel:
         And predictions from the deserialized model match the original
         """
         # Given: Trained model
-        X, y = sliding_window_data
-        original_model = ARIMAModel(order=(5, 1, 0))
+        X, y = return_training_set.X, return_training_set.y
+        original_model = ARIMAModel(window_days=10, n_features=X.shape[1])
         original_model.train(X, y)
 
         # When: Serialize
@@ -170,20 +167,53 @@ class TestARIMAModel:
         # Then: Returns trained model instance
         assert isinstance(restored_model, ARIMAModel)
         assert restored_model.is_trained
-        assert restored_model.order == (5, 1, 0)
+        assert restored_model.order == (5, 0, 0)
         assert restored_model.seasonal_order == (0, 0, 0, 0)
+        assert restored_model.window_days == 10
+        assert restored_model.n_features == X.shape[1]
 
-        # Verify predictions are similar (ARIMA refits so allow more variation)
-        X_new = last_30_days
-        original_prediction = original_model.predict(X_new)
-        restored_prediction = restored_model.predict(X_new)
+        # The forecast does not refit, so both models agree exactly
+        original_prediction = original_model.predict(latest_return_features)
+        restored_prediction = restored_model.predict(latest_return_features)
+        assert np.isclose(original_prediction, restored_prediction)
 
-        # Predictions should be in similar range (within 20%)
-        assert (
-            0.8 * original_prediction
-            <= restored_prediction
-            <= 1.2 * original_prediction
-        )
+    def test_train_rejects_a_feature_width_other_than_n_features(
+        self, return_training_set
+    ):
+        """
+        Gherkin Scenario: ARIMA rejects features of another width
+
+        Given an ARIMAModel built for the return features (21 columns)
+        When I train it with a matrix of another width
+        Then it raises a ValueError naming the expected feature count
+        """
+        X, y = return_training_set.X, return_training_set.y
+        model = ARIMAModel(window_days=10, n_features=X.shape[1])
+
+        with pytest.raises(ValueError, match="must have 21 features"):
+            model.train(X[:, :20], y)
+
+    def test_n_features_must_cover_the_window(self):
+        """The returns ARIMA reads are columns of X, so X cannot be narrower."""
+        with pytest.raises(ValueError, match="n_features .* must be >= window_days"):
+            ARIMAModel(window_days=10, n_features=5)
+
+    def test_window_days_must_be_positive(self):
+        with pytest.raises(ValueError, match="window_days must be >= 1"):
+            ARIMAModel(window_days=0)
+
+    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+        """An artifact saved before n_features existed loads with n_features=window."""
+        X, y = sliding_window_data
+        model = ARIMAModel(window_days=30)
+        model.train(X, y)
+        state = pickle.loads(model.serialize())
+        del state["n_features"]
+
+        restored = ARIMAModel.deserialize(pickle.dumps(state))
+
+        assert restored.n_features == 30
+        assert restored.is_trained
 
 
 class TestARIMAModelEdgeCases:

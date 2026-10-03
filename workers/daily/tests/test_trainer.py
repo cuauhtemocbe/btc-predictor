@@ -3,7 +3,7 @@ Tests for trainer module - multi-model training functionality.
 
 Covers:
 - train_single_model: Train one model with validation
-- train_all_models: Train all 4 models and select best
+- train_all_models: Train every enabled model and select the best
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -14,6 +14,7 @@ import pytest
 
 from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import Model, Price
+from shared.features import LOG_RETURN_TARGET
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import train_all_models, train_single_model
@@ -196,13 +197,22 @@ class TestTrainAllModels:
 
     @pytest.mark.non_linear
     def test_train_all_models_success(self, db_session, sample_prices):
-        """Test successful training of all models with the configured window."""
-        # 200 days >= 60, so ARIMA is included next to linear, lstm and xgboost
+        """
+        Gherkin Scenario: The trainer covers every enabled model again
+
+        Given 200 daily rows, enough for every model
+        When train_all_models runs with the configured window
+        Then it returns the linear model and the LSTM, XGBoost and ARIMA models
+        """
         models = train_all_models(db_session)
 
-        # Verify we got models back (should be 4: linear, lstm, xgboost, arima)
-        assert len(models) >= 3  # At least 3 models should succeed
-        assert len(models) <= 4  # Maximum 4 models
+        # Linear, LSTM, XGBoost and ARIMA all trained (200 days >= 60 for ARIMA)
+        assert {m.name for m in models} == {
+            "linear_v1",
+            "lstm_v1",
+            "xgboost_v1",
+            "arima_v1",
+        }
 
         # Verify models are saved to database
         all_models = get_all_models(db_session)
@@ -213,15 +223,12 @@ class TestTrainAllModels:
         assert active is not None
         assert active.is_active is True
 
-        # Verify all saved models have validation error in params
+        # Verify all saved models have validation error and the return target
         for model in models:
             assert "validation_error_pct" in model.params
             assert "training_samples" in model.params
             assert "validation_samples" in model.params
-
-        # Verify ARIMA is included (200 days >= 60)
-        model_names = [m.name for m in models]
-        assert any("arima" in name for name in model_names)
+            assert model.params["target"] == LOG_RETURN_TARGET
 
     @pytest.mark.usefixtures("model_registry")
     def test_train_all_models_activates_best(self, db_session, sample_prices):
@@ -295,8 +302,14 @@ class TestTrainAllModels:
 
     @pytest.mark.non_linear
     def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
-        """Test that ARIMA is excluded when less than 60 days available."""
-        # 55 days: enough for window=10 ((10 + 1) * 5 = 55) but not for ARIMA
+        """
+        Gherkin Scenario: ARIMA is excluded below its minimum data threshold
+
+        Given 55 daily rows, fewer than the 60 ARIMA needs
+        When train_all_models runs
+        Then it returns the linear, LSTM and XGBoost models but not ARIMA
+        """
+        # 55 days: enough for window=5 to build the 70/20 split, but not for ARIMA
         for i in range(55):
             price_record = Price(
                 timestamp=datetime.now(UTC) - timedelta(days=55 - i),
@@ -305,21 +318,15 @@ class TestTrainAllModels:
                 low=Decimal(50000 + i * 100 - 500),
                 close=Decimal(50000 + i * 100),
                 volume=Decimal("1000.5"),
-                source="coingecko",
+                source="binance",
             )
             db_session.add(price_record)
 
         db_session.commit()
 
-        models = train_all_models(db_session, window_days=10)
+        models = train_all_models(db_session, window_days=5)
 
-        # Should have 3 models (linear, lstm, xgboost) but NOT arima
-        assert len(models) == 3
-        model_names = [m.name for m in models]
-        assert not any("arima" in name for name in model_names)
-        assert any("linear" in name for name in model_names)
-        assert any("lstm" in name for name in model_names)
-        assert any("xgboost" in name for name in model_names)
+        assert {m.name for m in models} == {"linear_v1", "lstm_v1", "xgboost_v1"}
 
 
 class TestNextVersionNumber:

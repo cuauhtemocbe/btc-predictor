@@ -10,7 +10,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
-from shared.features import build_training_set, feature_count
+from shared.features import (
+    FeatureSet,
+    build_prediction_features,
+    build_training_set,
+    feature_count,
+)
 from workers.daily.models import LinearRegressionModel
 
 
@@ -98,6 +103,39 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
         >>> assert X_new.shape == (1, 30)
     """
     return synthetic_prices_60_days[-30:].reshape(1, -1)
+
+
+RETURN_WINDOW = 10
+RETURN_FEATURES = feature_count(RETURN_WINDOW)
+
+
+def _return_walk(days: int = 120) -> tuple[np.ndarray, np.ndarray]:
+    """Closes and volumes of a noisy random walk (daily log returns ~ 2%)."""
+    rng = np.random.default_rng(7)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, days)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, days))
+    return closes, volumes
+
+
+@pytest.fixture
+def return_training_set() -> FeatureSet:
+    """Return features and next-day log return targets, as the trainers build them.
+
+    ``RETURN_WINDOW`` days of window give ``RETURN_FEATURES`` columns; 120 days of
+    history give 109 samples.
+    """
+    closes, volumes = _return_walk()
+    return build_training_set(closes, volumes, RETURN_WINDOW)
+
+
+@pytest.fixture
+def latest_return_features() -> np.ndarray:
+    """Features of the latest day, shape (1, RETURN_FEATURES), as the predictor gets.
+
+    Built with build_prediction_features, the code the predictor runs.
+    """
+    closes, volumes = _return_walk()
+    return build_prediction_features(closes, volumes, RETURN_WINDOW)
 
 
 # ============================================================================

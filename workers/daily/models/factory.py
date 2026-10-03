@@ -1,8 +1,8 @@
 """
 Model construction shared by the daily trainer and the walk-forward backtest.
 
-One place knows how each model class is built (ARIMA takes an ``order``, Linear
-takes the feature count, the rest take the window), so the backtest instantiates
+One place knows how each model class is built (every model takes the window and
+the feature count, ARIMA also takes an ``order``), so the backtest instantiates
 exactly the models the daily worker does. LSTM, XGBoost and ARIMA are imported on
 demand: loading them pulls in TensorFlow, XGBoost and statsmodels.
 """
@@ -12,7 +12,9 @@ from workers.daily.models.linear import LinearRegressionModel
 
 MODEL_NAMES = ("linear", "xgboost", "lstm", "arima")
 
-ARIMA_ORDER = (5, 1, 0)
+# The series ARIMA fits is the daily log return, which is already differenced, so
+# d = 0 (the d = 1 of a price-level ARIMA would difference it twice).
+ARIMA_ORDER = (5, 0, 0)
 
 
 def model_class_for(name: str) -> type[BaseModel]:
@@ -52,13 +54,15 @@ def instantiate_model(
         model_class: Class to instantiate.
         model_name: Model family name; ``arima`` is built with ARIMA_ORDER.
         window_days: Sliding-window size.
-        n_features: Feature columns of the training matrix (used by Linear).
+        n_features: Feature columns of the training matrix.
     """
     if model_name == "arima":
-        return model_class(order=ARIMA_ORDER)  # type: ignore[call-arg]
-    if issubclass(model_class, LinearRegressionModel):
-        return model_class(window_days=window_days, n_features=n_features)
-    return model_class(window_days=window_days)  # type: ignore[call-arg]
+        return model_class(  # type: ignore[call-arg]
+            order=ARIMA_ORDER, window_days=window_days, n_features=n_features
+        )
+    return model_class(  # type: ignore[call-arg]
+        window_days=window_days, n_features=n_features
+    )
 
 
 def build_model(name: str, window_days: int, n_features: int) -> BaseModel:
