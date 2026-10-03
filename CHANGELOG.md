@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-module coverage gate: `[tool.coverage_thresholds]` in `pyproject.toml` sets a
+  minimum line coverage for each critical module (trainers, predictors, evaluators,
+  models, backtest, crud, utils, features, baselines, ingest, API routers), and
+  `scripts/check_coverage_thresholds.py` fails naming every module that is below its
+  minimum or missing from `coverage.xml`. It runs in the "Docker quality gate" job right
+  after the coverage run and in `scripts/validate.sh` (pre-push) (#68).
+- CI, `scripts/validate.sh`, the pre-commit hooks and `make lint` run ruff on `shared`,
+  `api`, `workers` and `scripts`, and `mypy --strict` on `shared`, `workers`, `api`
+  and `scripts` (test code outside `shared/tests` excluded) (#68).
 - Asset selector on the dashboard, models and backtesting pages: a `symbol` query
   parameter (`BTCUSDT` by default, `PAXGUSDT` for gold) scopes every table, chart
   and JSON endpoint (`/api/predictions/*`, `/api/prices`, `/api/backtesting/metrics`,
