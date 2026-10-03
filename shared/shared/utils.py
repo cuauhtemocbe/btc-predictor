@@ -857,6 +857,107 @@ def get_cumulative_pnl(
     return result
 
 
+def _round_or_none(value: float | None, digits: int) -> float | None:
+    """Round ``value`` to ``digits`` decimals, keeping ``None`` as ``None``."""
+    return round(value, digits) if value is not None else None
+
+
+def _count_evaluated_predictions(
+    db: Session,
+    model_id: int,
+    start_date: date | None,
+    end_date: date | None,
+    timeframe: str | None,
+) -> int:
+    """Count the evaluated predictions of a model within the given filters."""
+    from shared.db.models import Prediction
+
+    query = db.query(Prediction).filter(
+        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    )
+
+    if start_date:
+        query = query.filter(Prediction.predicted_for >= start_date)
+    if end_date:
+        query = query.filter(Prediction.predicted_for <= end_date)
+    if timeframe:
+        query = query.filter(Prediction.timeframe == timeframe)
+
+    return query.count()
+
+
+def _calculate_model_metrics(
+    db: Session,
+    model_id: int,
+    predictions_count: int,
+    start_date: date | None,
+    end_date: date | None,
+    pnl_column: str,
+    timeframe: str | None,
+    capital: float,
+) -> dict[str, float | None]:
+    """
+    Calculate the raw (unrounded) performance metrics of one model.
+
+    Every metric is None when the model has no evaluated predictions.
+    """
+    if predictions_count <= 0:
+        return {
+            "accuracy": None,
+            "mape": None,
+            "total_pnl": None,
+            "win_rate": None,
+            "sharpe": None,
+            "max_dd": None,
+            "max_dd_pct": None,
+        }
+
+    return {
+        "accuracy": calculate_accuracy(db, model_id, start_date, end_date, timeframe),
+        "mape": calculate_model_mape(db, model_id, start_date, end_date, timeframe),
+        "total_pnl": calculate_total_pnl(
+            db, model_id, start_date, end_date, pnl_column, timeframe
+        ),
+        "win_rate": calculate_win_rate(
+            db, model_id, start_date, end_date, pnl_column, timeframe
+        ),
+        "sharpe": calculate_sharpe_ratio(
+            db,
+            model_id,
+            start_date,
+            end_date,
+            pnl_column,
+            timeframe=timeframe,
+            capital=capital,
+        ),
+        "max_dd": calculate_max_drawdown(
+            db, model_id, start_date, end_date, pnl_column, timeframe
+        ),
+        "max_dd_pct": calculate_max_drawdown_pct(
+            db,
+            model_id,
+            start_date,
+            end_date,
+            pnl_column,
+            timeframe,
+            capital=capital,
+        ),
+    }
+
+
+def _round_model_metrics(metrics: dict[str, float | None]) -> dict[str, float | None]:
+    """Round raw model metrics to the precision exposed by the API."""
+    return {
+        "accuracy": _round_or_none(metrics["accuracy"], 4),
+        "avg_error_pct": _round_or_none(metrics["mape"], 2),
+        "total_pnl": _round_or_none(metrics["total_pnl"], 2),
+        "win_rate": _round_or_none(metrics["win_rate"], 4),
+        "sharpe_ratio": _round_or_none(metrics["sharpe"], 2),
+        "max_drawdown": _round_or_none(metrics["max_dd"], 2),
+        "max_drawdown_pct": _round_or_none(metrics["max_dd_pct"], 2),
+    }
+
+
 def get_all_models_metrics(
     db: Session,
     start_date: date | None = None,
@@ -916,7 +1017,7 @@ def get_all_models_metrics(
             ...
         ]
     """
-    from shared.db.models import Model, Prediction
+    from shared.db.models import Model
     from shared.model_baselines import get_model_baseline
 
     # Get all models (of one asset when a symbol is given)
@@ -927,59 +1028,19 @@ def get_all_models_metrics(
 
     results = []
     for model in models:
-        # Count evaluated predictions
-        query = db.query(Prediction).filter(
-            Prediction.model_id == model.id, Prediction.actual_price.isnot(None)
+        predictions_count = _count_evaluated_predictions(
+            db, model.id, start_date, end_date, timeframe
         )
-
-        if start_date:
-            query = query.filter(Prediction.predicted_for >= start_date)
-        if end_date:
-            query = query.filter(Prediction.predicted_for <= end_date)
-        if timeframe:
-            query = query.filter(Prediction.timeframe == timeframe)
-
-        predictions_count = query.count()
-
-        # Calculate metrics (only if there are predictions)
-        if predictions_count > 0:
-            accuracy = calculate_accuracy(db, model.id, start_date, end_date, timeframe)
-            mape = calculate_model_mape(db, model.id, start_date, end_date, timeframe)
-            total_pnl = calculate_total_pnl(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            win_rate = calculate_win_rate(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            sharpe = calculate_sharpe_ratio(
-                db,
-                model.id,
-                start_date,
-                end_date,
-                pnl_column,
-                timeframe=timeframe,
-                capital=capital,
-            )
-            max_dd = calculate_max_drawdown(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            max_dd_pct = calculate_max_drawdown_pct(
-                db,
-                model.id,
-                start_date,
-                end_date,
-                pnl_column,
-                timeframe,
-                capital=capital,
-            )
-        else:
-            accuracy = None
-            mape = None
-            total_pnl = None
-            win_rate = None
-            sharpe = None
-            max_dd = None
-            max_dd_pct = None
+        metrics = _calculate_model_metrics(
+            db,
+            model.id,
+            predictions_count,
+            start_date,
+            end_date,
+            pnl_column,
+            timeframe,
+            capital,
+        )
 
         results.append(
             {
@@ -989,15 +1050,7 @@ def get_all_models_metrics(
                 "is_active": model.is_active,
                 "trained_at": model.trained_at,
                 "predictions_count": predictions_count,
-                "accuracy": round(accuracy, 4) if accuracy is not None else None,
-                "avg_error_pct": round(mape, 2) if mape is not None else None,
-                "total_pnl": round(total_pnl, 2) if total_pnl is not None else None,
-                "win_rate": round(win_rate, 4) if win_rate is not None else None,
-                "sharpe_ratio": round(sharpe, 2) if sharpe is not None else None,
-                "max_drawdown": round(max_dd, 2) if max_dd is not None else None,
-                "max_drawdown_pct": (
-                    round(max_dd_pct, 2) if max_dd_pct is not None else None
-                ),
+                **_round_model_metrics(metrics),
                 "symbol": model.symbol,
                 "baseline": get_model_baseline(
                     db, model.id, model.symbol, start_date, end_date, timeframe
