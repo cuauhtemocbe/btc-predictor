@@ -16,7 +16,9 @@ from shared.config import Settings
 class TestConfigurationLoading:
     """Test loading configuration from environment variables."""
 
-    def test_load_database_url_from_environment(self, monkeypatch):
+    def test_load_database_url_from_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Scenario: Load DATABASE_URL from environment
         Given the environment variable DATABASE_URL is set to "postgresql://user:pass@localhost/btcdb"
@@ -33,7 +35,9 @@ class TestConfigurationLoading:
         # Then
         assert settings.database_url == expected_url
 
-    def test_database_url_with_different_formats(self, monkeypatch):
+    def test_database_url_with_different_formats(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that various PostgreSQL URL formats are accepted."""
         test_urls = [
             "postgresql://user:pass@localhost/db",
@@ -51,7 +55,9 @@ class TestConfigurationLoading:
 class TestConfigurationValidation:
     """Test configuration validation and error handling."""
 
-    def test_missing_database_url_raises_validation_error(self, clean_env):
+    def test_missing_database_url_raises_validation_error(
+        self, clean_env: None
+    ) -> None:
         """
         Scenario: Missing DATABASE_URL raises error
         Given the DATABASE_URL environment variable is not set
@@ -68,7 +74,9 @@ class TestConfigurationValidation:
         error = exc_info.value
         assert "database_url" in str(error).lower()
 
-    def test_empty_database_url_raises_validation_error(self, monkeypatch):
+    def test_empty_database_url_raises_validation_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Scenario: Empty DATABASE_URL raises error (ZOMBIES: Zero case)
         Given the DATABASE_URL environment variable is set to empty string
@@ -86,7 +94,9 @@ class TestConfigurationValidation:
         error = exc_info.value
         assert "database_url" in str(error).lower()
 
-    def test_whitespace_only_database_url_raises_validation_error(self, monkeypatch):
+    def test_whitespace_only_database_url_raises_validation_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Scenario: Whitespace-only DATABASE_URL raises error (ZOMBIES: Zero case)
         Given the DATABASE_URL is only whitespace
@@ -107,7 +117,9 @@ class TestConfigurationValidation:
 class TestConfigurationSecurity:
     """Test security-related configuration behavior."""
 
-    def test_settings_can_be_created_with_credentials(self, mock_database_url):
+    def test_settings_can_be_created_with_credentials(
+        self, mock_database_url: str
+    ) -> None:
         """
         Scenario: DATABASE_URL with credentials can be loaded (ZOMBIES: Security)
         Given a DATABASE_URL containing credentials

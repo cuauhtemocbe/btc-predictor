@@ -18,7 +18,7 @@ from shared.db.database import SessionLocal, engine, get_db
 class TestPostgreSQLIntegration:
     """Integration tests with real PostgreSQL database."""
 
-    def test_engine_connects_to_database(self):
+    def test_engine_connects_to_database(self) -> None:
         """
         Scenario: Engine connects to PostgreSQL
         Given a PostgreSQL database is running
@@ -29,7 +29,7 @@ class TestPostgreSQLIntegration:
         with engine.connect() as conn:
             assert conn is not None
 
-    def test_session_executes_simple_query(self):
+    def test_session_executes_simple_query(self) -> None:
         """
         Scenario: Session can execute queries
         Given a database session
@@ -50,7 +50,7 @@ class TestPostgreSQLIntegration:
         finally:
             session.close()
 
-    def test_session_can_query_pg_version(self):
+    def test_session_can_query_pg_version(self) -> None:
         """
         Scenario: Verify connected to PostgreSQL (not other DB)
         Given a database session
@@ -71,7 +71,7 @@ class TestPostgreSQLIntegration:
         finally:
             session.close()
 
-    def test_get_db_dependency_with_real_database(self):
+    def test_get_db_dependency_with_real_database(self) -> None:
         """
         Scenario: get_db() works with real database
         Given the get_db dependency
@@ -87,6 +87,7 @@ class TestPostgreSQLIntegration:
         row = result.fetchone()
 
         # Then
+        assert row is not None
         assert row[0] == 1
 
         # Cleanup - simulate context exit
@@ -95,7 +96,7 @@ class TestPostgreSQLIntegration:
         except StopIteration:
             pass  # Expected
 
-    def test_connection_pool_handles_multiple_sessions(self):
+    def test_connection_pool_handles_multiple_sessions(self) -> None:
         """
         Scenario: Connection pool works correctly
         Given multiple concurrent sessions
@@ -115,7 +116,7 @@ class TestPostgreSQLIntegration:
             for session in sessions:
                 session.close()
 
-    def test_session_transaction_rollback(self):
+    def test_session_transaction_rollback(self) -> None:
         """
         Scenario: Session rollback works (ZOMBIES: Boundaries)
         Given a session with uncommitted changes
@@ -143,7 +144,7 @@ class TestPostgreSQLIntegration:
         finally:
             session.close()
 
-    def test_session_transaction_commit(self):
+    def test_session_transaction_commit(self) -> None:
         """
         Scenario: Session commit works (ZOMBIES: Boundaries)
         Given a session
@@ -171,7 +172,7 @@ class TestPostgreSQLIntegration:
 class TestDatabasePerformance:
     """Optional performance tests for database operations."""
 
-    def test_connection_pool_pre_ping_prevents_stale_connections(self):
+    def test_connection_pool_pre_ping_prevents_stale_connections(self) -> None:
         """
         Scenario: pool_pre_ping prevents using stale connections
         Given pool_pre_ping is enabled

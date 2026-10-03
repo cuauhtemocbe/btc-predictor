@@ -190,8 +190,8 @@ docker compose exec api ruff check shared api workers scripts
 docker compose exec api ruff format shared api workers scripts
 
 # Types: mypy --strict on shared, workers, api and scripts, test code included
-# (workers/*/tests, api/tests and scripts/tests; no test directory is excluded).
-# Only the "tests.*" modules of shared/tests keep a relaxed override in pyproject.toml.
+# (shared/tests, workers/*/tests, api/tests and scripts/tests; no test directory
+# is excluded and no relaxed override remains in pyproject.toml).
 docker compose exec api python -m mypy shared/shared shared/btc_shared shared/tests workers api scripts
 ```
 

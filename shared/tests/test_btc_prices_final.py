@@ -5,13 +5,15 @@ Prerequisites: Run migrations before tests:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from shared.config import settings
 from shared.db.models import Price
@@ -19,7 +21,7 @@ from shared.db.models import Price
 
 # Module-level engine (shared across all tests)
 @pytest.fixture(scope="module")
-def engine():
+def engine() -> Iterator[Engine]:
     """Create engine once for all tests."""
     eng = create_engine(
         settings.database_url, pool_pre_ping=True, pool_recycle=3600, echo=False
@@ -30,7 +32,7 @@ def engine():
 
 # Function-level session with rollback
 @pytest.fixture(scope="function")
-def session(engine):
+def session(engine: Engine) -> Iterator[Session]:
     """Create session with automatic rollback for test isolation."""
     connection = engine.connect()
     transaction = connection.begin()
@@ -56,7 +58,7 @@ class TestGherkinScenario1:
     And (symbol, timestamp) has a UNIQUE constraint
     """
 
-    def test_table_exists_with_correct_schema(self, engine):
+    def test_table_exists_with_correct_schema(self, engine: Engine) -> None:
         """Verify prices table exists with correct structure."""
         inspector = inspect(engine)
 
@@ -107,7 +109,7 @@ class TestGherkinScenario2:
     And querying by timestamp returns the record
     """
 
-    def test_insert_and_query_valid_record(self, session):
+    def test_insert_and_query_valid_record(self, session: Session) -> None:
         """Test inserting a valid OHLCV record."""
         test_time = datetime(2026, 5, 16, 14, 0, 0, tzinfo=UTC)
 
@@ -149,7 +151,7 @@ class TestGherkinScenario3:
     And the second record is not saved
     """
 
-    def test_duplicate_timestamp_raises_integrity_error(self, engine):
+    def test_duplicate_timestamp_raises_integrity_error(self, engine: Engine) -> None:
         """Test that duplicate timestamp is rejected by UNIQUE constraint."""
         from sqlalchemy.orm import sessionmaker
 
@@ -221,7 +223,7 @@ class TestGherkinScenario4:
     """
 
     @pytest.mark.skip(reason="Verified manually - would break other tests")
-    def test_downgrade_removes_table(self):
+    def test_downgrade_removes_table(self) -> None:
         """Downgrade scenario tested manually in Task 4."""
         pass
 
@@ -229,7 +231,7 @@ class TestGherkinScenario4:
 class TestZombiesEdgeCases:
     """Additional edge cases from ZOMBIES analysis."""
 
-    def test_zero_volume_is_valid(self, session):
+    def test_zero_volume_is_valid(self, session: Session) -> None:
         """ZOMBIES Z: Zero volume should be accepted."""
         price = Price(
             timestamp=datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC),
@@ -245,7 +247,7 @@ class TestZombiesEdgeCases:
 
         assert price.id is not None, "Should save record with zero volume"
 
-    def test_null_timestamp_rejected(self, session):
+    def test_null_timestamp_rejected(self, session: Session) -> None:
         """ZOMBIES E: NULL timestamp should violate NOT NULL constraint."""
         price = Price(
             timestamp=None,  # NULL should fail
@@ -263,7 +265,7 @@ class TestZombiesEdgeCases:
 
         session.rollback()
 
-    def test_large_price_values(self, session):
+    def test_large_price_values(self, session: Session) -> None:
         """ZOMBIES B: Test boundary values (large Bitcoin price)."""
         # BTC could theoretically reach very high values
         large_price = Decimal("999999999.99999999")  # Within NUMERIC(18,8)

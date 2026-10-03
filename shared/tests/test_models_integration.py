@@ -11,13 +11,15 @@ from datetime import UTC, date, datetime
 import numpy as np
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from shared.db.models import Model
 
 
 # Gherkin Scenario 1: Create models table via migration
-def test_models_table_exists(db_engine, apply_migrations):
+def test_models_table_exists(db_engine: Engine, apply_migrations: None) -> None:
     """
     Scenario: Create models table via migration
         When I run "alembic upgrade head"
@@ -63,7 +65,7 @@ def test_models_table_exists(db_engine, apply_migrations):
     assert "BOOLEAN" in str(columns["is_active"]["type"])
 
 
-def test_models_table_constraints(db_engine, apply_migrations):
+def test_models_table_constraints(db_engine: Engine, apply_migrations: None) -> None:
     """
     Verify constraints and indexes exist on models table.
     """
@@ -100,7 +102,7 @@ def test_models_table_constraints(db_engine, apply_migrations):
 
 # Gherkin Scenario 2: Insert trained model
 @pytest.fixture
-def sample_model_artifact():
+def sample_model_artifact() -> bytes:
     """
     Create and serialize a real LinearRegressionModel for testing.
     """
@@ -118,7 +120,9 @@ def sample_model_artifact():
     return pickle.dumps(model)
 
 
-def test_insert_and_retrieve_model(db_session, sample_model_artifact):
+def test_insert_and_retrieve_model(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Scenario: Insert trained model
         Given I have a serialized LinearRegressionModel as bytes
@@ -154,6 +158,7 @@ def test_insert_and_retrieve_model(db_session, sample_model_artifact):
     assert retrieved is not None
     assert retrieved.name == "linear_v1"
     assert retrieved.version == "1.0.0"
+    assert retrieved is not None
     assert retrieved.params["window_days"] == 30
     assert retrieved.is_active is True
     assert retrieved.train_from == train_from
@@ -166,7 +171,9 @@ def test_insert_and_retrieve_model(db_session, sample_model_artifact):
 
 
 # Gherkin Scenario 3: Retrieve active model
-def test_retrieve_active_model(db_session, sample_model_artifact):
+def test_retrieve_active_model(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Scenario: Retrieve active model
         Given the models table has 3 records for name="linear_v1"
@@ -232,7 +239,9 @@ def test_retrieve_active_model(db_session, sample_model_artifact):
 
 
 # Gherkin Scenario 4: Store params as JSONB
-def test_jsonb_params_queries(db_session, sample_model_artifact):
+def test_jsonb_params_queries(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Scenario: Store params as JSONB
         Given I insert a model with params={"window_days": 30, "features": ["close"]}
@@ -256,6 +265,7 @@ def test_jsonb_params_queries(db_session, sample_model_artifact):
 
     # Query back
     retrieved = db_session.query(Model).filter_by(name="test_jsonb").first()
+    assert retrieved is not None
     assert retrieved.params["window_days"] == 30
     assert retrieved.params["features"] == ["close", "volume"]
 
@@ -268,7 +278,9 @@ def test_jsonb_params_queries(db_session, sample_model_artifact):
 
 
 # Gherkin Scenario 5: Constraint validation
-def test_unique_constraint_violation(db_session, sample_model_artifact):
+def test_unique_constraint_violation(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test UNIQUE constraint: duplicate (name, version) should raise IntegrityError.
     """
@@ -306,7 +318,9 @@ def test_unique_constraint_violation(db_session, sample_model_artifact):
     assert "unique_model_version" in str(exc_info.value)
 
 
-def test_check_constraint_violation(db_session, sample_model_artifact):
+def test_check_constraint_violation(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test CHECK constraint: train_to < train_from should raise IntegrityError.
     """
@@ -330,8 +344,8 @@ def test_check_constraint_violation(db_session, sample_model_artifact):
 
 
 def test_one_active_version_per_name_timeframe_constraint(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test partial unique index ix_models_one_active_version_per_name_timeframe:
     two active rows with the same (family, timeframe) must be rejected at the
@@ -375,8 +389,8 @@ def test_one_active_version_per_name_timeframe_constraint(
 
 
 def test_active_version_constraint_allows_different_name_or_timeframe(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     The partial unique index only blocks duplicates of the SAME
     (name, timeframe). A different name (multi-model mode) or a different
@@ -425,7 +439,9 @@ def test_active_version_constraint_allows_different_name_or_timeframe(
     assert linear_1w.is_active is True
 
 
-def test_trained_at_not_null_constraint(db_session, sample_model_artifact):
+def test_trained_at_not_null_constraint(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     MUTATION TEST: Verify trained_at is NOT NULL.
 

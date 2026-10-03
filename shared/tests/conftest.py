@@ -2,19 +2,22 @@
 Pytest configuration and fixtures for shared package tests.
 """
 
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import pytest
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session
 
 from shared.config import settings
 from shared.db.models import Model, Prediction, Price
 
 
 @pytest.fixture
-def clean_env(monkeypatch):
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Fixture that ensures DATABASE_URL is not set in environment.
     Useful for testing validation errors.
@@ -23,7 +26,7 @@ def clean_env(monkeypatch):
 
 
 @pytest.fixture
-def mock_database_url(monkeypatch):
+def mock_database_url(monkeypatch: pytest.MonkeyPatch) -> str:
     """
     Fixture that sets a valid DATABASE_URL for testing.
     """
@@ -38,7 +41,7 @@ def mock_database_url(monkeypatch):
 
 
 @pytest.fixture(scope="function")
-async def async_db_session():
+async def async_db_session() -> AsyncIterator[AsyncSession]:
     """
     Create an async database session with automatic rollback after test.
     This ensures test isolation - changes are not persisted.
@@ -57,10 +60,11 @@ async def async_db_session():
         session = AsyncSessionLocal()
 
         # Override commit to do nothing (let fixture handle rollback)
-        async def _do_not_commit(*args, **kwargs):
+        async def _do_not_commit(*args: object, **kwargs: object) -> None:
             pass
 
-        session.commit = _do_not_commit
+        # Swallow commits so the surrounding transaction rolls back at the end
+        session.commit = _do_not_commit  # type: ignore[method-assign]
 
         yield session
 
@@ -72,13 +76,13 @@ async def async_db_session():
 
 # Compatibility fixtures for tests that still reference old fixture names
 @pytest.fixture
-def db_engine(db_engine_session):
+def db_engine(db_engine_session: Engine) -> Engine:
     """Compatibility: points to root db_engine_session"""
     return db_engine_session
 
 
 @pytest.fixture
-def apply_migrations():
+def apply_migrations() -> Iterator[None]:
     """
     Compatibility: no-op fixture.
     Schema is now created by autouse fixture in root conftest.py.
@@ -87,7 +91,7 @@ def apply_migrations():
 
 
 @pytest.fixture
-def sample_btc_price(db_session):
+def sample_btc_price(db_session: Session) -> Callable[..., Price]:
     """
     Factory fixture for creating sample Price records.
     Automatically cleans up after test (via db_session rollback).
@@ -123,7 +127,7 @@ def sample_btc_price(db_session):
 
 
 @pytest.fixture
-def sample_model(db_session):
+def sample_model(db_session: Session) -> Callable[..., Model]:
     """
     Factory fixture for creating sample Model records.
     Automatically cleans up after test (via db_session rollback).
@@ -167,7 +171,9 @@ def sample_model(db_session):
 
 
 @pytest.fixture
-def sample_prediction(db_session, sample_model):
+def sample_prediction(
+    db_session: Session, sample_model: Callable[..., Model]
+) -> Callable[..., Prediction]:
     """
     Factory fixture for creating sample Prediction records.
 
@@ -215,7 +221,9 @@ def sample_prediction(db_session, sample_model):
 
 
 @pytest.fixture
-def evaluated_prediction(db_session, sample_model):
+def evaluated_prediction(
+    db_session: Session, sample_model: Callable[..., Model]
+) -> Callable[..., Prediction]:
     """
     Factory fixture for creating evaluated Prediction records.
 

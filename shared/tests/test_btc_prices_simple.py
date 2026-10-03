@@ -5,20 +5,22 @@ These tests assume migrations have been applied:
     docker compose exec api sh -c "cd shared && alembic upgrade head"
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from shared.config import settings
 from shared.db.models import Price
 
 
 @pytest.fixture(scope="module")
-def engine():
+def engine() -> Iterator[Engine]:
     """Create engine for tests."""
     eng = create_engine(settings.database_url)
     yield eng
@@ -26,12 +28,12 @@ def engine():
 
 
 @pytest.fixture(scope="function")
-def session(engine):
+def session(engine: Engine) -> Iterator[Session]:
     """Create session with automatic rollback."""
     connection = engine.connect()
     transaction = connection.begin()
-    Session = sessionmaker(bind=connection)
-    sess = Session()
+    SessionLocal = sessionmaker(bind=connection)
+    sess = SessionLocal()
 
     yield sess
 
@@ -40,7 +42,7 @@ def session(engine):
     connection.close()
 
 
-def test_insert_valid_ohlcv_record(session):
+def test_insert_valid_ohlcv_record(session: Session) -> None:
     """Gherkin Scenario 2: Insert valid OHLCV record."""
     test_timestamp = datetime(2026, 5, 16, 15, 0, 0, tzinfo=UTC)
 
@@ -65,7 +67,7 @@ def test_insert_valid_ohlcv_record(session):
     assert retrieved.source == "binance"
 
 
-def test_duplicate_timestamp_rejected(session):
+def test_duplicate_timestamp_rejected(session: Session) -> None:
     """Gherkin Scenario 3: Duplicate timestamp is rejected."""
     test_timestamp = datetime(2026, 5, 16, 16, 0, 0, tzinfo=UTC)
 
@@ -98,7 +100,7 @@ def test_duplicate_timestamp_rejected(session):
     session.rollback()
 
 
-def test_zero_volume_is_valid(session):
+def test_zero_volume_is_valid(session: Session) -> None:
     """ZOMBIES edge case: Zero volume is valid."""
     price = Price(
         timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),

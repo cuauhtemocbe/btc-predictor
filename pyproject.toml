@@ -175,15 +175,6 @@ exclude = [
 module = ["sklearn.*", "statsmodels.*", "xgboost.*", "tensorflow.*", "keras.*"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-strict_optional = false
-implicit_optional = true
-disable_error_code = ["method-assign"]
-
 [tool.ruff]
 line-length = 88
 target-version = "py313"

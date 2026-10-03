@@ -125,16 +125,18 @@ def _report(edge: float | None, significant: bool | None) -> BaselineReport:
         (None, None, None),
     ],
 )
-def test_verdict(edge, significant, expected):
+def test_verdict(
+    edge: float | None, significant: bool | None, expected: str | None
+) -> None:
     assert verdict(_report(edge, significant)) == expected
 
 
-def test_equal_to_the_baseline_is_not_beating_it():
+def test_equal_to_the_baseline_is_not_beating_it() -> None:
     """Even a 'significant' tie (impossible by construction) is not a win."""
     assert verdict(_report(0.0, True)) == NOT_BEATING
 
 
-def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session):
+def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session) -> None:
     """Alternating 100/110 closes: always-up 50%, persistence 0%, model 100%."""
     closes = [100.0 if i % 2 == 0 else 110.0 for i in range(12)]
     model = _model(db_session, "BTCUSDT")
@@ -143,6 +145,7 @@ def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session):
 
     baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
 
+    assert baseline is not None
     assert baseline["n_days"] == 10
     assert baseline["always_up_accuracy"] == 0.5
     assert baseline["persistence_accuracy"] == 0.0
@@ -151,7 +154,7 @@ def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session):
     assert baseline["verdict"] == BEATS
 
 
-def test_baseline_respects_the_date_filters(db_session: Session):
+def test_baseline_respects_the_date_filters(db_session: Session) -> None:
     closes = [100.0 + i for i in range(12)]
     model = _model(db_session, "BTCUSDT")
     _prices(db_session, "BTCUSDT", closes)
@@ -166,10 +169,13 @@ def test_baseline_respects_the_date_filters(db_session: Session):
         timeframe="1d",
     )
 
+    assert baseline is not None
     assert baseline["n_days"] == 4
 
 
-def test_persistence_skips_days_without_a_stored_previous_close(db_session: Session):
+def test_persistence_skips_days_without_a_stored_previous_close(
+    db_session: Session,
+) -> None:
     """Prices only exist from day 5: earlier days score always-up, not persistence."""
     closes = [100.0 + i for i in range(12)]
     model = _model(db_session, "BTCUSDT")
@@ -178,11 +184,12 @@ def test_persistence_skips_days_without_a_stored_previous_close(db_session: Sess
 
     baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
 
+    assert baseline is not None
     assert baseline["n_days"] == 10
     assert baseline["persistence_n_days"] == 5  # days 7..11 have a stored D-2
 
 
-def test_previous_close_comes_from_the_models_own_symbol(db_session: Session):
+def test_previous_close_comes_from_the_models_own_symbol(db_session: Session) -> None:
     """Gold prices must not feed the BTC persistence baseline."""
     btc_closes = [100.0 + i for i in range(6)]  # rising: persistence is right
     gold_closes = [200.0 - i for i in range(6)]  # falling: persistence would be wrong
@@ -193,13 +200,14 @@ def test_previous_close_comes_from_the_models_own_symbol(db_session: Session):
 
     baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
 
+    assert baseline is not None
     assert baseline["persistence_accuracy"] == 1.0
 
 
 @pytest.mark.parametrize("timeframe", ["1w", "1h", None])
 def test_baseline_is_unavailable_outside_the_daily_timeframe(
-    db_session: Session, timeframe
-):
+    db_session: Session, timeframe: str | None
+) -> None:
     closes = [100.0 + i for i in range(8)]
     model = _model(db_session, "BTCUSDT")
     _prices(db_session, "BTCUSDT", closes)
@@ -212,13 +220,13 @@ def test_baseline_is_unavailable_outside_the_daily_timeframe(
 
 def test_baseline_is_none_for_a_model_without_evaluated_predictions(
     db_session: Session,
-):
+) -> None:
     model = _model(db_session, "BTCUSDT")
 
     assert get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d") is None
 
 
-def test_daily_closes_takes_the_latest_row_of_each_day(db_session: Session):
+def test_daily_closes_takes_the_latest_row_of_each_day(db_session: Session) -> None:
     day = _at(FIRST_DAY)
     for hour, close in [(1, "10"), (23, "30"), (12, "20")]:
         value = Decimal(close)
@@ -239,7 +247,7 @@ def test_daily_closes_takes_the_latest_row_of_each_day(db_session: Session):
     assert daily_closes(db_session, "BTCUSDT", FIRST_DAY) == {FIRST_DAY: Decimal("30")}
 
 
-def test_symbol_filter_scopes_every_shared_query(db_session: Session):
+def test_symbol_filter_scopes_every_shared_query(db_session: Session) -> None:
     closes = [100.0 + i for i in range(6)]
     btc = _model(db_session, "BTCUSDT")
     gold = _model(db_session, "PAXGUSDT")

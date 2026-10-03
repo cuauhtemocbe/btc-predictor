@@ -60,7 +60,7 @@ def binomial_tail(k: int, n: int, p: float) -> float:
 # --- Scenario: Baselines are computed over the same evaluated days as the model ---
 
 
-def test_baselines_cover_exactly_the_evaluated_days():
+def test_baselines_cover_exactly_the_evaluated_days() -> None:
     # Given a model evaluated on 200 days
     directions = "UUDUD" * 40
     days = days_from_directions(directions, predicted="U" * 200)
@@ -75,7 +75,7 @@ def test_baselines_cover_exactly_the_evaluated_days():
     assert report.persistence_n_days == 199
 
 
-def test_baselines_ignore_days_outside_the_given_list():
+def test_baselines_ignore_days_outside_the_given_list() -> None:
     days = days_from_directions("UUDU" * 10)
 
     assert evaluate_baselines(days[:10]).n_days == 10
@@ -92,7 +92,9 @@ def test_baselines_ignore_days_outside_the_given_list():
         ("UDUD", "persistence", 0.0),
     ],
 )
-def test_baseline_accuracy_hand_checked(directions, baseline, accuracy):
+def test_baseline_accuracy_hand_checked(
+    directions: str, baseline: str, accuracy: float
+) -> None:
     report = evaluate_baselines(days_from_directions(directions))
 
     value = {
@@ -102,7 +104,7 @@ def test_baseline_accuracy_hand_checked(directions, baseline, accuracy):
     assert value == accuracy
 
 
-def test_persistence_scores_a_trending_series_perfectly():
+def test_persistence_scores_a_trending_series_perfectly() -> None:
     # after the first day, every day repeats the previous direction
     report = evaluate_baselines(days_from_directions("UUUUU"))
 
@@ -110,7 +112,7 @@ def test_persistence_scores_a_trending_series_perfectly():
     assert report.persistence_n_days == 4
 
 
-def test_persistence_skips_days_without_previous_close():
+def test_persistence_skips_days_without_previous_close() -> None:
     days = days_from_directions("UDUD")
     # the first day has no previous close, so persistence is scored on three days
     assert days[0].previous_close is None
@@ -121,7 +123,7 @@ def test_persistence_skips_days_without_previous_close():
     assert report.persistence_n_days == 3
 
 
-def test_flat_day_counts_as_up_like_the_evaluator():
+def test_flat_day_counts_as_up_like_the_evaluator() -> None:
     # evaluator rule: actual UP iff actual_price >= price_at_prediction
     day = EvaluatedDay(
         predicted_for=START,
@@ -140,7 +142,7 @@ def test_flat_day_counts_as_up_like_the_evaluator():
 # --- Scenario: Buy-and-hold PnL is reported for the same period ---
 
 
-def test_buy_and_hold_pnl_between_two_dates():
+def test_buy_and_hold_pnl_between_two_dates() -> None:
     # Given a model evaluated between two dates: bought at 100, ended at 103
     days = days_from_directions("UUDU")  # 100 -> 101 -> 102 -> 101 -> 102
     days = [
@@ -160,13 +162,13 @@ def test_buy_and_hold_pnl_between_two_dates():
     assert report.buy_and_hold_pnl == Decimal("3")
 
 
-def test_buy_and_hold_equals_always_up_pnl_on_contiguous_days():
+def test_buy_and_hold_equals_always_up_pnl_on_contiguous_days() -> None:
     report = evaluate_baselines(days_from_directions("UDDUUDU"))
 
     assert report.always_up_pnl == report.buy_and_hold_pnl
 
 
-def test_buy_and_hold_uses_chronological_order_not_input_order():
+def test_buy_and_hold_uses_chronological_order_not_input_order() -> None:
     days = days_from_directions("UUU")
 
     report = evaluate_baselines(list(reversed(days)))
@@ -174,7 +176,7 @@ def test_buy_and_hold_uses_chronological_order_not_input_order():
     assert report.buy_and_hold_pnl == Decimal("3")
 
 
-def test_persistence_pnl_trades_only_after_an_up_day():
+def test_persistence_pnl_trades_only_after_an_up_day() -> None:
     # UDUD, first day unscored: day 2 follows an up day -> long, loses 1;
     # day 3 follows a down day -> cash; day 4 follows an up day -> long, loses 1
     report = evaluate_baselines(days_from_directions("UDUD"))
@@ -185,7 +187,7 @@ def test_persistence_pnl_trades_only_after_an_up_day():
 # --- Scenario: The edge over the best baseline is reported with its sample size ---
 
 
-def test_edge_reports_sample_size_and_p_value():
+def test_edge_reports_sample_size_and_p_value() -> None:
     # Given a model with 100 evaluated days and 70 correct directions
     directions = "UUDUD" * 20  # 60 up days; always-up accuracy 0.60
     predicted = ["U" if d == "U" else "D" for d in directions]
@@ -199,23 +201,29 @@ def test_edge_reports_sample_size_and_p_value():
     # Then the result includes the sample size and a significance measure of the edge
     assert report.n_days == 100
     assert report.model_accuracy == pytest.approx(0.70)
+    assert report.always_up_accuracy is not None
+    assert report.persistence_accuracy is not None
+    assert report.edge is not None
+    assert report.p_value is not None
     best = max(report.always_up_accuracy, report.persistence_accuracy)
     assert report.edge == pytest.approx(0.70 - best)
     assert report.p_value == pytest.approx(binomial_tail(70, 100, best), rel=1e-9)
     assert report.significant is (report.p_value < 0.05)
 
 
-def test_best_baseline_is_named():
+def test_best_baseline_is_named() -> None:
     # trending series: persistence beats always-up when ups and downs come in runs
     report = evaluate_baselines(
         days_from_directions("UUUDDDUUUDDD", predicted="U" * 12)
     )
 
     assert report.best_baseline == "persistence"
+    assert report.persistence_accuracy is not None
+    assert report.always_up_accuracy is not None
     assert report.persistence_accuracy > report.always_up_accuracy
 
 
-def test_model_that_equals_the_baseline_has_no_edge_and_is_not_significant():
+def test_model_that_equals_the_baseline_has_no_edge_and_is_not_significant() -> None:
     directions = "UUDUD" * 20
     days = days_from_directions(directions, predicted="U" * 100)  # always-up model
 
@@ -227,7 +235,7 @@ def test_model_that_equals_the_baseline_has_no_edge_and_is_not_significant():
     assert report.significant is False
 
 
-def test_significance_level_is_configurable():
+def test_significance_level_is_configurable() -> None:
     directions = "UUDUD" * 20
     predicted = directions  # perfect model
     days = days_from_directions(directions, predicted=predicted)
@@ -242,7 +250,7 @@ def test_significance_level_is_configurable():
 # --- Scenario: No evaluated days yields no misleading numbers ---
 
 
-def test_no_evaluated_days_is_unavailable_not_zero():
+def test_no_evaluated_days_is_unavailable_not_zero() -> None:
     # Given a model with zero evaluated predictions
     report = evaluate_baselines([])
 
@@ -260,7 +268,7 @@ def test_no_evaluated_days_is_unavailable_not_zero():
     assert report.significant is None
 
 
-def test_one_day_has_no_persistence_but_has_always_up():
+def test_one_day_has_no_persistence_but_has_always_up() -> None:
     report = evaluate_baselines(days_from_directions("U"))
 
     assert report.n_days == 1
@@ -273,7 +281,7 @@ def test_one_day_has_no_persistence_but_has_always_up():
 # --- Implementation details ---
 
 
-def test_model_metrics_are_unavailable_when_a_prediction_is_missing():
+def test_model_metrics_are_unavailable_when_a_prediction_is_missing() -> None:
     days = days_from_directions("UUDU", predicted="UUDU")
     days[2] = EvaluatedDay(
         days[2].predicted_for,
@@ -291,7 +299,7 @@ def test_model_metrics_are_unavailable_when_a_prediction_is_missing():
     assert report.p_value is None
 
 
-def test_model_accuracy_follows_the_evaluator_direction_rule():
+def test_model_accuracy_follows_the_evaluator_direction_rule() -> None:
     from workers.daily.evaluator import calculate_direction_correct
 
     cases = [
@@ -322,7 +330,7 @@ def test_model_accuracy_follows_the_evaluator_direction_rule():
     ("k", "n", "p"),
     [(70, 100, 0.6), (5, 5, 0.5), (0, 10, 0.3), (550, 1000, 0.511), (3000, 3300, 0.5)],
 )
-def test_p_value_matches_scipy_binomial_test(k, n, p):
+def test_p_value_matches_scipy_binomial_test(k: int, n: int, p: float) -> None:
     from shared.baselines import binomial_tail_probability
 
     assert binomial_tail_probability(k, n, p) == pytest.approx(
@@ -334,14 +342,16 @@ def test_p_value_matches_scipy_binomial_test(k, n, p):
     ("k", "n", "p", "expected"),
     [(0, 10, 0.0, 1.0), (1, 10, 0.0, 0.0), (10, 10, 1.0, 1.0), (0, 10, 0.5, 1.0)],
 )
-def test_p_value_handles_degenerate_probabilities(k, n, p, expected):
+def test_p_value_handles_degenerate_probabilities(
+    k: int, n: int, p: float, expected: float
+) -> None:
     from shared.baselines import binomial_tail_probability
 
     assert binomial_tail_probability(k, n, p) == expected
     assert not math.isnan(binomial_tail_probability(k, n, p))
 
 
-def test_p_value_never_exceeds_one_despite_rounding():
+def test_p_value_never_exceeds_one_despite_rounding() -> None:
     from shared.baselines import binomial_tail_probability
 
     # summing 49 near-certain terms in log space rounds to 1.0000000000000158
@@ -351,7 +361,9 @@ def test_p_value_never_exceeds_one_despite_rounding():
 @pytest.mark.parametrize(
     ("k", "n", "p"), [(3, 10, 0.3), (2, 8, 0.2), (4, 12, 0.7), (1, 20, 0.05)]
 )
-def test_p_value_matches_scipy_when_successes_are_below_half_the_trials(k, n, p):
+def test_p_value_matches_scipy_when_successes_are_below_half_the_trials(
+    k: int, n: int, p: float
+) -> None:
     from shared.baselines import binomial_tail_probability
 
     assert binomial_tail_probability(k, n, p) == pytest.approx(
@@ -359,14 +371,14 @@ def test_p_value_matches_scipy_when_successes_are_below_half_the_trials(k, n, p)
     )
 
 
-def test_p_value_handles_out_of_range_success_counts():
+def test_p_value_handles_out_of_range_success_counts() -> None:
     from shared.baselines import binomial_tail_probability
 
     assert binomial_tail_probability(-1, 10, 0.5) == 1.0
     assert binomial_tail_probability(11, 10, 0.5) == 0.0
 
 
-def test_buy_and_hold_is_the_difference_not_a_remainder():
+def test_buy_and_hold_is_the_difference_not_a_remainder() -> None:
     days = [
         EvaluatedDay(START, None, Decimal("100"), Decimal("120")),
         EvaluatedDay(START + timedelta(days=1), None, Decimal("120"), Decimal("250")),
@@ -376,19 +388,20 @@ def test_buy_and_hold_is_the_difference_not_a_remainder():
     assert evaluate_baselines(days).buy_and_hold_pnl == Decimal("150")
 
 
-def test_an_empty_report_has_zero_persistence_days():
+def test_an_empty_report_has_zero_persistence_days() -> None:
     assert evaluate_baselines([]).persistence_n_days == 0
 
 
-def test_a_p_value_equal_to_the_level_is_not_significant():
+def test_a_p_value_equal_to_the_level_is_not_significant() -> None:
     days = days_from_directions("UUDUD" * 20, predicted="UUDUD" * 20)  # perfect model
     p_value = evaluate_baselines(days).p_value
+    assert p_value is not None
 
     # significant means strictly below the level
     assert evaluate_baselines(days, significance_level=p_value).significant is False
 
 
-def test_a_tie_between_the_baselines_names_always_up():
+def test_a_tie_between_the_baselines_names_always_up() -> None:
     days = [
         EvaluatedDay(START, Decimal("99"), Decimal("100"), Decimal("101")),  # up
         EvaluatedDay(
@@ -403,7 +416,7 @@ def test_a_tie_between_the_baselines_names_always_up():
     assert report.best_baseline == "always_up"
 
 
-def test_a_flat_previous_day_counts_as_up_for_persistence():
+def test_a_flat_previous_day_counts_as_up_for_persistence() -> None:
     flat_previous = EvaluatedDay(
         START,
         Decimal("100"),

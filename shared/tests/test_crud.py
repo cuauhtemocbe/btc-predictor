@@ -10,6 +10,8 @@ from datetime import UTC, date, datetime
 
 import numpy as np
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from shared.db.crud import (
     activate_model,
@@ -23,7 +25,7 @@ from shared.db.models import Model, Prediction, model_family
 
 
 @pytest.fixture
-def sample_model_artifact():
+def sample_model_artifact() -> bytes:
     """Create serialized LinearRegressionModel for testing."""
     from workers.daily.models.linear import LinearRegressionModel
 
@@ -34,7 +36,9 @@ def sample_model_artifact():
     return pickle.dumps(model)
 
 
-def test_join_uses_exact_equality(db_session, sample_model_artifact):
+def test_join_uses_exact_equality(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     MUTATION TEST: Verify JOIN uses exact equality (==), not <= or 'is not'.
 
@@ -129,7 +133,9 @@ def test_join_uses_exact_equality(db_session, sample_model_artifact):
             pytest.fail(f"Unexpected prediction id: {pred.id}")
 
 
-def test_to_date_filter_uses_less_than_or_equal(db_session, sample_model_artifact):
+def test_to_date_filter_uses_less_than_or_equal(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     MUTATION TEST: Verify to_date filter uses <= (range), not == (exact).
 
@@ -221,7 +227,9 @@ def test_to_date_filter_uses_less_than_or_equal(db_session, sample_model_artifac
     )
 
 
-def test_from_date_filter_uses_greater_than_or_equal(db_session, sample_model_artifact):
+def test_from_date_filter_uses_greater_than_or_equal(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test that from_date filter uses >= (range), not == (exact).
 
@@ -301,7 +309,9 @@ def test_from_date_filter_uses_greater_than_or_equal(db_session, sample_model_ar
     assert date(2026, 5, 10) in result_dates
 
 
-def test_date_range_filter_both_boundaries(db_session, sample_model_artifact):
+def test_date_range_filter_both_boundaries(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test that both from_date and to_date work together correctly.
 
@@ -360,7 +370,9 @@ def test_date_range_filter_both_boundaries(db_session, sample_model_artifact):
 # ============================================================================
 
 
-def test_get_active_model_returns_active_model(db_session, sample_model_artifact):
+def test_get_active_model_returns_active_model(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """Test that get_active_model returns the model with is_active=True."""
     # Create 2 models: one active, one inactive
     inactive_model = Model(
@@ -398,8 +410,8 @@ def test_get_active_model_returns_active_model(db_session, sample_model_artifact
 
 
 def test_get_active_model_returns_none_when_no_active(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """Test that get_active_model returns None when no models are active."""
     # Create 2 inactive models
     model1 = Model(
@@ -434,8 +446,8 @@ def test_get_active_model_returns_none_when_no_active(
 
 
 def test_get_all_models_returns_all_ordered_by_trained_at(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """Test that get_all_models returns all models ordered by trained_at DESC."""
     # Create 3 models with different trained_at timestamps
     old_model = Model(
@@ -484,7 +496,9 @@ def test_get_all_models_returns_all_ordered_by_trained_at(
     assert results[2].name == "linear_v1"  # Oldest
 
 
-def test_deactivate_all_models(db_session, sample_model_artifact):
+def test_deactivate_all_models(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """Test that deactivate_all_models sets is_active=False for all models."""
     # Create 3 models, 2 active
     model1 = Model(
@@ -536,7 +550,9 @@ def test_deactivate_all_models(db_session, sample_model_artifact):
         assert model.is_active is False
 
 
-def test_activate_model_success(db_session, sample_model_artifact):
+def test_activate_model_success(
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Test that activate_model activates the target and deactivates the
     previous active version of the SAME name -- but leaves a different-
@@ -604,8 +620,8 @@ def test_activate_model_success(db_session, sample_model_artifact):
 
 
 def test_activate_model_rolls_back_on_commit_failure(
-    db_session, sample_model_artifact, monkeypatch
-):
+    db_session: Session, sample_model_artifact: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     If the commit inside activate_model() fails, the previous active model
     must remain active -- no partial state (issue #66 atomicity guarantee).
@@ -635,7 +651,7 @@ def test_activate_model_rolls_back_on_commit_failure(
     db_session.commit()
     db_session.refresh(new_version)
 
-    def failing_commit():
+    def failing_commit() -> None:
         raise RuntimeError("simulated persistence failure")
 
     monkeypatch.setattr(db_session, "commit", failing_commit)
@@ -657,8 +673,8 @@ def test_activate_model_rolls_back_on_commit_failure(
 
 
 def test_activate_model_raises_error_for_nonexistent_id(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """Test that activate_model raises ValueError for non-existent model_id."""
     # Create one model
     model = Model(
@@ -681,8 +697,8 @@ def test_activate_model_raises_error_for_nonexistent_id(
 
 
 def test_activate_model_keeps_different_names_independently_active(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     Activating models with different names accumulates active models --
     this is what powers multi-model prediction mode (US-025). Only
@@ -721,8 +737,8 @@ def test_activate_model_keeps_different_names_independently_active(
 
 
 def test_activate_model_only_one_active_version_per_name(
-    db_session, sample_model_artifact
-):
+    db_session: Session, sample_model_artifact: bytes
+) -> None:
     """
     CRITICAL TEST: activating a new version of the SAME model name leaves
     exactly one active version of that name (the atomicity guarantee
@@ -760,7 +776,9 @@ def test_activate_model_only_one_active_version_per_name(
         assert active_linear_versions[0].id == target_model.id
 
 
-def _persisted_model(session, name, timeframe, is_active):
+def _persisted_model(
+    session: Session, name: str, timeframe: str, is_active: bool
+) -> Model:
     model = Model(
         name=name,
         version="1.0.0",
@@ -777,7 +795,7 @@ def _persisted_model(session, name, timeframe, is_active):
     return model
 
 
-def test_deactivate_all_models_scoped_to_a_timeframe(db_session):
+def test_deactivate_all_models_scoped_to_a_timeframe(db_session: Session) -> None:
     """Only the models of the given timeframe are deactivated (#68)."""
     daily = _persisted_model(db_session, "daily_model", "1d", is_active=True)
     weekly = _persisted_model(db_session, "weekly_model", "1w", is_active=True)
@@ -790,7 +808,9 @@ def test_deactivate_all_models_scoped_to_a_timeframe(db_session):
     assert weekly.is_active is False
 
 
-async def test_get_evaluated_predictions_async_filters_and_orders(async_db_session):
+async def test_get_evaluated_predictions_async_filters_and_orders(
+    async_db_session: AsyncSession,
+) -> None:
     """The async query keeps evaluated rows only, filtered and newest first (#68)."""
     model = Model(
         name="async_model",
@@ -806,7 +826,7 @@ async def test_get_evaluated_predictions_async_filters_and_orders(async_db_sessi
     async_db_session.add(model)
     await async_db_session.flush()
 
-    def prediction(day, timeframe, actual_price):
+    def prediction(day: int, timeframe: str, actual_price: float | None) -> Prediction:
         return Prediction(
             model_id=model.id,
             predicted_at=datetime.now(UTC),
@@ -839,7 +859,14 @@ async def test_get_evaluated_predictions_async_filters_and_orders(async_db_sessi
     assert [p.predicted_for.day for p in daily_in_range] == [12]
 
 
-def _versioned_model(session, name, version, *, symbol="BTCUSDT", timeframe="1d"):
+def _versioned_model(
+    session: Session,
+    name: str,
+    version: str,
+    *,
+    symbol: str = "BTCUSDT",
+    timeframe: str = "1d",
+) -> Model:
     model = Model(
         symbol=symbol,
         name=name,
@@ -857,7 +884,9 @@ def _versioned_model(session, name, version, *, symbol="BTCUSDT", timeframe="1d"
     return model
 
 
-def test_activate_model_replaces_previous_version_in_the_name(db_session):
+def test_activate_model_replaces_previous_version_in_the_name(
+    db_session: Session,
+) -> None:
     """
     Issue #169: the daily trainer names models "<family>_v<N>", so activating
     linear_v2 must deactivate linear_v1 -- while xgboost_v1 stays active.
@@ -874,7 +903,9 @@ def test_activate_model_replaces_previous_version_in_the_name(db_session):
     assert active == {"linear_v2", "xgboost_v1"}
 
 
-def test_activate_model_does_not_touch_other_symbols_or_timeframes(db_session):
+def test_activate_model_does_not_touch_other_symbols_or_timeframes(
+    db_session: Session,
+) -> None:
     """The family scope stays within one (symbol, timeframe)."""
     paxg = _versioned_model(db_session, "linear_v1", "v1", symbol="PAXGUSDT")
     weekly = _versioned_model(db_session, "linear_v1", "v1", timeframe="1w")
@@ -900,5 +931,7 @@ def test_activate_model_does_not_touch_other_symbols_or_timeframes(db_session):
         ("model_v1_extra", "model_v1_extra"),
     ],
 )
-def test_model_family_strips_only_a_trailing_version_suffix(name, family):
+def test_model_family_strips_only_a_trailing_version_suffix(
+    name: str, family: str
+) -> None:
     assert model_family(name) == family

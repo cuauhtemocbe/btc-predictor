@@ -107,7 +107,7 @@ def sample_predictions(db_session: Session, test_model: Model) -> list[Predictio
 
 def test_calculate_strategy_metrics_with_known_values(
     sample_predictions: list[Prediction],
-):
+) -> None:
     """Test metrics calculation with known PnL values."""
     # Long/Short strategy: [100, -50, 200, -30, 150]
     metrics = calculate_strategy_metrics(sample_predictions, "pnl_long_short")
@@ -123,7 +123,7 @@ def test_calculate_strategy_metrics_with_known_values(
 
 def test_calculate_strategy_metrics_with_threshold_strategy(
     sample_predictions: list[Prediction],
-):
+) -> None:
     """Test threshold strategy which has some zero-trade days."""
     # Threshold strategy: [100, 0, 200, 0, 150] (only 3 actual trades)
     metrics = calculate_strategy_metrics(sample_predictions, "pnl_threshold")
@@ -134,7 +134,7 @@ def test_calculate_strategy_metrics_with_threshold_strategy(
     assert metrics["max_drawdown"] == 0.0  # No losses
 
 
-def test_calculate_strategy_metrics_with_empty_predictions():
+def test_calculate_strategy_metrics_with_empty_predictions() -> None:
     """Test metrics calculation with no predictions."""
     metrics = calculate_strategy_metrics([], "pnl_simulated")
 
@@ -149,7 +149,7 @@ def test_calculate_strategy_metrics_with_empty_predictions():
 
 def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
     db_session: Session, test_model: Model
-):
+) -> None:
     """Test metrics with predictions not yet evaluated (actual_price is NULL)."""
     predictions = [
         Prediction(
@@ -175,7 +175,7 @@ def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
     assert metrics["trade_count"] == 0
 
 
-def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model):
+def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model) -> None:
     """Test Sharpe Ratio calculation with known daily returns."""
     # Create predictions with specific PnL pattern
     predictions = [
@@ -204,7 +204,7 @@ def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model):
     assert 1.0 <= metrics["sharpe_ratio"] <= 1.2
 
 
-def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
+def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]) -> None:
     """Test cumulative PnL calculation over time."""
     cumulative = calculate_cumulative_pnl(sample_predictions, "pnl_long_short")
 
@@ -219,7 +219,7 @@ def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
 
 def test_calculate_cumulative_pnl_sorted_by_date(
     db_session: Session, test_model: Model
-):
+) -> None:
     """Test that cumulative PnL is calculated in date order."""
     # Insert predictions out of order
     predictions = [
@@ -276,7 +276,7 @@ def test_calculate_cumulative_pnl_sorted_by_date(
 
 def test_get_all_strategies_metrics(
     db_session: Session, sample_predictions: list[Prediction]
-):
+) -> None:
     """Test getting metrics for all 4 strategies at once."""
     strategies = get_all_strategies_metrics(db_session)
 
@@ -304,7 +304,7 @@ def test_get_all_strategies_metrics(
     assert len(strategies[0]["cumulative_pnl"]) == 5  # 5 sample predictions
 
 
-def test_get_all_strategies_metrics_with_empty_database(db_session: Session):
+def test_get_all_strategies_metrics_with_empty_database(db_session: Session) -> None:
     """Test all strategies metrics with no predictions."""
     strategies = get_all_strategies_metrics(db_session)
 
