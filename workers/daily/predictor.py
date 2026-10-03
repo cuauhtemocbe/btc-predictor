@@ -438,7 +438,9 @@ def _predict_single_model(
                 session, model_record, model_instance, tomorrow, current_price, outcome
             )
         except Exception as e:
-            logger.error(f"Failed to generate prediction for {model_record.name}: {e}")
+            logger.exception(
+                f"Failed to generate prediction for {model_record.name}: {e}"
+            )
             outcome.failed.append((model_record.name, str(e)))
             raise
 
@@ -461,7 +463,9 @@ def _predict_multi_model(
                 session, model_record, model_instance, tomorrow, current_price, outcome
             )
         except Exception as e:
-            logger.error(f"Failed to generate prediction for {model_record.name}: {e}")
+            logger.exception(
+                f"Failed to generate prediction for {model_record.name}: {e}"
+            )
             outcome.failed.append((model_record.name, str(e)))
 
 

@@ -51,12 +51,13 @@ class TestPredictSingleModel:
 
     def test_failure_is_recorded_logged_and_reraised(self, fake_predict_one, caplog):
         outcome = PredictionOutcome()
+        models = _models("bad_v1")
 
         with (
             caplog.at_level(logging.ERROR),
             pytest.raises(ValueError, match="exploded"),
         ):
-            _predict_single_model(None, _models("bad_v1"), TOMORROW, PRICE, outcome)
+            _predict_single_model(None, models, TOMORROW, PRICE, outcome)
 
         assert outcome.failed == [("bad_v1", "bad_v1 exploded")]
         assert "Failed to generate prediction for bad_v1" in caplog.text
