@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from workers.daily import evaluator
+from workers.daily.evaluator import EvaluationMetrics
 
 # ============================================================================
 # Unit tests for helper functions
@@ -322,7 +323,7 @@ class TestUpdatePrediction:
         """Should update all evaluation fields including new PnL strategies."""
         prediction = sample_unevaluated_prediction_for_today
         actual_price = Decimal("67500.00")
-        metrics = {
+        metrics: EvaluationMetrics = {
             "error_abs": Decimal("500.00"),
             "error_pct": Decimal("0.74"),
             "direction_correct": True,
@@ -361,7 +362,7 @@ class TestEvaluatorMain:
         db_session: Session,
         sample_unevaluated_prediction_for_today: Prediction,
         sample_actual_price_for_today: Price,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin Scenario 1: Evaluate yesterday's prediction.
@@ -375,11 +376,10 @@ class TestEvaluatorMain:
         prediction_id = sample_unevaluated_prediction_for_today.id
 
         # Mock SessionLocal to return our test session, but don't close it
-        def mock_session():
-            session = db_session
+        def mock_session() -> Session:
             # Override close to be no-op for testing
-            session.close = lambda: None
-            return session
+            monkeypatch.setattr(db_session, "close", lambda: None)
+            return db_session
 
         monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
 
@@ -405,7 +405,7 @@ class TestEvaluatorMain:
         self,
         db_session: Session,
         sample_evaluated_prediction_for_today: Prediction,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin Scenario 2: No unevaluated predictions.
@@ -417,10 +417,9 @@ class TestEvaluatorMain:
         """
 
         # Mock SessionLocal to return our test session, but don't close it
-        def mock_session():
-            session = db_session
-            session.close = lambda: None
-            return session
+        def mock_session() -> Session:
+            monkeypatch.setattr(db_session, "close", lambda: None)
+            return db_session
 
         monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
 
@@ -434,7 +433,7 @@ class TestEvaluatorMain:
         self,
         db_session: Session,
         sample_unevaluated_prediction_for_today: Prediction,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin Scenario 3: Missing actual price in btc_prices.
@@ -449,10 +448,9 @@ class TestEvaluatorMain:
         prediction_id = sample_unevaluated_prediction_for_today.id
 
         # Mock SessionLocal to return our test session, but don't close it
-        def mock_session():
-            session = db_session
-            session.close = lambda: None
-            return session
+        def mock_session() -> Session:
+            monkeypatch.setattr(db_session, "close", lambda: None)
+            return db_session
 
         monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
 
@@ -477,7 +475,7 @@ class TestEvaluatorMain:
         db_session: Session,
         sample_unevaluated_prediction_for_today: Prediction,
         sample_actual_price_for_today: Price,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Should continue processing and return exit code 0.
@@ -485,15 +483,14 @@ class TestEvaluatorMain:
         Even when individual predictions fail.
         """
 
-        def mock_session():
-            session = db_session
-            session.close = lambda: None
-            return session
+        def mock_session() -> Session:
+            monkeypatch.setattr(db_session, "close", lambda: None)
+            return db_session
 
         monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
 
         # Mock update_prediction to raise an exception
-        def mock_update_error(*args, **kwargs):
+        def mock_update_error(*args: object, **kwargs: object) -> None:
             raise Exception("Database connection lost")
 
         monkeypatch.setattr(
@@ -511,9 +508,9 @@ class TestEvaluatorMain:
 # ============================================================================
 
 
-def _patch_session(db_session: Session, monkeypatch) -> None:
-    def mock_session():
-        db_session.close = lambda: None
+def _patch_session(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_session() -> Session:
+        monkeypatch.setattr(db_session, "close", lambda: None)
         return db_session
 
     monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
@@ -561,7 +558,10 @@ def _add_prediction(
 
 class TestPendingPredictions:
     def test_prediction_scored_against_bar_it_predicted(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Given a prediction for 10-03, the bar opened 10-02 closing at 85100.00."""
         _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
@@ -580,7 +580,11 @@ class TestPendingPredictions:
         assert prediction.evaluated_at is not None
 
     def test_missing_bar_leaves_prediction_pending_and_names_the_bar(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch, caplog
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         prediction = _add_prediction(
             db_session, sample_trained_model, date(2026, 10, 3)
@@ -597,7 +601,10 @@ class TestPendingPredictions:
         assert "will retry tomorrow" not in caplog.text
 
     def test_past_pending_predictions_are_evaluated_on_the_next_run(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_daily_bar(db_session, date(2026, 10, 1), "84000.00")
         _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
@@ -614,7 +621,10 @@ class TestPendingPredictions:
         assert second.actual_price == Decimal("85100.00")
 
     def test_a_missing_bar_does_not_block_the_other_dates(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
         gap = _add_prediction(db_session, sample_trained_model, date(2026, 10, 2))
@@ -630,7 +640,10 @@ class TestPendingPredictions:
         assert later.actual_price == Decimal("85100.00")
 
     def test_already_evaluated_prediction_is_untouched(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
         prediction = _add_prediction(
@@ -650,7 +663,10 @@ class TestPendingPredictions:
         assert prediction.evaluated_at == evaluated_at
 
     def test_weekly_predictions_are_left_to_the_weekly_evaluator(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
         weekly = _add_prediction(
@@ -665,7 +681,10 @@ class TestPendingPredictions:
         assert weekly.actual_price is None
 
     def test_future_predictions_are_not_touched(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_daily_bar(db_session, date(2026, 10, 3), "85500.00")
         future = _add_prediction(db_session, sample_trained_model, date(2026, 10, 4))

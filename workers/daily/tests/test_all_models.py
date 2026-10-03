@@ -9,9 +9,13 @@ of the reboot (return features of shared.features, next-day log return target):
 4. All models can be imported from workers.daily.models
 """
 
+from typing import Any
+
 import numpy as np
 import pytest
+from sqlalchemy.orm import Session
 
+from shared.features import FeatureSet
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -25,7 +29,7 @@ N_FEATURES = 2 * WINDOW_DAYS + 1
 
 # Constructor arguments of each model for the return features. LSTM trains for a
 # few epochs only, to keep the suite fast.
-MODEL_KWARGS = {
+MODEL_KWARGS: dict[type[BaseModel], dict[str, Any]] = {
     LinearRegressionModel: {},
     XGBoostModel: {},
     LSTMModel: {"epochs": 5},
@@ -53,7 +57,7 @@ class TestAllModelsIntegration:
     """Integration tests for all models."""
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
-    def test_all_models_inherit_basemodel(self, model_class):
+    def test_all_models_inherit_basemodel(self, model_class: type[BaseModel]) -> None:
         """
         Gherkin Scenario: All models implement BaseModel interface
 
@@ -64,7 +68,9 @@ class TestAllModelsIntegration:
         assert isinstance(build(model_class), BaseModel)
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
-    def test_all_models_have_required_methods(self, model_class):
+    def test_all_models_have_required_methods(
+        self, model_class: type[BaseModel]
+    ) -> None:
         """
         Gherkin Scenario: All models have required methods
 
@@ -85,7 +91,9 @@ class TestAllModelsIntegration:
         assert isinstance(model.is_trained, bool)
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
-    def test_all_models_expose_the_window_and_feature_count(self, model_class):
+    def test_all_models_expose_the_window_and_feature_count(
+        self, model_class: type[BaseModel]
+    ) -> None:
         """
         Gherkin Scenario: All models are built from the window and feature count
 
@@ -95,11 +103,16 @@ class TestAllModelsIntegration:
         """
         model = build(model_class)
 
+        assert isinstance(
+            model, LinearRegressionModel | XGBoostModel | LSTMModel | ARIMAModel
+        )
         assert model.window_days == WINDOW_DAYS
         assert model.n_features == N_FEATURES
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
-    def test_all_models_serialize_to_bytes(self, model_class, return_training_set):
+    def test_all_models_serialize_to_bytes(
+        self, model_class: type[BaseModel], return_training_set: FeatureSet
+    ) -> None:
         """
         Gherkin Scenario: All models serialize to bytes
 
@@ -119,8 +132,11 @@ class TestAllModelsIntegration:
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
     def test_all_models_predictions_valid(
-        self, model_class, return_training_set, latest_return_features
-    ):
+        self,
+        model_class: type[BaseModel],
+        return_training_set: FeatureSet,
+        latest_return_features: np.ndarray,
+    ) -> None:
         """
         Gherkin Scenario: All models produce valid predictions
 
@@ -139,7 +155,7 @@ class TestAllModelsIntegration:
         assert np.isfinite(prediction), f"{name}: prediction is not finite"
         assert abs(prediction) < 1.0, f"{name}: {prediction} is not a daily return"
 
-    def test_all_models_can_be_imported(self):
+    def test_all_models_can_be_imported(self) -> None:
         """
         Gherkin Scenario: All models are importable from workers.daily.models
 
@@ -156,8 +172,12 @@ class TestAllModelsIntegration:
 
     @pytest.mark.parametrize("model_class", MODEL_CLASSES)
     def test_store_all_models_in_db(
-        self, model_class, return_training_set, latest_return_features, db_session
-    ):
+        self,
+        model_class: type[BaseModel],
+        return_training_set: FeatureSet,
+        latest_return_features: np.ndarray,
+        db_session: Session,
+    ) -> None:
         """
         Gherkin Scenario: All models can be stored in database
 
@@ -208,7 +228,7 @@ class TestAllModelsIntegration:
 class TestModelComparison:
     """Compare characteristics of different models."""
 
-    def test_model_serialization_sizes(self, return_training_set):
+    def test_model_serialization_sizes(self, return_training_set: FeatureSet) -> None:
         """
         Compare serialization sizes across models.
 

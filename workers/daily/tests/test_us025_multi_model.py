@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from workers.daily import evaluator, predictor
+from workers.daily.models import BaseModel
 
 # ============================================================================
 # Additional fixtures for multi-model scenarios
@@ -120,6 +121,7 @@ class TestMultiModelPredictions:
 
     def test_multi_model_mode_generates_predictions_for_all_active_models(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         three_active_models: list[Model],
         sample_btc_prices_31_days: list[Price],
@@ -144,42 +146,37 @@ class TestMultiModelPredictions:
         assert count_before == 0
 
         # Mock parse_args to enable multi-model mode
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=True)
 
-        original_parse_args = predictor.parse_args
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # When: predictor runs in multi-model mode
-            exit_code = predictor.main(session=db_session)
+        # When: predictor runs in multi-model mode
+        exit_code = predictor.main(session=db_session)
 
-            # Then: job exits successfully
-            assert exit_code == 0
+        # Then: job exits successfully
+        assert exit_code == 0
 
-            # And: 3 predictions are created (one per model)
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 3
+        # And: 3 predictions are created (one per model)
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 3
 
-            # And: all predictions are for tomorrow
-            assert all(p.predicted_for == tomorrow for p in predictions)
+        # And: all predictions are for tomorrow
+        assert all(p.predicted_for == tomorrow for p in predictions)
 
-            # And: predictions are from different models
-            model_ids = {p.model_id for p in predictions}
-            assert len(model_ids) == 3  # All 3 models predicted
+        # And: predictions are from different models
+        model_ids = {p.model_id for p in predictions}
+        assert len(model_ids) == 3  # All 3 models predicted
 
-            # And: all predictions have the same price_at_prediction (current price)
-            current_prices = {p.price_at_prediction for p in predictions}
-            assert len(current_prices) == 1  # Same current price for all
+        # And: all predictions have the same price_at_prediction (current price)
+        current_prices = {p.price_at_prediction for p in predictions}
+        assert len(current_prices) == 1  # Same current price for all
 
-            # And: all predictions have predicted_price set (not NULL)
-            assert all(p.predicted_price is not None for p in predictions)
+        # And: all predictions have predicted_price set (not NULL)
+        assert all(p.predicted_price is not None for p in predictions)
 
-            # And: evaluation fields are NULL (not evaluated yet)
-            assert all(p.actual_price is None for p in predictions)
-
-        finally:
-            predictor.parse_args = original_parse_args
+        # And: evaluation fields are NULL (not evaluated yet)
+        assert all(p.actual_price is None for p in predictions)
 
 
 # ============================================================================
@@ -192,6 +189,7 @@ class TestCLIFlag:
 
     def test_single_model_mode_uses_only_first_active_model(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         three_active_models: list[Model],
         sample_btc_prices_31_days: list[Price],
@@ -207,32 +205,28 @@ class TestCLIFlag:
         assert len(three_active_models) == 3
 
         # Mock parse_args to DISABLE multi-model mode (default)
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=False)
 
-        original_parse_args = predictor.parse_args
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # When: predictor runs in single-model mode (default)
-            exit_code = predictor.main(session=db_session)
+        # When: predictor runs in single-model mode (default)
+        exit_code = predictor.main(session=db_session)
 
-            # Then: job exits successfully
-            assert exit_code == 0
+        # Then: job exits successfully
+        assert exit_code == 0
 
-            # And: only 1 prediction is created
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 1
+        # And: only 1 prediction is created
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 1
 
-            # And: the prediction is from the first active model (primary)
-            prediction = predictions[0]
-            assert prediction.model_id == three_active_models[0].id
-
-        finally:
-            predictor.parse_args = original_parse_args
+        # And: the prediction is from the first active model (primary)
+        prediction = predictions[0]
+        assert prediction.model_id == three_active_models[0].id
 
     def test_multi_model_flag_enabled_uses_all_active_models(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         three_active_models: list[Model],
         sample_btc_prices_31_days: list[Price],
@@ -249,25 +243,20 @@ class TestCLIFlag:
         assert len(three_active_models) == 3
 
         # Mock parse_args to ENABLE multi-model mode
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=True)
 
-        original_parse_args = predictor.parse_args
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # When: predictor runs with --multi-model flag
-            exit_code = predictor.main(session=db_session)
+        # When: predictor runs with --multi-model flag
+        exit_code = predictor.main(session=db_session)
 
-            # Then: job exits successfully
-            assert exit_code == 0
+        # Then: job exits successfully
+        assert exit_code == 0
 
-            # And: 3 predictions are created (all active models)
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 3
-
-        finally:
-            predictor.parse_args = original_parse_args
+        # And: 3 predictions are created (all active models)
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 3
 
 
 # ============================================================================
@@ -283,7 +272,7 @@ class TestEvaluatorMultiModel:
         db_session: Session,
         three_active_models: list[Model],
         sample_actual_price_for_today: Price,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin Scenario: Evaluator evaluates predictions for all models
@@ -330,11 +319,10 @@ class TestEvaluatorMultiModel:
         assert len(unevaluated) == 3
 
         # Mock SessionLocal to return our test session
-        def mock_session():
-            session = db_session
+        def mock_session() -> Session:
             # Override close to be no-op for testing
-            session.close = lambda: None
-            return session
+            monkeypatch.setattr(db_session, "close", lambda: None)
+            return db_session
 
         monkeypatch.setattr("workers.daily.evaluator.SessionLocal", mock_session)
 
@@ -377,6 +365,7 @@ class TestMultiModelFailureHandling:
 
     def test_multi_model_handles_individual_model_failure(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         three_active_models: list[Model],
         sample_btc_prices_31_days: list[Price],
@@ -396,41 +385,36 @@ class TestMultiModelFailureHandling:
         assert len(three_active_models) == 3
 
         # Mock deserialize_model to fail for LSTM (model 3)
+
         original_deserialize = predictor.deserialize_model
 
-        def mock_deserialize(model_record: Model):
+        def mock_deserialize(model_record: Model) -> BaseModel:
             if model_record.name == "lstm_v1":
                 raise RuntimeError("LSTM deserialization failed (simulated)")
             return original_deserialize(model_record)
 
         # Mock parse_args for multi-model mode
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=True)
 
-        original_parse_args = predictor.parse_args
-        predictor.parse_args = mock_parse_args
-        predictor.deserialize_model = mock_deserialize
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
+        monkeypatch.setattr(predictor, "deserialize_model", mock_deserialize)
 
-        try:
-            # When: predictor runs in multi-model mode
-            exit_code = predictor.main(session=db_session)
+        # When: predictor runs in multi-model mode
+        exit_code = predictor.main(session=db_session)
 
-            # Then: job exits successfully (despite 1 model failing)
-            assert exit_code == 0
+        # Then: job exits successfully (despite 1 model failing)
+        assert exit_code == 0
 
-            # And: only 2 predictions are created (linear + xgboost)
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 2
+        # And: only 2 predictions are created (linear + xgboost)
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 2
 
-            # And: predictions are from models 1 and 2 (not model 3)
-            model_ids = {p.model_id for p in predictions}
-            assert three_active_models[0].id in model_ids  # linear
-            assert three_active_models[1].id in model_ids  # xgboost
-            assert three_active_models[2].id not in model_ids  # lstm failed
-
-        finally:
-            predictor.parse_args = original_parse_args
-            predictor.deserialize_model = original_deserialize
+        # And: predictions are from models 1 and 2 (not model 3)
+        model_ids = {p.model_id for p in predictions}
+        assert three_active_models[0].id in model_ids  # linear
+        assert three_active_models[1].id in model_ids  # xgboost
+        assert three_active_models[2].id not in model_ids  # lstm failed
 
 
 # ============================================================================
@@ -443,6 +427,7 @@ class TestMultiModelIdempotency:
 
     def test_multi_model_idempotency_per_model(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         three_active_models: list[Model],
         sample_btc_prices_31_days: list[Price],
@@ -479,27 +464,22 @@ class TestMultiModelIdempotency:
         assert count_before == 3
 
         # Mock parse_args for multi-model mode
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=True)
 
-        original_parse_args = predictor.parse_args
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # When: predictor runs again in multi-model mode
-            exit_code = predictor.main(session=db_session)
+        # When: predictor runs again in multi-model mode
+        exit_code = predictor.main(session=db_session)
 
-            # Then: job exits successfully (idempotent)
-            assert exit_code == 0
+        # Then: job exits successfully (idempotent)
+        assert exit_code == 0
 
-            # And: no additional predictions are created (still just 3)
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before  # Still 3
+        # And: no additional predictions are created (still just 3)
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before  # Still 3
 
-            # And: all 3 predictions are unchanged
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 3
-            assert all(p.predicted_for == tomorrow for p in predictions)
-
-        finally:
-            predictor.parse_args = original_parse_args
+        # And: all 3 predictions are unchanged
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 3
+        assert all(p.predicted_for == tomorrow for p in predictions)

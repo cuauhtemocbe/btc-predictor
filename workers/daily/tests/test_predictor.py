@@ -221,6 +221,7 @@ class TestPredictorGherkinScenarios:
 
     def test_scenario_1_predict_next_day_price(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
@@ -247,39 +248,32 @@ class TestPredictorGherkinScenarios:
         # Mock parse_args to avoid pytest argument conflicts
         from argparse import Namespace
 
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=False)
 
         # Mock SessionLocal to return our test session
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
+        # Execute
+        exit_code = predictor.main()
 
-            # Assert
-            assert exit_code == 0
+        # Assert
+        assert exit_code == 0
 
-            # Verify prediction was created
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 1
+        # Verify prediction was created
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 1
 
-            prediction = predictions[0]
-            assert prediction.predicted_for == tomorrow
-            assert prediction.predicted_price > 0
-            assert prediction.actual_price is None
-            assert prediction.model_id == model_id
-
-        finally:
-            # Restore originals
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        prediction = predictions[0]
+        assert prediction.predicted_for == tomorrow
+        assert prediction.predicted_price > 0
+        assert prediction.actual_price is None
+        assert prediction.model_id == model_id
 
     def test_scenario_2_insufficient_historical_data(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_10_days: list[Price],
@@ -299,31 +293,27 @@ class TestPredictorGherkinScenarios:
         # Mock parse_args and SessionLocal
         from argparse import Namespace
 
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=False)
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
+        # Execute
+        exit_code = predictor.main()
 
-            # Assert
-            assert exit_code == 1  # Should exit with error code
+        # Assert
+        assert exit_code == 1  # Should exit with error code
 
-            # Verify no prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before
 
     def test_scenario_3_no_active_model(
-        self, db_session: Session, sample_btc_prices_31_days: list[Price]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: Session,
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario 3: No active model
@@ -339,31 +329,25 @@ class TestPredictorGherkinScenarios:
         # Mock parse_args and SessionLocal
         from argparse import Namespace
 
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=False)
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
+        # Execute
+        exit_code = predictor.main()
 
-            # Assert
-            assert exit_code == 1
+        # Assert
+        assert exit_code == 1
 
-            # Verify no prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before
 
     def test_scenario_4_prediction_already_exists(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
@@ -384,25 +368,18 @@ class TestPredictorGherkinScenarios:
         # Mock parse_args and SessionLocal
         from argparse import Namespace
 
-        def mock_parse_args():
+        def mock_parse_args() -> Namespace:
             return Namespace(multi_model=False)
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
+        # Execute
+        exit_code = predictor.main()
 
-            # Assert
-            assert exit_code == 0  # Success (idempotent)
+        # Assert
+        assert exit_code == 0  # Success (idempotent)
 
-            # Verify no additional prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before  # Still just 1
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no additional prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before  # Still just 1

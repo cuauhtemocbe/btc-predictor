@@ -11,6 +11,7 @@ from decimal import Decimal
 
 import numpy as np
 import pytest
+from sqlalchemy.orm import Session
 
 from shared.db.crud import get_active_model, get_all_models
 from shared.db.models import Model, Price
@@ -21,7 +22,7 @@ from workers.daily.trainer import train_all_models, train_single_model
 
 
 @pytest.fixture
-def sample_prices(db_session):
+def sample_prices(db_session: Session) -> list[Price]:
     """Create 200 days of sample BTC prices for testing.
 
     Note: 200 days ensures enough data after train/val split (70%/20%):
@@ -52,26 +53,31 @@ def sample_prices(db_session):
 class _BiasedModel(LinearRegressionModel):
     """Linear model that is always 10% off, so it validates worse."""
 
-    def predict(self, X):
+    def predict(self, X: np.ndarray) -> float:
         return super().predict(X) * 1.1
 
 
 class _BrokenModel(LinearRegressionModel):
     """Model whose training always fails."""
 
-    def train(self, X, y):
+    def train(self, X: np.ndarray, y: np.ndarray) -> None:
         raise RuntimeError("cannot converge")
 
 
 @pytest.fixture
-def model_registry(monkeypatch):
+def model_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, type[LinearRegressionModel]]:
     """Replace the trained models with cheap ones (no TensorFlow/XGBoost).
 
     The real LSTM/XGBoost/ARIMA are covered by their own tests and by
     ``test_train_all_models_success``; these tests are about the orchestration.
     Returns the registry dict so a test can add models to it.
     """
-    registry = {"linear": LinearRegressionModel, "biased": _BiasedModel}
+    registry: dict[str, type[LinearRegressionModel]] = {
+        "linear": LinearRegressionModel,
+        "biased": _BiasedModel,
+    }
     monkeypatch.setattr(trainer, "model_registry", lambda days_available: registry)
     return registry
 
@@ -79,7 +85,7 @@ def model_registry(monkeypatch):
 class TestTrainSingleModel:
     """Test train_single_model function."""
 
-    def test_train_single_model_success(self):
+    def test_train_single_model_success(self) -> None:
         """Test successful training of a single model with validation."""
         # Create sample data
         X_train = np.random.rand(50, 30) * 10000 + 50000
@@ -105,7 +111,7 @@ class TestTrainSingleModel:
         assert isinstance(validation_error, float)
         assert 0 <= validation_error <= 100  # MAPE percentage
 
-    def test_validation_error_is_measured_on_the_implied_prices(self):
+    def test_validation_error_is_measured_on_the_implied_prices(self) -> None:
         """With base closes the targets are log returns and the MAPE is on prices."""
         rng = np.random.default_rng(3)
         X_train = rng.normal(0, 0.02, (50, 5))
@@ -114,7 +120,7 @@ class TestTrainSingleModel:
         y_val = X_val[:, 0]
         base_close = np.full(10, 84000.0)
 
-        model, error = train_single_model(
+        result = train_single_model(
             model_class=LinearRegressionModel,
             model_name="linear",
             X_train=X_train,
@@ -125,13 +131,15 @@ class TestTrainSingleModel:
             base_close_val=base_close,
         )
 
+        assert result is not None
+        model, error = result
         assert isinstance(model, LinearRegressionModel)
         assert model.n_features == 5
         assert error == pytest.approx(0, abs=1e-6)
 
         # A model whose return is 10% too large is ~0.1% off in price (a MAPE on the
         # raw returns would say ~10%)
-        _, biased_error = train_single_model(
+        biased = train_single_model(
             model_class=_BiasedModel,
             model_name="biased",
             X_train=X_train,
@@ -141,9 +149,11 @@ class TestTrainSingleModel:
             window_days=5,
             base_close_val=base_close,
         )
+        assert biased is not None
+        _, biased_error = biased
         assert 0 < biased_error < 1
 
-    def test_train_single_model_handles_failure(self):
+    def test_train_single_model_handles_failure(self) -> None:
         """Test that train_single_model returns None on failure."""
         # Invalid data (empty arrays)
         X_train = np.array([])
@@ -164,7 +174,9 @@ class TestTrainSingleModel:
         # Should return None on failure
         assert result is None
 
-    def test_train_single_model_logs_metrics(self, caplog):
+    def test_train_single_model_logs_metrics(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Test that train_single_model logs duration and validation error."""
         import logging
 
@@ -195,7 +207,9 @@ class TestTrainSingleModel:
 class TestTrainAllModels:
     """Test train_all_models function."""
 
-    def test_train_all_models_success(self, db_session, sample_prices):
+    def test_train_all_models_success(
+        self, db_session: Session, sample_prices: list[Price]
+    ) -> None:
         """
         Gherkin Scenario: The trainer covers every enabled model again
 
@@ -230,7 +244,9 @@ class TestTrainAllModels:
             assert model.params["target"] == LOG_RETURN_TARGET
 
     @pytest.mark.usefixtures("model_registry")
-    def test_train_all_models_activates_best(self, db_session, sample_prices):
+    def test_train_all_models_activates_best(
+        self, db_session: Session, sample_prices: list[Price]
+    ) -> None:
         """
         Test that train_all_models activates the model with lowest error.
 
@@ -254,8 +270,8 @@ class TestTrainAllModels:
 
     @pytest.mark.usefixtures("model_registry")
     def test_train_all_models_default_activates_nothing(
-        self, db_session, sample_prices
-    ):
+        self, db_session: Session, sample_prices: list[Price]
+    ) -> None:
         """By default every model is saved inactive and the active one is untouched."""
         previous = Model(
             name="linear_v0",
@@ -280,7 +296,9 @@ class TestTrainAllModels:
         assert active.id == previous.id
 
     @pytest.mark.usefixtures("model_registry")
-    def test_train_all_models_uses_same_data(self, db_session, sample_prices):
+    def test_train_all_models_uses_same_data(
+        self, db_session: Session, sample_prices: list[Price]
+    ) -> None:
         """Test that all models are trained on the same training data."""
         models = train_all_models(db_session)
 
@@ -294,8 +312,11 @@ class TestTrainAllModels:
             assert model.params["validation_samples"] == validation_samples
 
     def test_train_all_models_handles_partial_failures(
-        self, db_session, sample_prices, model_registry
-    ):
+        self,
+        db_session: Session,
+        sample_prices: list[Price],
+        model_registry: dict[str, type[LinearRegressionModel]],
+    ) -> None:
         """Test that train_all_models continues if one model fails."""
         model_registry["broken"] = _BrokenModel
 
@@ -306,7 +327,9 @@ class TestTrainAllModels:
         assert not any("broken" in name for name in model_names)
         assert get_active_model(db_session) is not None
 
-    def test_train_all_models_insufficient_data_raises_error(self, db_session):
+    def test_train_all_models_insufficient_data_raises_error(
+        self, db_session: Session
+    ) -> None:
         """train_all_models fails when fewer rows are stored than the split needs."""
         # 29 rows < (21 + 1) * 5 = 110 required for the default window
         for i in range(29):
@@ -326,7 +349,9 @@ class TestTrainAllModels:
         with pytest.raises(ValueError, match=r"need 110 daily rows.*have 29"):
             train_all_models(db_session)
 
-    def test_train_all_models_excludes_arima_with_limited_data(self, db_session):
+    def test_train_all_models_excludes_arima_with_limited_data(
+        self, db_session: Session
+    ) -> None:
         """
         Gherkin Scenario: ARIMA is excluded below its minimum data threshold
 
@@ -358,7 +383,7 @@ class TestNextVersionNumber:
     """The version a newly trained model gets, derived from the latest saved one."""
 
     @staticmethod
-    def _save_model(db_session, name, version):
+    def _save_model(db_session: Session, name: str, version: str) -> None:
         record = Model(
             name=f"{name}_{version}",
             version=version,
@@ -373,15 +398,17 @@ class TestNextVersionNumber:
         db_session.add(record)
         db_session.commit()
 
-    def test_starts_at_one_without_previous_model(self, db_session):
+    def test_starts_at_one_without_previous_model(self, db_session: Session) -> None:
         assert trainer._next_version_number(db_session, "linear") == 1
 
-    def test_increments_the_latest_version(self, db_session):
+    def test_increments_the_latest_version(self, db_session: Session) -> None:
         self._save_model(db_session, "linear", "v3")
 
         assert trainer._next_version_number(db_session, "linear") == 4
 
-    def test_restarts_at_one_when_version_is_not_numeric(self, db_session):
+    def test_restarts_at_one_when_version_is_not_numeric(
+        self, db_session: Session
+    ) -> None:
         self._save_model(db_session, "linear", "vbeta")
 
         assert trainer._next_version_number(db_session, "linear") == 1

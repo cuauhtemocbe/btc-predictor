@@ -24,7 +24,7 @@ def _python_files() -> list[Path]:
     ]
 
 
-def test_no_test_carries_the_skip_marker_and_no_hook_skips_it():
+def test_no_test_carries_the_skip_marker_and_no_hook_skips_it() -> None:
     offenders = [
         str(path.relative_to(REPO_ROOT))
         for path in _python_files()
@@ -34,7 +34,7 @@ def test_no_test_carries_the_skip_marker_and_no_hook_skips_it():
     assert offenders == []
 
 
-def test_the_skip_marker_is_not_registered():
+def test_the_skip_marker_is_not_registered() -> None:
     config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
 
     markers = config["tool"]["pytest"]["ini_options"]["markers"]
@@ -42,7 +42,7 @@ def test_the_skip_marker_is_not_registered():
     assert not [marker for marker in markers if marker.startswith(MARKER)]
 
 
-def test_no_test_module_is_omitted_from_coverage():
+def test_no_test_module_is_omitted_from_coverage() -> None:
     config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
 
     omitted = config["tool"].get("coverage", {}).get("run", {}).get("omit", [])
@@ -50,7 +50,7 @@ def test_no_test_module_is_omitted_from_coverage():
     assert omitted == []
 
 
-def test_the_three_model_suites_exist_next_to_the_trainer_tests():
+def test_the_three_model_suites_exist_next_to_the_trainer_tests() -> None:
     tests = Path(__file__).parent
 
     for suite in ("lstm_model", "xgboost_model", "arima_model", "all_models"):

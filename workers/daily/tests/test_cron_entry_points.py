@@ -24,7 +24,9 @@ CRON_ENTRY_POINTS = [
 ]
 
 
-def test_importing_the_cron_entry_points_does_not_load_the_non_linear_libraries():
+def test_importing_the_cron_entry_points_does_not_load_the_non_linear_libraries() -> (
+    None
+):
     imports = "; ".join(f"import {module}" for module in CRON_ENTRY_POINTS)
     code = (
         f"import sys; {imports}; "

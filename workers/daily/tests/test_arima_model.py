@@ -10,17 +10,19 @@ This test suite validates all Gherkin acceptance criteria from US-023 for ARIMA:
 """
 
 import pickle
+from typing import cast
 
 import numpy as np
 import pytest
 
+from shared.features import FeatureSet
 from workers.daily.models import ARIMAModel, BaseModel
 
 
 class TestARIMAModel:
     """Tests for ARIMAModel implementation."""
 
-    def test_arima_implements_basemodel_interface(self):
+    def test_arima_implements_basemodel_interface(self) -> None:
         """
         Gherkin Scenario: ARIMAModel implements BaseModel interface
 
@@ -45,7 +47,7 @@ class TestARIMAModel:
         assert callable(model.serialize)
         assert callable(ARIMAModel.deserialize)
 
-    def test_train_with_default_order(self, return_training_set):
+    def test_train_with_default_order(self, return_training_set: FeatureSet) -> None:
         """
         Gherkin Scenario: Train ARIMA model with default order
 
@@ -68,7 +70,9 @@ class TestARIMAModel:
         assert model.is_trained
         assert model.order == (5, 0, 0)
 
-    def test_arima_is_fitted_on_the_return_series(self, return_training_set):
+    def test_arima_is_fitted_on_the_return_series(
+        self, return_training_set: FeatureSet
+    ) -> None:
         """
         Gherkin Scenario: ARIMA is fitted on log returns, not on price levels
 
@@ -82,13 +86,15 @@ class TestARIMAModel:
 
         model.train(X, y)
 
-        assert np.allclose(model._training_data[:10], X[0, :10])
-        assert np.allclose(model._training_data[10:], y)
-        assert len(model._training_data) == 10 + len(y)
+        training_data = model._training_data
+        assert training_data is not None
+        assert np.allclose(training_data[:10], X[0, :10])
+        assert np.allclose(training_data[10:], y)
+        assert len(training_data) == 10 + len(y)
 
     def test_arima_predict_returns_valid_float(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: ARIMA predicts the next-day log return
 
@@ -112,8 +118,8 @@ class TestARIMAModel:
         assert abs(predicted_return) < 1.0
 
     def test_arima_predict_uses_the_latest_returns_without_refitting(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: ARIMA forecasts from the latest returns
 
@@ -134,8 +140,8 @@ class TestARIMAModel:
         assert np.array_equal(params_before, model.fitted_model.params)
 
     def test_arima_serialize_deserialize(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: ARIMA model serializes and deserializes correctly
 
@@ -176,8 +182,8 @@ class TestARIMAModel:
         assert np.isclose(original_prediction, restored_prediction)
 
     def test_train_rejects_a_feature_width_other_than_n_features(
-        self, return_training_set
-    ):
+        self, return_training_set: FeatureSet
+    ) -> None:
         """
         Gherkin Scenario: ARIMA rejects features of another width
 
@@ -191,16 +197,18 @@ class TestARIMAModel:
         with pytest.raises(ValueError, match="must have 21 features"):
             model.train(X[:, :20], y)
 
-    def test_n_features_must_cover_the_window(self):
+    def test_n_features_must_cover_the_window(self) -> None:
         """The returns ARIMA reads are columns of X, so X cannot be narrower."""
         with pytest.raises(ValueError, match="n_features .* must be >= window_days"):
             ARIMAModel(window_days=10, n_features=5)
 
-    def test_window_days_must_be_positive(self):
+    def test_window_days_must_be_positive(self) -> None:
         with pytest.raises(ValueError, match="window_days must be >= 1"):
             ARIMAModel(window_days=0)
 
-    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+    def test_artifact_without_n_features_still_loads(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """An artifact saved before n_features existed loads with n_features=window."""
         X, y = sliding_window_data
         model = ARIMAModel(window_days=30)
@@ -218,7 +226,7 @@ class TestARIMAModelEdgeCases:
     """ZOMBIES edge case tests for ARIMAModel."""
 
     # Z - Zero
-    def test_train_with_zero_samples(self):
+    def test_train_with_zero_samples(self) -> None:
         """Train with 0 samples should raise error."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.array([]).reshape(0, 30)
@@ -228,7 +236,7 @@ class TestARIMAModelEdgeCases:
             model.train(X, y)
 
     # O - One
-    def test_train_with_one_sample(self):
+    def test_train_with_one_sample(self) -> None:
         """Train with 1 sample should raise error (insufficient for ARIMA)."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.random.rand(1, 30) * 50000
@@ -239,7 +247,7 @@ class TestARIMAModelEdgeCases:
             model.train(X, y)
 
     # M - Many
-    def test_train_with_many_samples(self):
+    def test_train_with_many_samples(self) -> None:
         """Train with 365 days of data (335 samples)."""
         model = ARIMAModel(order=(5, 1, 0))
         prices = np.linspace(50000, 55000, 365)
@@ -254,48 +262,50 @@ class TestARIMAModelEdgeCases:
         assert model.is_trained
 
     # B - Boundaries
-    def test_order_p_zero_is_valid(self):
+    def test_order_p_zero_is_valid(self) -> None:
         """ARIMA order with p=0 is valid (pure MA model)."""
         model = ARIMAModel(order=(0, 1, 5))
         assert model.order == (0, 1, 5)
 
-    def test_order_d_zero_is_valid(self):
+    def test_order_d_zero_is_valid(self) -> None:
         """ARIMA order with d=0 is valid (no differencing)."""
         model = ARIMAModel(order=(5, 0, 0))
         assert model.order == (5, 0, 0)
 
-    def test_order_q_zero_is_valid(self):
+    def test_order_q_zero_is_valid(self) -> None:
         """ARIMA order with q=0 is valid (pure AR model)."""
         model = ARIMAModel(order=(5, 1, 0))
         assert model.order == (5, 1, 0)
 
-    def test_order_negative_p_raises_error(self):
+    def test_order_negative_p_raises_error(self) -> None:
         """Negative p value should raise error."""
         with pytest.raises(ValueError, match="order values.*must be >= 0"):
             ARIMAModel(order=(-1, 1, 0))
 
-    def test_order_negative_d_raises_error(self):
+    def test_order_negative_d_raises_error(self) -> None:
         """Negative d value should raise error."""
         with pytest.raises(ValueError, match="order values.*must be >= 0"):
             ARIMAModel(order=(5, -1, 0))
 
-    def test_order_wrong_length_raises_error(self):
+    def test_order_wrong_length_raises_error(self) -> None:
         """Order with wrong number of elements should raise error."""
         with pytest.raises(ValueError, match="order must be a 3-tuple"):
-            ARIMAModel(order=(5, 1))
+            ARIMAModel(order=cast("tuple[int, int, int]", (5, 1)))
 
-    def test_seasonal_order_all_zeros_is_valid(self):
+    def test_seasonal_order_all_zeros_is_valid(self) -> None:
         """Seasonal order with all zeros (no seasonality) is valid."""
         model = ARIMAModel(order=(5, 1, 0), seasonal_order=(0, 0, 0, 0))
         assert model.seasonal_order == (0, 0, 0, 0)
 
-    def test_seasonal_order_wrong_length_raises_error(self):
+    def test_seasonal_order_wrong_length_raises_error(self) -> None:
         """Seasonal order with wrong number of elements should raise error."""
         with pytest.raises(ValueError, match="seasonal_order must be a 4-tuple"):
-            ARIMAModel(seasonal_order=(0, 0, 0))
+            ARIMAModel(seasonal_order=cast("tuple[int, int, int, int]", (0, 0, 0)))
 
     # I - Interfaces
-    def test_predict_accepts_1d_array(self, sliding_window_data):
+    def test_predict_accepts_1d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 1D array (window_days,)."""
         X, y = sliding_window_data
         model = ARIMAModel(order=(5, 1, 0))
@@ -306,7 +316,9 @@ class TestARIMAModelEdgeCases:
         prediction = model.predict(X_new_1d)
         assert isinstance(prediction, float)
 
-    def test_predict_accepts_2d_array(self, sliding_window_data):
+    def test_predict_accepts_2d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 2D array (1, window_days)."""
         X, y = sliding_window_data
         model = ARIMAModel(order=(5, 1, 0))
@@ -318,7 +330,7 @@ class TestARIMAModelEdgeCases:
         assert isinstance(prediction, float)
 
     # E - Exceptions
-    def test_predict_before_training_raises_error(self):
+    def test_predict_before_training_raises_error(self) -> None:
         """Predict on untrained model should raise error."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.random.rand(1, 30) * 50000
@@ -326,7 +338,7 @@ class TestARIMAModelEdgeCases:
         with pytest.raises(ValueError, match="Model must be trained"):
             model.predict(X)
 
-    def test_train_with_mismatched_shapes_raises_error(self):
+    def test_train_with_mismatched_shapes_raises_error(self) -> None:
         """Train with mismatched X and y shapes should raise error."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.random.rand(50, 30) * 50000
@@ -335,7 +347,7 @@ class TestARIMAModelEdgeCases:
         with pytest.raises(ValueError, match="same number of samples"):
             model.train(X, y)
 
-    def test_train_with_nan_values_raises_error(self):
+    def test_train_with_nan_values_raises_error(self) -> None:
         """Train with NaN values should raise error."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.random.rand(50, 30) * 50000
@@ -345,7 +357,7 @@ class TestARIMAModelEdgeCases:
         with pytest.raises(ValueError, match="contains NaN"):
             model.train(X, y)
 
-    def test_train_with_inf_values_raises_error(self):
+    def test_train_with_inf_values_raises_error(self) -> None:
         """Train with infinite values should raise error."""
         model = ARIMAModel(order=(5, 1, 0))
         X = np.random.rand(50, 30) * 50000
@@ -355,14 +367,14 @@ class TestARIMAModelEdgeCases:
         with pytest.raises(ValueError, match="contains infinite"):
             model.train(X, y)
 
-    def test_deserialize_corrupted_bytes_raises_error(self):
+    def test_deserialize_corrupted_bytes_raises_error(self) -> None:
         """Deserialize corrupted bytes should raise error."""
         corrupted_bytes = b"not a valid pickle"
 
         with pytest.raises((pickle.UnpicklingError, ValueError)):
             ARIMAModel.deserialize(corrupted_bytes)
 
-    def test_deserialize_invalid_structure_raises_error(self):
+    def test_deserialize_invalid_structure_raises_error(self) -> None:
         """Deserialize bytes with invalid structure should raise error."""
         # Pickle a simple dict instead of model state
         invalid_data = pickle.dumps({"wrong": "structure"})
@@ -371,7 +383,7 @@ class TestARIMAModelEdgeCases:
             ARIMAModel.deserialize(invalid_data)
 
     # S - Serialization
-    def test_serialize_untrained_model_works(self):
+    def test_serialize_untrained_model_works(self) -> None:
         """Serialize untrained model should work."""
         model = ARIMAModel(order=(5, 1, 0))
         model_bytes = model.serialize()

@@ -8,6 +8,7 @@ The trainers no longer pick a window from a phase table: the window comes from
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -114,9 +115,9 @@ class TestTrainsOnEveryBtcRow:
         seen: dict[str, tuple[int, int]] = {}
         original_train = LinearRegressionModel.train
 
-        def spy(self, X, y):  # noqa: ANN001, ANN202
+        def spy(self: LinearRegressionModel, X: np.ndarray, y: np.ndarray) -> None:
             seen["shape"] = X.shape
-            return original_train(self, X, y)
+            original_train(self, X, y)
 
         monkeypatch.setattr(LinearRegressionModel, "train", spy)
 

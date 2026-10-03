@@ -113,9 +113,9 @@ class TestLinearModelTrainsOnReturns:
         seen: dict[str, np.ndarray] = {}
         original_train = LinearRegressionModel.train
 
-        def spy(self, X, y):  # noqa: ANN001, ANN202
+        def spy(self: LinearRegressionModel, X: np.ndarray, y: np.ndarray) -> None:
             seen["X"], seen["y"] = X, y
-            return original_train(self, X, y)
+            original_train(self, X, y)
 
         monkeypatch.setattr(LinearRegressionModel, "train", spy)
 
@@ -182,7 +182,9 @@ class TestTrainingAndPredictionUseTheSameBuilder:
         original = features._feature_matrix
         stage = {"name": "train"}
 
-        def spy(closes, volumes, window_days):  # noqa: ANN001, ANN202
+        def spy(
+            closes: np.ndarray, volumes: np.ndarray, window_days: int
+        ) -> np.ndarray:
             windows.append((stage["name"], window_days))
             return original(closes, volumes, window_days)
 
