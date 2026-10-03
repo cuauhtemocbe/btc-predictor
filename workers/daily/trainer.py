@@ -355,6 +355,71 @@ def model_registry(days_available: int) -> dict[str, type[BaseModel]]:
     return registry
 
 
+def _train_candidate_models(
+    model_classes: dict[str, type[BaseModel]],
+    *,
+    X_train: npt.NDArray[np.float64],
+    y_train: npt.NDArray[np.float64],
+    x_val: npt.NDArray[np.float64],
+    y_val: npt.NDArray[np.float64],
+    window_days: int,
+    base_close_val: npt.NDArray[np.float64] | None,
+) -> list[tuple[str, BaseModel, float]]:
+    """
+    Train every candidate model and keep the ones that trained successfully.
+
+    A model that fails is skipped (``train_single_model`` logs the error), so
+    the result can be shorter than ``model_classes`` or empty.
+
+    Returns:
+        List of (model_name, trained_model, validation_error_pct) tuples
+    """
+    successful_models: list[tuple[str, BaseModel, float]] = []
+
+    for model_name, model_class in model_classes.items():
+        result = train_single_model(
+            model_class=model_class,
+            model_name=model_name,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=x_val,
+            y_val=y_val,
+            window_days=window_days,
+            base_close_val=base_close_val,
+        )
+
+        if result is not None:
+            model_instance, validation_error = result
+            successful_models.append((model_name, model_instance, validation_error))
+
+    return successful_models
+
+
+def _next_version_number(session: Session, model_name: str) -> int:
+    """
+    Version number for the next saved model with this name.
+
+    Takes the latest saved model whose name starts with ``model_name`` and
+    increments its version (``"v3"`` -> 4). Starts at 1 when there is no
+    previous model or its version cannot be parsed.
+    """
+    stmt = (
+        select(Model)
+        .where(Model.name.like(f"{model_name}%"))
+        .order_by(Model.trained_at.desc())
+        .limit(1)
+    )
+    latest = session.execute(stmt).scalar_one_or_none()
+
+    if not (latest and latest.version):
+        return 1
+
+    try:
+        return int(latest.version.split("v")[-1]) + 1
+    except (ValueError, IndexError):
+        return 1
+
+
 def train_all_models(
     session: Session,
     window_days: int | None = None,
@@ -419,23 +484,15 @@ def train_all_models(
     logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(x_val)}")
 
     # Train all models
-    successful_models: list[tuple[str, BaseModel, float]] = []
-
-    for model_name, model_class in MODEL_CLASSES.items():
-        result = train_single_model(
-            model_class=model_class,
-            model_name=model_name,
-            X_train=X_train,
-            y_train=y_train,
-            X_val=x_val,
-            y_val=y_val,
-            window_days=window_days,
-            base_close_val=val_set.base_close,
-        )
-
-        if result is not None:
-            model_instance, validation_error = result
-            successful_models.append((model_name, model_instance, validation_error))
+    successful_models = _train_candidate_models(
+        MODEL_CLASSES,
+        X_train=X_train,
+        y_train=y_train,
+        x_val=x_val,
+        y_val=y_val,
+        window_days=window_days,
+        base_close_val=val_set.base_close,
+    )
 
     if not successful_models:
         raise ValueError("All models failed to train")
@@ -453,23 +510,7 @@ def train_all_models(
     saved_models = []
 
     for model_name, model_instance, validation_error in successful_models:
-        # Get existing versions for this model name
-        stmt = (
-            select(Model)
-            .where(Model.name.like(f"{model_name}%"))
-            .order_by(Model.trained_at.desc())
-            .limit(1)
-        )
-        latest = session.execute(stmt).scalar_one_or_none()
-
-        if latest and latest.version:
-            # Extract version number and increment
-            try:
-                version_num = int(latest.version.split("v")[-1]) + 1
-            except (ValueError, IndexError):
-                version_num = 1
-        else:
-            version_num = 1
+        version_num = _next_version_number(session, model_name)
 
         version = f"v{version_num}"
         full_name = f"{model_name}_{version}"

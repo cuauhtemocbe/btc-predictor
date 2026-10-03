@@ -18,6 +18,7 @@ Entry point: python -m daily.predictor [--multi-model]
 import argparse
 import logging
 import sys
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -353,6 +354,160 @@ def save_prediction(
     return prediction
 
 
+@dataclass
+class PredictionOutcome:
+    """Results of one predictor run, one entry per model."""
+
+    generated: list[tuple[str, float]] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _predict_one(
+    session: Session,
+    model_record: Model,
+    model_instance: BaseModel,
+    tomorrow: date,
+    current_price: Decimal,
+    outcome: PredictionOutcome,
+) -> None:
+    """
+    Generate and save the prediction of one model, unless it already exists.
+
+    Records the result in ``outcome`` (skipped or generated). Any error
+    propagates to the caller, which decides whether to continue.
+    """
+    model_name = model_record.name
+
+    # Check if prediction already exists for this model (idempotency)
+    if check_existing_prediction(session, tomorrow, model_id=model_record.id):
+        logger.info(
+            f"Prediction for {tomorrow} from {model_name} already exists, skipping"
+        )
+        outcome.skipped.append(model_name)
+        return
+
+    # Get window_days from model params
+    window_days = model_record.params.get("window_days", 30)
+    logger.info(f"{model_name} requires {window_days} days of historical data")
+
+    require_return_model(model_record)
+
+    # Fetch recent prices (window_days returns need window_days + 1 closes)
+    series = get_recent_series(session, required_history_days(window_days))
+
+    # Prepare features
+    X = prepare_features(series, window_days)
+
+    # The model predicts tomorrow's log return; the price follows from it
+    predicted_return = model_instance.predict(X)
+    predicted_price = price_from_return(current_price, predicted_return)
+    logger.info(
+        f"{model_name} predicted return {predicted_return:+.4%}, "
+        f"price: ${predicted_price:.2f}"
+    )
+
+    # Save prediction
+    save_prediction(
+        session=session,
+        model_id=model_record.id,
+        predicted_for=tomorrow,
+        current_price=current_price,
+        predicted_price=predicted_price,
+    )
+
+    outcome.generated.append((model_name, predicted_price))
+
+
+def _predict_single_model(
+    session: Session,
+    models: list[tuple[Model, BaseModel]],
+    tomorrow: date,
+    current_price: Decimal,
+    outcome: PredictionOutcome,
+) -> None:
+    """
+    Single-model mode: predict with the primary model and fail immediately.
+
+    A failure is logged, recorded in ``outcome`` and re-raised so ``main``
+    turns it into a non-zero exit code.
+    """
+    for model_record, model_instance in models:
+        try:
+            _predict_one(
+                session, model_record, model_instance, tomorrow, current_price, outcome
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate prediction for {model_record.name}: {e}"
+            )
+            outcome.failed.append((model_record.name, str(e)))
+            raise
+
+
+def _predict_multi_model(
+    session: Session,
+    models: list[tuple[Model, BaseModel]],
+    tomorrow: date,
+    current_price: Decimal,
+    outcome: PredictionOutcome,
+) -> None:
+    """
+    Multi-model mode: predict with every active model, continuing after errors.
+
+    A failure is logged and recorded in ``outcome``; the other models still run.
+    """
+    for model_record, model_instance in models:
+        try:
+            _predict_one(
+                session, model_record, model_instance, tomorrow, current_price, outcome
+            )
+        except Exception as e:
+            logger.exception(
+                f"Failed to generate prediction for {model_record.name}: {e}"
+            )
+            outcome.failed.append((model_record.name, str(e)))
+
+
+def _log_prediction_summary(tomorrow: date, outcome: PredictionOutcome) -> None:
+    """Log what the run generated, skipped and failed."""
+    logger.info("=" * 60)
+    logger.info(f"Predictions for {tomorrow}:")
+    for model_name, predicted_price in outcome.generated:
+        logger.info(f"  ✓ {model_name}: ${predicted_price:,.2f}")
+
+    if outcome.skipped:
+        logger.info(f"Skipped (already exist): {', '.join(outcome.skipped)}")
+
+    if outcome.failed:
+        logger.warning(f"Failed: {len(outcome.failed)} model(s)")
+        for model_name, error in outcome.failed:
+            logger.warning(f"  ✗ {model_name}: {error}")
+
+    logger.info("=" * 60)
+
+
+def _exit_code(outcome: PredictionOutcome) -> int:
+    """Exit code of the run: 0 if anything was generated or already existed."""
+    # Success if at least one prediction was generated
+    if outcome.generated:
+        logger.info(
+            f"Predictor job completed successfully: "
+            f"{len(outcome.generated)} prediction(s) generated"
+        )
+        return 0
+    if outcome.skipped:
+        # All predictions already existed (idempotent re-run)
+        logger.info(
+            "Predictor job completed: all predictions already existed (idempotent)"
+        )
+        return 0
+
+    # No predictions generated and none skipped = all failed
+    logger.error("Predictor job failed: no predictions generated")
+    return 1
+
+
 def main(session: Session | None = None) -> int:
     """
     Main entry point for the predictor job.
@@ -396,103 +551,17 @@ def main(session: Session | None = None) -> int:
         current_price = session.execute(current_price_stmt).scalar_one()
         logger.info(f"Current BTC price: ${current_price}")
 
-        # Track predictions generated
-        predictions_generated = []
-        predictions_skipped = []
-        predictions_failed = []
+        outcome = PredictionOutcome()
 
         # Generate prediction for each active model
-        for model_record, model_instance in models:
-            model_name = model_record.name
-
-            try:
-                # Check if prediction already exists for this model (idempotency)
-                if check_existing_prediction(
-                    session, tomorrow, model_id=model_record.id
-                ):
-                    logger.info(
-                        f"Prediction for {tomorrow} from {model_name} "
-                        f"already exists, skipping"
-                    )
-                    predictions_skipped.append(model_name)
-                    continue
-
-                # Get window_days from model params
-                window_days = model_record.params.get("window_days", 30)
-                logger.info(
-                    f"{model_name} requires {window_days} days of historical data"
-                )
-
-                require_return_model(model_record)
-
-                # Fetch recent prices (window_days returns need window_days + 1 closes)
-                series = get_recent_series(session, required_history_days(window_days))
-
-                # Prepare features
-                X = prepare_features(series, window_days)
-
-                # The model predicts tomorrow's log return; the price follows from it
-                predicted_return = model_instance.predict(X)
-                predicted_price = price_from_return(current_price, predicted_return)
-                logger.info(
-                    f"{model_name} predicted return {predicted_return:+.4%}, "
-                    f"price: ${predicted_price:.2f}"
-                )
-
-                # Save prediction
-                save_prediction(
-                    session=session,
-                    model_id=model_record.id,
-                    predicted_for=tomorrow,
-                    current_price=current_price,
-                    predicted_price=predicted_price,
-                )
-
-                predictions_generated.append((model_name, predicted_price))
-
-            except Exception as e:
-                # In multi-model mode, log error and continue with other models
-                # In single-model mode, exception propagates to outer try/except
-                logger.error(f"Failed to generate prediction for {model_name}: {e}")
-                predictions_failed.append((model_name, str(e)))
-
-                if not args.multi_model:
-                    # In single-model mode, fail immediately
-                    raise
-
-        # Log summary
-        logger.info("=" * 60)
-        logger.info(f"Predictions for {tomorrow}:")
-        for model_name, predicted_price in predictions_generated:
-            logger.info(f"  ✓ {model_name}: ${predicted_price:,.2f}")
-
-        if predictions_skipped:
-            logger.info(f"Skipped (already exist): {', '.join(predictions_skipped)}")
-
-        if predictions_failed:
-            logger.warning(f"Failed: {len(predictions_failed)} model(s)")
-            for model_name, error in predictions_failed:
-                logger.warning(f"  ✗ {model_name}: {error}")
-
-        logger.info("=" * 60)
-
-        # Success if at least one prediction was generated
-        if predictions_generated:
-            logger.info(
-                f"Predictor job completed successfully: "
-                f"{len(predictions_generated)} prediction(s) generated"
-            )
-            return 0
-        elif predictions_skipped:
-            # All predictions already existed (idempotent re-run)
-            logger.info(
-                "Predictor job completed: all predictions already existed (idempotent)"
-            )
-            return 0
+        if args.multi_model:
+            _predict_multi_model(session, models, tomorrow, current_price, outcome)
         else:
-            # No predictions generated and none skipped = all failed
-            logger.error("Predictor job failed: no predictions generated")
-            return 1
+            _predict_single_model(session, models, tomorrow, current_price, outcome)
+
+        _log_prediction_summary(tomorrow, outcome)
+
+        return _exit_code(outcome)
 
     except ValueError as e:
         logger.error(f"Validation error: {e}")
