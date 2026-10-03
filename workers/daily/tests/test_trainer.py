@@ -6,14 +6,14 @@ Covers:
 - train_all_models: Train all 4 models and select best
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
 import pytest
 
 from shared.db.crud import get_active_model, get_all_models
-from shared.db.models import Price
+from shared.db.models import Model, Price
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 from workers.daily.trainer import train_all_models, train_single_model
@@ -320,3 +320,36 @@ class TestTrainAllModels:
         assert any("linear" in name for name in model_names)
         assert any("lstm" in name for name in model_names)
         assert any("xgboost" in name for name in model_names)
+
+
+class TestNextVersionNumber:
+    """The version a newly trained model gets, derived from the latest saved one."""
+
+    @staticmethod
+    def _save_model(db_session, name, version):
+        record = Model(
+            name=f"{name}_{version}",
+            version=version,
+            params={},
+            artifact=b"",
+            trained_at=datetime.now(UTC),
+            train_from=date(2026, 1, 1),
+            train_to=date(2026, 1, 31),
+            timeframe="1d",
+            is_active=False,
+        )
+        db_session.add(record)
+        db_session.commit()
+
+    def test_starts_at_one_without_previous_model(self, db_session):
+        assert trainer._next_version_number(db_session, "linear") == 1
+
+    def test_increments_the_latest_version(self, db_session):
+        self._save_model(db_session, "linear", "v3")
+
+        assert trainer._next_version_number(db_session, "linear") == 4
+
+    def test_restarts_at_one_when_version_is_not_numeric(self, db_session):
+        self._save_model(db_session, "linear", "vbeta")
+
+        assert trainer._next_version_number(db_session, "linear") == 1
