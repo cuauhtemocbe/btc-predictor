@@ -6,7 +6,9 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.orm import Session
 
+from scripts.tests.helpers import DailyRows, PriceRows
 from shared.db.models import Price
 
 # Note: db_session is provided by root conftest.py
@@ -19,10 +21,10 @@ from shared.db.models import Price
 
 
 @pytest.fixture(scope="module")
-def cached_sample_price_data():
+def cached_sample_price_data() -> PriceRows:
     """Module-scoped cached price data (60 days, 360 records)."""
     start_date = date(2024, 5, 1)
-    data = []
+    data: PriceRows = []
 
     for day in range(60):
         current_date = start_date + timedelta(days=day)
@@ -50,9 +52,11 @@ def cached_sample_price_data():
 
 
 @pytest.fixture
-def sample_btc_prices(db_session, cached_sample_price_data):
+def sample_btc_prices(
+    db_session: Session, cached_sample_price_data: PriceRows
+) -> list[Price]:
     """Create sample BTC price data using cached values (60 days, 360 records)."""
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_p, high, low, close, volume in cached_sample_price_data:
         price = Price(
@@ -72,10 +76,10 @@ def sample_btc_prices(db_session, cached_sample_price_data):
 
 
 @pytest.fixture(scope="module")
-def cached_historical_60_days():
+def cached_historical_60_days() -> PriceRows:
     """Module-scoped cached historical data (60 days, 360 records)."""
     start_date = date(2024, 4, 1)
-    data = []
+    data: PriceRows = []
 
     for day in range(60):
         current_date = start_date + timedelta(days=day)
@@ -103,9 +107,11 @@ def cached_historical_60_days():
 
 
 @pytest.fixture
-def historical_data_60_days(db_session, cached_historical_60_days):
+def historical_data_60_days(
+    db_session: Session, cached_historical_60_days: PriceRows
+) -> list[Price]:
     """Create 60 days of BTC price data using cached values (360 records)."""
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_p, high, low, close, volume in cached_historical_60_days:
         price = Price(
@@ -125,10 +131,10 @@ def historical_data_60_days(db_session, cached_historical_60_days):
 
 
 @pytest.fixture(scope="module")
-def cached_historical_90_days():
+def cached_historical_90_days() -> PriceRows:
     """Module-scoped cached historical data (90 days, 540 records)."""
     start_date = date(2024, 3, 1)
-    data = []
+    data: PriceRows = []
 
     for day in range(90):
         current_date = start_date + timedelta(days=day)
@@ -156,9 +162,11 @@ def cached_historical_90_days():
 
 
 @pytest.fixture
-def historical_90_days(db_session, cached_historical_90_days):
+def historical_90_days(
+    db_session: Session, cached_historical_90_days: PriceRows
+) -> list[Price]:
     """Create 90 days of BTC price data using cached values (540 records)."""
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_p, high, low, close, volume in cached_historical_90_days:
         price = Price(
@@ -186,7 +194,7 @@ SYNTHETIC_DAYS = 800  # through 2025-03-11
 
 
 @pytest.fixture(scope="module")
-def synthetic_daily_rows():
+def synthetic_daily_rows() -> DailyRows:
     """Module-scoped (day, close, volume) rows of a seeded random walk, one per day.
 
     Every close and volume is distinct, so a test can tell which day's data
@@ -208,7 +216,7 @@ def synthetic_daily_rows():
 
 
 @pytest.fixture
-def seeded_prices(db_session, synthetic_daily_rows):
+def seeded_prices(db_session: Session, synthetic_daily_rows: DailyRows) -> DailyRows:
     """Insert the synthetic series as BTCUSDT daily bars (00:00 UTC) and return it."""
     db_session.add_all(
         Price(

@@ -4,20 +4,24 @@ from contextlib import nullcontext
 from datetime import date
 
 import pytest
+from sqlalchemy.orm import Session
 
 from scripts import backtest
 from scripts.backtest_engine import BacktestConfig
+from scripts.tests.helpers import DailyRows, params_of
 from shared.config import settings
 from shared.db.models import BacktestResult
 
 DAY = ["--start-date=2024-06-10", "--end-date=2024-06-12", "--training-window=5"]
 
 
-def run(db_session, *args: str) -> int:
+def run(db_session: Session, *args: str) -> int:
     return backtest.main(list(args), session_factory=lambda: nullcontext(db_session))
 
 
-def test_a_run_stores_one_row_per_day_and_exits_zero(db_session, seeded_prices):
+def test_a_run_stores_one_row_per_day_and_exits_zero(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     assert run(db_session, *DAY) == 0
 
     rows = db_session.query(BacktestResult).all()
@@ -26,10 +30,10 @@ def test_a_run_stores_one_row_per_day_and_exits_zero(db_session, seeded_prices):
         date(2024, 6, 11),
         date(2024, 6, 12),
     ]
-    assert {r.model_params["model_name"] for r in rows} == {"linear"}
+    assert {params_of(r)["model_name"] for r in rows} == {"linear"}
 
 
-def test_training_window_defaults_to_the_production_window():
+def test_training_window_defaults_to_the_production_window() -> None:
     args = backtest.parse_arguments(
         ["--start-date=2024-01-01", "--end-date=2024-01-02"]
     )
@@ -41,7 +45,9 @@ def test_training_window_defaults_to_the_production_window():
     )
 
 
-def test_model_defaults_to_linear_and_rejects_unknown_names(capsys):
+def test_model_defaults_to_linear_and_rejects_unknown_names(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     args = backtest.parse_arguments(
         ["--start-date=2024-01-01", "--end-date=2024-01-02"]
     )
@@ -66,8 +72,12 @@ def test_model_defaults_to_linear_and_rejects_unknown_names(capsys):
     ],
 )
 def test_invalid_arguments_exit_one_without_writing(
-    db_session, seeded_prices, caplog, args, message
-):
+    db_session: Session,
+    seeded_prices: DailyRows,
+    caplog: pytest.LogCaptureFixture,
+    args: list[str],
+    message: str,
+) -> None:
     assert run(db_session, *args) == 1
 
     assert message in caplog.text
@@ -75,8 +85,8 @@ def test_invalid_arguments_exit_one_without_writing(
 
 
 def test_insufficient_history_exits_one_and_names_the_earliest_start(
-    db_session, seeded_prices, caplog
-):
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     assert (
         run(
             db_session,
@@ -91,7 +101,9 @@ def test_insufficient_history_exits_one_and_names_the_earliest_start(
     assert db_session.query(BacktestResult).count() == 0
 
 
-def test_the_summary_logs_the_pnl_of_every_strategy(db_session, seeded_prices, caplog):
+def test_the_summary_logs_the_pnl_of_every_strategy(
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     import logging
 
     caplog.set_level(logging.INFO)
@@ -107,15 +119,17 @@ def test_the_summary_logs_the_pnl_of_every_strategy(db_session, seeded_prices, c
         assert label in caplog.text
 
 
-def test_seed_and_retrain_every_reach_the_stored_params(db_session, seeded_prices):
+def test_seed_and_retrain_every_reach_the_stored_params(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     assert run(db_session, *DAY, "--seed=9", "--retrain-every=2") == 0
 
-    params = [r.model_params for r in db_session.query(BacktestResult).all()]
+    params = [params_of(r) for r in db_session.query(BacktestResult).all()]
     assert {p["seed"] for p in params} == {9}
     assert {p["retrain_every"] for p in params} == {2}
 
 
-def test_seed_defaults_to_42_and_retrain_every_to_1():
+def test_seed_defaults_to_42_and_retrain_every_to_1() -> None:
     args = backtest.parse_arguments(
         ["--start-date=2024-01-01", "--end-date=2024-01-02"]
     )
@@ -123,15 +137,17 @@ def test_seed_defaults_to_42_and_retrain_every_to_1():
     assert (args.seed, args.retrain_every) == (42, 1)
 
 
-def test_retrain_every_below_one_is_rejected(db_session, seeded_prices, caplog):
+def test_retrain_every_below_one_is_rejected(
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     assert run(db_session, *DAY, "--retrain-every=0") == 1
 
     assert "retrain-every must be >= 1" in caplog.text
 
 
 def test_the_run_prints_the_report_with_the_test_slice_as_headline(
-    db_session, seeded_prices, capsys
-):
+    db_session: Session, seeded_prices: DailyRows, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run(db_session, *DAY) == 0
 
     out = capsys.readouterr().out
@@ -140,7 +156,9 @@ def test_the_run_prints_the_report_with_the_test_slice_as_headline(
     assert "Edge over best baseline:" in out
 
 
-def test_test_start_date_reaches_the_stored_slices(db_session, seeded_prices):
+def test_test_start_date_reaches_the_stored_slices(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     assert run(db_session, *DAY, "--test-start-date=2024-06-12") == 0
 
     slices = {
@@ -154,21 +172,29 @@ def test_test_start_date_reaches_the_stored_slices(db_session, seeded_prices):
     }
 
 
-def test_test_start_date_outside_the_range_exits_one(db_session, seeded_prices, caplog):
+def test_test_start_date_outside_the_range_exits_one(
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     assert run(db_session, *DAY, "--test-start-date=2024-07-01") == 1
 
     assert "within the backtest range" in caplog.text
     assert db_session.query(BacktestResult).count() == 0
 
 
-def test_a_malformed_test_start_date_exits_one(db_session, seeded_prices, caplog):
+def test_a_malformed_test_start_date_exits_one(
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     assert run(db_session, *DAY, "--test-start-date=soon") == 1
 
     assert "Invalid test-start-date" in caplog.text
 
 
-def test_ctrl_c_exits_one(db_session, monkeypatch, caplog):
-    def interrupted(*args, **kwargs):
+def test_ctrl_c_exits_one(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def interrupted(*args: object, **kwargs: object) -> None:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(backtest, "run_walk_forward", interrupted)
@@ -177,8 +203,12 @@ def test_ctrl_c_exits_one(db_session, monkeypatch, caplog):
     assert "interrupted by user" in caplog.text
 
 
-def test_an_unexpected_error_exits_one_and_is_logged(db_session, monkeypatch, caplog):
-    def broken(*args, **kwargs):
+def test_an_unexpected_error_exits_one_and_is_logged(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
         raise RuntimeError("database went away")
 
     monkeypatch.setattr(backtest, "run_walk_forward", broken)
