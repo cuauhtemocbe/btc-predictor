@@ -8,12 +8,17 @@ Same bug as the daily worker: PAXGUSDT bars share the ``prices`` table since
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy.orm import Session
 
 import workers.weekly.predictor as pred_module
 from shared.db.models import Model, Prediction, Price
 from workers.daily import predictor as daily_predictor
 from workers.weekly import evaluator, predictor
+
+# weekly.evaluator.fetch_actual_price is re-exported from the daily module, not in its
+# public API, so mypy rejects the attribute; look it up through vars().
+fetch_actual_price = vars(evaluator)["fetch_actual_price"]
 
 BTC = "BTCUSDT"
 PAXG = "PAXGUSDT"
@@ -72,16 +77,14 @@ class TestWeeklyPredictorSymbolIsolation:
         db_session: Session,
         sample_trained_model: Model,
         sample_daily_close_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _add_bar(db_session, PAXG, datetime.now(UTC), PAXG_CLOSE)
         db_session.commit()
 
-        original_session = pred_module.SessionLocal
-        pred_module.SessionLocal = lambda: db_session
-        try:
-            assert predictor.main() == 0
-        finally:
-            pred_module.SessionLocal = original_session
+        monkeypatch.setattr(pred_module, "SessionLocal", lambda: db_session)
+
+        assert predictor.main() == 0
 
         prediction = db_session.query(Prediction).one()
         assert prediction.price_at_prediction > 50000
@@ -95,4 +98,4 @@ class TestWeeklyEvaluatorSymbolIsolation:
         _add_bar(db_session, BTC, bar_open, BTC_CLOSE)
         db_session.commit()
 
-        assert evaluator.fetch_actual_price(db_session, today) == BTC_CLOSE
+        assert fetch_actual_price(db_session, today) == BTC_CLOSE

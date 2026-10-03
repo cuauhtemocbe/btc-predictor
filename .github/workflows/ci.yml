@@ -40,8 +40,8 @@ jobs:
         run: docker compose exec -T api ruff format --check shared api workers scripts
 
       # shared, workers, api and scripts: all production packages, strict.
-      # Test code is checked for shared, fetch_price and backtest; the other
-      # packages are still listed in [tool.mypy] exclude in pyproject.toml
+      # Test code is checked for shared, fetch_price, backtest and weekly; the
+      # other packages are still listed in [tool.mypy] exclude in pyproject.toml
       # and are being typed one by one (#158).
       - name: Run mypy strict checks
         run: >-

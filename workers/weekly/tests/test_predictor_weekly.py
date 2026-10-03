@@ -22,6 +22,10 @@ from workers.daily import predictor as daily_predictor
 from workers.weekly import predictor
 from workers.weekly.models import LinearRegressionModel
 
+# weekly.predictor.prepare_features is re-exported from the daily module and not in its
+# public API, so mypy rejects the attribute; look it up through vars().
+prepare_features = vars(predictor)["prepare_features"]
+
 # ============================================================================
 # Unit tests for helper functions
 # ============================================================================
@@ -101,7 +105,7 @@ class TestPrepareFeatures:
     """The weekly predictor builds the same return features as the daily one."""
 
     def test_uses_the_daily_feature_builder(self) -> None:
-        assert predictor.prepare_features is daily_predictor.prepare_features
+        assert prepare_features is daily_predictor.prepare_features
 
     def test_30_day_window_gives_61_return_features(self) -> None:
         series = DailySeries(
@@ -109,7 +113,7 @@ class TestPrepareFeatures:
             volumes=[Decimal(1000 + i) for i in range(31)],
         )
 
-        X = predictor.prepare_features(series, window_days=30)
+        X = prepare_features(series, window_days=30)
 
         assert X.shape == (1, 61)
 
@@ -164,7 +168,7 @@ class TestCheckExistingPrediction:
             model_id=sample_trained_model.id,
             predicted_for=target_date,
             timeframe="1d",  # Daily, not weekly
-            predicted_at=predictor.datetime.now(predictor.UTC),
+            predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("51000.00"),
             predicted_price=Decimal("51500.00"),
         )
@@ -231,6 +235,7 @@ class TestMainWeeklyPredictor:
         db_session: Session,
         sample_trained_model: Model,
         sample_daily_close_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin: Weekly predictor predicts 7 days ahead.
@@ -244,30 +249,25 @@ class TestMainWeeklyPredictor:
         # Patch SessionLocal to return our test session
         import workers.weekly.predictor as pred_module
 
-        original_session = pred_module.SessionLocal
-        pred_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(pred_module, "SessionLocal", lambda: db_session)
 
-        try:
-            exit_code = predictor.main()
+        exit_code = predictor.main()
 
-            # Should succeed
-            assert exit_code == 0
+        # Should succeed
+        assert exit_code == 0
 
-            # Should create a weekly prediction
-            predictions = (
-                db_session.query(Prediction).filter(Prediction.timeframe == "1w").all()
-            )
-            assert len(predictions) == 1
+        # Should create a weekly prediction
+        predictions = (
+            db_session.query(Prediction).filter(Prediction.timeframe == "1w").all()
+        )
+        assert len(predictions) == 1
 
-            # Should be for 7 days ahead
-            prediction = predictions[0]
-            expected_date = date.today() + timedelta(days=7)
-            assert prediction.predicted_for == expected_date
-            assert prediction.timeframe == "1w"
-            assert prediction.predicted_price is not None
-
-        finally:
-            pred_module.SessionLocal = original_session
+        # Should be for 7 days ahead
+        prediction = predictions[0]
+        expected_date = date.today() + timedelta(days=7)
+        assert prediction.predicted_for == expected_date
+        assert prediction.timeframe == "1w"
+        assert prediction.predicted_price is not None
 
     def test_stored_price_is_last_close_times_exp_of_the_7_day_return(
         self,
@@ -313,6 +313,7 @@ class TestMainWeeklyPredictor:
         sample_trained_model: Model,
         sample_daily_close_prices_31_days: list[Price],
         sample_weekly_prediction_for_next_monday: Prediction,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin: Idempotency - re-running doesn't duplicate.
@@ -326,40 +327,32 @@ class TestMainWeeklyPredictor:
         """
         import workers.weekly.predictor as pred_module
 
-        original_session = pred_module.SessionLocal
-        pred_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(pred_module, "SessionLocal", lambda: db_session)
 
-        try:
-            # Count predictions before
-            count_before = (
-                db_session.query(Prediction)
-                .filter(Prediction.timeframe == "1w")
-                .count()
-            )
-            assert count_before == 1  # From fixture
+        # Count predictions before
+        count_before = (
+            db_session.query(Prediction).filter(Prediction.timeframe == "1w").count()
+        )
+        assert count_before == 1  # From fixture
 
-            # Run predictor
-            exit_code = predictor.main()
+        # Run predictor
+        exit_code = predictor.main()
 
-            # Should succeed (idempotent behavior returns 0)
-            assert exit_code == 0
+        # Should succeed (idempotent behavior returns 0)
+        assert exit_code == 0
 
-            # Should NOT create a new prediction
-            count_after = (
-                db_session.query(Prediction)
-                .filter(Prediction.timeframe == "1w")
-                .count()
-            )
-            assert count_after == 1  # Still only 1 prediction
-
-        finally:
-            pred_module.SessionLocal = original_session
+        # Should NOT create a new prediction
+        count_after = (
+            db_session.query(Prediction).filter(Prediction.timeframe == "1w").count()
+        )
+        assert count_after == 1  # Still only 1 prediction
 
     def test_insufficient_data_fails_gracefully(
         self,
         db_session: Session,
         sample_trained_model: Model,
         sample_daily_close_prices_10_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin: Weekly predictor fails gracefully if insufficient data.
@@ -374,28 +367,24 @@ class TestMainWeeklyPredictor:
         """
         import workers.weekly.predictor as pred_module
 
-        original_session = pred_module.SessionLocal
-        pred_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(pred_module, "SessionLocal", lambda: db_session)
 
-        try:
-            exit_code = predictor.main()
+        exit_code = predictor.main()
 
-            # Should fail
-            assert exit_code == 1
+        # Should fail
+        assert exit_code == 1
 
-            # Should NOT create any prediction
-            predictions = (
-                db_session.query(Prediction).filter(Prediction.timeframe == "1w").all()
-            )
-            assert len(predictions) == 0
-
-        finally:
-            pred_module.SessionLocal = original_session
+        # Should NOT create any prediction
+        predictions = (
+            db_session.query(Prediction).filter(Prediction.timeframe == "1w").all()
+        )
+        assert len(predictions) == 0
 
     def test_no_active_model_fails(
         self,
         db_session: Session,
         sample_daily_close_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Should fail when no active model exists.
@@ -407,21 +396,16 @@ class TestMainWeeklyPredictor:
         """
         import workers.weekly.predictor as pred_module
 
-        original_session = pred_module.SessionLocal
-        pred_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(pred_module, "SessionLocal", lambda: db_session)
 
-        try:
-            exit_code = predictor.main()
+        exit_code = predictor.main()
 
-            # Should fail
-            assert exit_code == 1
+        # Should fail
+        assert exit_code == 1
 
-            # Should NOT create any prediction
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 0
-
-        finally:
-            pred_module.SessionLocal = original_session
+        # Should NOT create any prediction
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 0
 
 
 # ============================================================================

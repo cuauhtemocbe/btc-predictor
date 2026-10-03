@@ -13,6 +13,9 @@ from shared.db.models import Model, Prediction, Price
 from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
 from workers.weekly.models import LinearRegressionModel
 
+# One cached bar: (timestamp, open, high, low, close, volume).
+type BarRow = tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]
+
 # Note: db_session is provided by root conftest.py
 # Note: Database schema is created by autouse fixture in root conftest.py
 
@@ -62,9 +65,9 @@ def sample_trained_model(db_session: Session) -> Model:
 
 
 @pytest.fixture(scope="module")
-def cached_daily_price_data_31_days():
+def cached_daily_price_data_31_days() -> list[BarRow]:
     """Module-scoped cached hourly price data (31 days, 744 records)."""
-    data = []
+    data: list[BarRow] = []
     base_time = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=31)
@@ -90,7 +93,7 @@ def cached_daily_price_data_31_days():
 
 @pytest.fixture
 def sample_daily_close_prices_31_days(
-    db_session: Session, cached_daily_price_data_31_days
+    db_session: Session, cached_daily_price_data_31_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 31 days of hourly prices using cached data.
@@ -120,9 +123,9 @@ def sample_daily_close_prices_31_days(
 
 
 @pytest.fixture(scope="module")
-def cached_daily_price_data_10_days():
+def cached_daily_price_data_10_days() -> list[BarRow]:
     """Module-scoped cached hourly price data (10 days, 240 records)."""
-    data = []
+    data: list[BarRow] = []
     base_time = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=10)
@@ -148,7 +151,7 @@ def cached_daily_price_data_10_days():
 
 @pytest.fixture
 def sample_daily_close_prices_10_days(
-    db_session: Session, cached_daily_price_data_10_days
+    db_session: Session, cached_daily_price_data_10_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 10 days of hourly prices using cached data (insufficient for 30-day window).

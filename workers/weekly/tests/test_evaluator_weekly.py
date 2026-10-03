@@ -14,7 +14,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from workers.daily.evaluator import EvaluationMetrics
 from workers.weekly import evaluator
+
+# weekly.evaluator.fetch_actual_price is re-exported from the daily module, not in its
+# public API, so mypy rejects the attribute; look it up through vars().
+fetch_actual_price = vars(evaluator)["fetch_actual_price"]
 
 # ============================================================================
 # Unit tests for helper functions
@@ -76,11 +81,11 @@ class TestFindUnevaluatedWeeklyPrediction:
             model_id=sample_trained_model.id,
             predicted_for=today,
             timeframe="1w",
-            predicted_at=evaluator.datetime.now(evaluator.UTC) - timedelta(days=7),
+            predicted_at=datetime.now(UTC) - timedelta(days=7),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("67000.00"),
             actual_price=Decimal("67500.00"),  # Already evaluated!
-            evaluated_at=evaluator.datetime.now(evaluator.UTC),
+            evaluated_at=datetime.now(UTC),
             error_abs=Decimal("500.00"),
             error_pct=Decimal("0.74"),
             direction_correct=True,
@@ -111,7 +116,7 @@ class TestFindUnevaluatedWeeklyPrediction:
             model_id=sample_trained_model.id,
             predicted_for=today,
             timeframe="1d",  # Daily, not weekly
-            predicted_at=evaluator.datetime.now(evaluator.UTC) - timedelta(days=1),
+            predicted_at=datetime.now(UTC) - timedelta(days=1),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("67000.00"),
             actual_price=None,
@@ -136,13 +141,13 @@ class TestFetchActualPrice:
         When fetch_actual_price() is called for today
         Then it returns that bar's close
         """
-        price = evaluator.fetch_actual_price(db_session, date.today())
+        price = fetch_actual_price(db_session, date.today())
 
         assert price == Decimal("67500.00")  # Close price from fixture
 
     def test_returns_none_when_bar_missing(self, db_session: Session) -> None:
         """Given no bar is stored, fetch_actual_price() returns None."""
-        assert evaluator.fetch_actual_price(db_session, date.today()) is None
+        assert fetch_actual_price(db_session, date.today()) is None
 
     def test_ignores_bar_opened_on_the_prediction_date(
         self, db_session: Session
@@ -166,7 +171,7 @@ class TestFetchActualPrice:
             )
         db_session.commit()
 
-        assert evaluator.fetch_actual_price(db_session, target) == Decimal("100")
+        assert fetch_actual_price(db_session, target) == Decimal("100")
 
 
 class TestCalculateDirectionCorrect:
@@ -340,7 +345,7 @@ class TestCalculateMetrics:
             model_id=sample_trained_model.id,
             predicted_for=date.today(),
             timeframe="1d",
-            predicted_at=evaluator.datetime.now(evaluator.UTC),
+            predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("67000.00"),
         )
@@ -350,7 +355,7 @@ class TestCalculateMetrics:
             model_id=sample_trained_model.id,
             predicted_for=date.today(),
             timeframe="1w",
-            predicted_at=evaluator.datetime.now(evaluator.UTC),
+            predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("67000.00"),
         )
@@ -401,7 +406,7 @@ class TestUpdatePrediction:
         prediction = sample_unevaluated_weekly_prediction_for_today
         actual_price = Decimal("67500.00")
 
-        metrics = {
+        metrics: EvaluationMetrics = {
             "error_abs": Decimal("500.00"),
             "error_pct": Decimal("0.74"),
             "direction_correct": True,
@@ -437,6 +442,7 @@ class TestMainWeeklyEvaluator:
         db_session: Session,
         sample_unevaluated_weekly_prediction_for_today: Prediction,
         sample_actual_price_for_today: Price,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Gherkin: Weekly evaluator evaluates predictions 7 days later.
@@ -449,40 +455,37 @@ class TestMainWeeklyEvaluator:
         """
         import workers.weekly.evaluator as eval_module
 
-        original_session = eval_module.SessionLocal
-        eval_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(eval_module, "SessionLocal", lambda: db_session)
 
-        try:
-            # Verify prediction is unevaluated
-            prediction = sample_unevaluated_weekly_prediction_for_today
-            prediction_id = prediction.id
-            assert prediction.actual_price is None
+        # Verify prediction is unevaluated
+        prediction = sample_unevaluated_weekly_prediction_for_today
+        prediction_id = prediction.id
+        assert prediction.actual_price is None
 
-            # Run evaluator
-            exit_code = evaluator.main()
+        # Run evaluator
+        exit_code = evaluator.main()
 
-            # Should succeed
-            assert exit_code == 0
+        # Should succeed
+        assert exit_code == 0
 
-            # Re-query prediction to see updated values
-            from shared.db.models import Prediction as PredModel
+        # Re-query prediction to see updated values
+        from shared.db.models import Prediction as PredModel
 
-            updated_prediction = (
-                db_session.query(PredModel).filter_by(id=prediction_id).one()
-            )
+        updated_prediction = (
+            db_session.query(PredModel).filter_by(id=prediction_id).one()
+        )
 
-            # Verify prediction was evaluated
-            assert updated_prediction.actual_price == Decimal("67500.00")
-            assert updated_prediction.evaluated_at is not None
-            assert updated_prediction.error_abs is not None
-            assert updated_prediction.error_pct is not None
-            assert updated_prediction.direction_correct is not None
-            assert updated_prediction.pnl_long_short is not None
+        # Verify prediction was evaluated
+        assert updated_prediction.actual_price == Decimal("67500.00")
+        assert updated_prediction.evaluated_at is not None
+        assert updated_prediction.error_abs is not None
+        assert updated_prediction.error_pct is not None
+        assert updated_prediction.direction_correct is not None
+        assert updated_prediction.pnl_long_short is not None
 
-        finally:
-            eval_module.SessionLocal = original_session
-
-    def test_exits_successfully_when_no_predictions(self, db_session: Session) -> None:
+    def test_exits_successfully_when_no_predictions(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Should exit successfully when no predictions to evaluate.
 
@@ -493,22 +496,18 @@ class TestMainWeeklyEvaluator:
         """
         import workers.weekly.evaluator as eval_module
 
-        original_session = eval_module.SessionLocal
-        eval_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(eval_module, "SessionLocal", lambda: db_session)
 
-        try:
-            exit_code = evaluator.main()
+        exit_code = evaluator.main()
 
-            # Should succeed (nothing to do is not an error)
-            assert exit_code == 0
-
-        finally:
-            eval_module.SessionLocal = original_session
+        # Should succeed (nothing to do is not an error)
+        assert exit_code == 0
 
     def test_skips_when_actual_price_not_available(
         self,
         db_session: Session,
         sample_unevaluated_weekly_prediction_for_today: Prediction,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Should leave the prediction pending when its bar is not stored yet.
@@ -521,34 +520,29 @@ class TestMainWeeklyEvaluator:
         """
         import workers.weekly.evaluator as eval_module
 
-        original_session = eval_module.SessionLocal
-        eval_module.SessionLocal = lambda: db_session
+        monkeypatch.setattr(eval_module, "SessionLocal", lambda: db_session)
 
-        try:
-            # Verify the settling bar does NOT exist
-            today = date.today()
-            price = evaluator.fetch_actual_price(db_session, today)
-            assert price is None
+        # Verify the settling bar does NOT exist
+        today = date.today()
+        price = fetch_actual_price(db_session, today)
+        assert price is None
 
-            prediction = sample_unevaluated_weekly_prediction_for_today
-            prediction_id = prediction.id
+        prediction = sample_unevaluated_weekly_prediction_for_today
+        prediction_id = prediction.id
 
-            # Run evaluator
-            exit_code = evaluator.main()
+        # Run evaluator
+        exit_code = evaluator.main()
 
-            # Should succeed (skip, not error)
-            assert exit_code == 0
+        # Should succeed (skip, not error)
+        assert exit_code == 0
 
-            # Re-query prediction to verify it remains unevaluated
-            from shared.db.models import Prediction as PredModel
+        # Re-query prediction to verify it remains unevaluated
+        from shared.db.models import Prediction as PredModel
 
-            updated_prediction = (
-                db_session.query(PredModel).filter_by(id=prediction_id).one()
-            )
-            assert updated_prediction.actual_price is None
-
-        finally:
-            eval_module.SessionLocal = original_session
+        updated_prediction = (
+            db_session.query(PredModel).filter_by(id=prediction_id).one()
+        )
+        assert updated_prediction.actual_price is None
 
 
 # ============================================================================
@@ -556,9 +550,9 @@ class TestMainWeeklyEvaluator:
 # ============================================================================
 
 
-def _patch_session(db_session: Session, monkeypatch) -> None:
-    def mock_session():
-        db_session.close = lambda: None
+def _patch_session(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_session() -> Session:
+        monkeypatch.setattr(db_session, "close", lambda: None)
         return db_session
 
     monkeypatch.setattr("workers.weekly.evaluator.SessionLocal", mock_session)
@@ -602,7 +596,10 @@ def _add_prediction(
 
 class TestPendingWeeklyPredictions:
     def test_prediction_scored_against_bar_it_predicted(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Prediction for Monday 10-12: the bar opened Sunday 10-11 settles it."""
         _patch_session(db_session, monkeypatch)
@@ -623,7 +620,7 @@ class TestPendingWeeklyPredictions:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         _patch_session(db_session, monkeypatch)
@@ -642,7 +639,10 @@ class TestPendingWeeklyPredictions:
         assert "7am" not in caplog.text
 
     def test_past_pending_prediction_is_evaluated_on_a_later_run(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A Monday whose bar arrived late is settled by the next Monday's run."""
         _patch_session(db_session, monkeypatch)
@@ -659,7 +659,10 @@ class TestPendingWeeklyPredictions:
         assert current.actual_price == Decimal("86000.00")
 
     def test_a_missing_bar_does_not_block_the_other_dates(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _patch_session(db_session, monkeypatch)
         _add_daily_bar(db_session, date(2026, 10, 18), "86000.00")
@@ -674,7 +677,10 @@ class TestPendingWeeklyPredictions:
         assert current.actual_price == Decimal("86000.00")
 
     def test_already_evaluated_prediction_is_untouched(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _patch_session(db_session, monkeypatch)
         _add_daily_bar(db_session, date(2026, 10, 11), "85100.00")
@@ -693,7 +699,10 @@ class TestPendingWeeklyPredictions:
         assert prediction.evaluated_at == evaluated_at
 
     def test_daily_predictions_are_left_alone(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _patch_session(db_session, monkeypatch)
         _add_daily_bar(db_session, date(2026, 10, 11), "85100.00")
@@ -707,7 +716,10 @@ class TestPendingWeeklyPredictions:
         assert prediction.actual_price is None
 
     def test_future_predictions_are_untouched(
-        self, db_session: Session, sample_trained_model: Model, monkeypatch
+        self,
+        db_session: Session,
+        sample_trained_model: Model,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _patch_session(db_session, monkeypatch)
         _add_daily_bar(db_session, date(2026, 10, 18), "86000.00")
