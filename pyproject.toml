@@ -127,18 +127,18 @@ markers = [
 "workers/daily/__main__.py" = 90
 "workers/daily/evaluator.py" = 90
 "workers/daily/models/__init__.py" = 85
-"workers/daily/models/arima_model.py" = 80
+"workers/daily/models/arima_model.py" = 95
 "workers/daily/models/base.py" = 70
 "workers/daily/models/factory.py" = 95
 "workers/daily/models/linear.py" = 95
-"workers/daily/models/lstm_model.py" = 80
-"workers/daily/models/xgboost_model.py" = 80
+"workers/daily/models/lstm_model.py" = 95
+"workers/daily/models/xgboost_model.py" = 95
 "workers/daily/predictor.py" = 90
 "workers/daily/trainer.py" = 90
 "workers/fetch_price/main.py" = 90
 "workers/weekly/__main__.py" = 90
 "workers/weekly/evaluator.py" = 85
-"workers/weekly/predictor.py" = 80
+"workers/weekly/predictor.py" = 95
 "workers/weekly/trainer.py" = 90
 
 [tool.mypy]
