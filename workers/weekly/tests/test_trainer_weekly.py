@@ -121,17 +121,16 @@ def sample_model_artifact() -> bytes:
 
 class TestMainWeeklyTrainer:
     @pytest.fixture(autouse=True)
-    def _patch_session_local(self, db_session: Session):
+    def _patch_session_local(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         trainer.main() opens its own SessionLocal() rather than accepting an
         injected session, so route it to the test's SAVEPOINT-isolated
         db_session -- same pattern used by TestMainWeeklyPredictor in
         test_predictor_weekly.py.
         """
-        original = trainer.SessionLocal
-        trainer.SessionLocal = lambda: db_session
-        yield
-        trainer.SessionLocal = original
+        monkeypatch.setattr(trainer, "SessionLocal", lambda: db_session)
 
     def test_success_trains_and_activates_seven_day_model(
         self, db_session: Session, sample_prices_200_days: list[Price]
