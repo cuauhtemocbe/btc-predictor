@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -94,7 +95,9 @@ async def dashboard(
 
 
 @app.get("/health", response_model=None)
-async def health(db: Session = Depends(get_db)) -> JSONResponse | dict[str, str]:
+async def health(
+    db: Annotated[Session, Depends(get_db)],
+) -> JSONResponse | dict[str, str]:
     """
     Report API and database health.
 

@@ -32,13 +32,19 @@ def _x(rows: int = 10) -> np.ndarray:
 
 
 def test_train_rejects_a_one_dimensional_x(untrained_model):
+    x = np.ones(WINDOW)
+    y = np.ones(WINDOW)
+
     with pytest.raises(ValueError, match="X must be 2-dimensional"):
-        untrained_model.train(np.ones(WINDOW), np.ones(WINDOW))
+        untrained_model.train(x, y)
 
 
 def test_train_rejects_a_two_dimensional_y(untrained_model):
+    x = _x()
+    y = np.ones((10, 1))
+
     with pytest.raises(ValueError, match="y must be 1-dimensional"):
-        untrained_model.train(_x(), np.ones((10, 1)))
+        untrained_model.train(x, y)
 
 
 @pytest.mark.parametrize(
@@ -46,21 +52,26 @@ def test_train_rejects_a_two_dimensional_y(untrained_model):
     [(np.nan, "y contains NaN"), (np.inf, "y contains infinite")],
 )
 def test_train_rejects_non_finite_targets(untrained_model, bad_value, message):
+    x = _x()
     y = np.ones(10)
     y[3] = bad_value
 
     with pytest.raises(ValueError, match=message):
-        untrained_model.train(_x(), y)
+        untrained_model.train(x, y)
 
 
 def test_predict_rejects_a_one_dimensional_x_of_the_wrong_length(trained_model):
+    x = np.ones(3)
+
     with pytest.raises(ValueError, match=f"must have {WINDOW} features, got 3"):
-        trained_model.predict(np.ones(3))
+        trained_model.predict(x)
 
 
 def test_predict_rejects_a_three_dimensional_x(trained_model):
+    x = np.ones((1, 1, WINDOW))
+
     with pytest.raises(ValueError, match="X must be 1D or 2D"):
-        trained_model.predict(np.ones((1, 1, WINDOW)))
+        trained_model.predict(x)
 
 
 @pytest.mark.parametrize(
@@ -91,5 +102,7 @@ def test_deserialize_turns_a_truncated_payload_into_a_value_error():
 
 
 def test_deserialize_rejects_a_payload_that_is_not_a_dict():
+    payload = pickle.dumps([1, 2, 3])
+
     with pytest.raises(ValueError, match="must be a dictionary"):
-        LinearRegressionModel.deserialize(pickle.dumps([1, 2, 3]))
+        LinearRegressionModel.deserialize(payload)
