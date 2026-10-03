@@ -39,7 +39,7 @@ def main() -> int:
                 logger.info("%s: %d new bars", symbol, inserted)
             except BinanceVisionError as error:
                 session.rollback()
-                logger.error("%s ingestion failed: %s", symbol, error)
+                logger.exception("%s ingestion failed: %s", symbol, error)
                 failed.append(symbol)
             except Exception:
                 session.rollback()

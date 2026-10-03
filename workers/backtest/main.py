@@ -128,7 +128,7 @@ def main():
     try:
         start_date, end_date, test_start_date = plan_range(history, window_days)
     except InsufficientHistoryError as e:
-        logger.error(f"Cannot plan the backtest range: {e}")
+        logger.exception(f"Cannot plan the backtest range: {e}")
         sys.exit(1)
 
     logger.info(f"Backtesting range: {start_date} to {end_date}")

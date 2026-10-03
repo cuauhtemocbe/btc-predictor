@@ -296,7 +296,8 @@ class TestMigration:
             remaining_models = connection.execute(
                 text("SELECT count(*) FROM models")
             ).scalar()
-        assert "prices" not in tables and "btc_prices" in tables
+        assert "prices" not in tables
+        assert "btc_prices" in tables
         assert "symbol" not in price_columns | model_columns
         assert remaining_prices == remaining_models == 1, "only BTC rows can survive"
 

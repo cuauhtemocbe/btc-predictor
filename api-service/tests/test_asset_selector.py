@@ -317,8 +317,10 @@ async def test_models_view_shows_baselines_next_to_each_model(
 
     row = table_rows(soup)[0]
     always_up, persistence, buy_and_hold, verdict = row[8:12]
-    assert always_up.startswith("50.0%") and "n=10" in always_up
-    assert persistence.startswith("0.0%") and "n=10" in persistence
+    assert always_up.startswith("50.0%")
+    assert "n=10" in always_up
+    assert persistence.startswith("0.0%")
+    assert "n=10" in persistence
     # Held from the close before the first evaluated day to the last close: 110 -> 110.
     assert buy_and_hold.startswith("$0.00")
     assert "Beats baseline" in verdict
@@ -429,8 +431,10 @@ async def test_empty_json_endpoints_return_empty_results_for_a_new_asset(
     history = await client.get("/api/predictions/history", params={"symbol": GOLD})
     metrics = await client.get("/models/metrics", params={"symbol": GOLD})
 
-    assert history.status_code == 200 and history.json() == []
-    assert metrics.status_code == 200 and metrics.json()["models"] == []
+    assert history.status_code == 200
+    assert history.json() == []
+    assert metrics.status_code == 200
+    assert metrics.json()["models"] == []
 
 
 # Scenario: An unknown symbol is rejected
