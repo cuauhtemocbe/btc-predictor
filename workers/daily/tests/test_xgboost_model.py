@@ -15,13 +15,14 @@ import time
 import numpy as np
 import pytest
 
+from shared.features import FeatureSet
 from workers.daily.models import BaseModel, XGBoostModel
 
 
 class TestXGBoostModel:
     """Tests for XGBoostModel implementation."""
 
-    def test_xgboost_implements_basemodel_interface(self):
+    def test_xgboost_implements_basemodel_interface(self) -> None:
         """
         Gherkin Scenario: XGBoostModel implements BaseModel interface
 
@@ -46,7 +47,9 @@ class TestXGBoostModel:
         assert callable(model.serialize)
         assert callable(XGBoostModel.deserialize)
 
-    def test_train_with_default_hyperparameters(self, sliding_window_data):
+    def test_train_with_default_hyperparameters(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """
         Gherkin Scenario: Train XGBoost model with default hyperparameters
 
@@ -78,8 +81,8 @@ class TestXGBoostModel:
         assert model.is_trained
 
     def test_xgboost_predict_returns_valid_float(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: XGBoost predicts the next-day log return
 
@@ -103,8 +106,8 @@ class TestXGBoostModel:
         assert y.min() <= predicted_return <= y.max()
 
     def test_xgboost_serialize_deserialize(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: XGBoost model serializes and deserializes correctly
 
@@ -145,7 +148,7 @@ class TestXGBoostModel:
         restored_prediction = restored_model.predict(latest_return_features)
         assert np.isclose(original_prediction, restored_prediction, rtol=1e-5)
 
-    def test_xgboost_training_time_365_days(self):
+    def test_xgboost_training_time_365_days(self) -> None:
         """
         Gherkin Scenario: XGBoost training completes in < 30 seconds
 
@@ -175,7 +178,9 @@ class TestXGBoostModel:
         )
         assert model.is_trained
 
-    def test_trains_on_the_return_features_of_the_reboot(self, return_training_set):
+    def test_trains_on_the_return_features_of_the_reboot(
+        self, return_training_set: FeatureSet
+    ) -> None:
         """
         Gherkin Scenario: XGBoost trains on the reboot features and target
 
@@ -193,11 +198,13 @@ class TestXGBoostModel:
         assert model.is_trained
         assert model.n_features == 21
 
-    def test_default_feature_count_is_the_window(self):
+    def test_default_feature_count_is_the_window(self) -> None:
         """Without n_features the model expects one column per day, as before."""
         assert XGBoostModel(window_days=30).n_features == 30
 
-    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+    def test_artifact_without_n_features_still_loads(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """An artifact saved before n_features existed loads with n_features=window."""
         X, y = sliding_window_data
         model = XGBoostModel(window_days=30)
@@ -215,7 +222,7 @@ class TestXGBoostModelEdgeCases:
     """ZOMBIES edge case tests for XGBoostModel."""
 
     # Z - Zero
-    def test_train_with_zero_samples(self):
+    def test_train_with_zero_samples(self) -> None:
         """Train with 0 samples should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.array([]).reshape(0, 30)
@@ -225,7 +232,7 @@ class TestXGBoostModelEdgeCases:
             model.train(X, y)
 
     # O - One
-    def test_train_with_one_sample(self):
+    def test_train_with_one_sample(self) -> None:
         """Train with 1 sample should raise error (insufficient for XGBoost)."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(1, 30) * 50000
@@ -236,7 +243,7 @@ class TestXGBoostModelEdgeCases:
             model.train(X, y)
 
     # M - Many
-    def test_train_with_many_samples(self):
+    def test_train_with_many_samples(self) -> None:
         """Train with 365 days of data (335 samples)."""
         model = XGBoostModel(window_days=30)
         prices = np.linspace(50000, 55000, 365)
@@ -250,7 +257,7 @@ class TestXGBoostModelEdgeCases:
         assert model.is_trained
 
     # B - Boundaries
-    def test_window_days_boundary_minimum(self):
+    def test_window_days_boundary_minimum(self) -> None:
         """Window size of 1 day (minimum)."""
         model = XGBoostModel(window_days=1)
         X = np.random.rand(10, 1) * 50000
@@ -259,33 +266,35 @@ class TestXGBoostModelEdgeCases:
         model.train(X, y)
         assert model.is_trained
 
-    def test_window_days_boundary_zero(self):
+    def test_window_days_boundary_zero(self) -> None:
         """Window size of 0 should raise error."""
         with pytest.raises(ValueError, match="window_days must be >= 1"):
             XGBoostModel(window_days=0)
 
-    def test_n_estimators_boundary_zero(self):
+    def test_n_estimators_boundary_zero(self) -> None:
         """n_estimators of 0 should raise error."""
         with pytest.raises(ValueError, match="n_estimators must be >= 1"):
             XGBoostModel(n_estimators=0)
 
-    def test_max_depth_boundary_zero(self):
+    def test_max_depth_boundary_zero(self) -> None:
         """max_depth of 0 should raise error."""
         with pytest.raises(ValueError, match="max_depth must be >= 1"):
             XGBoostModel(max_depth=0)
 
-    def test_learning_rate_boundary_zero(self):
+    def test_learning_rate_boundary_zero(self) -> None:
         """learning_rate of 0 should raise error."""
         with pytest.raises(ValueError, match="learning_rate must be > 0"):
             XGBoostModel(learning_rate=0.0)
 
-    def test_learning_rate_boundary_negative(self):
+    def test_learning_rate_boundary_negative(self) -> None:
         """Negative learning_rate should raise error."""
         with pytest.raises(ValueError, match="learning_rate must be > 0"):
             XGBoostModel(learning_rate=-0.1)
 
     # I - Interfaces
-    def test_predict_accepts_1d_array(self, sliding_window_data):
+    def test_predict_accepts_1d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 1D array (window_days,)."""
         X, y = sliding_window_data
         model = XGBoostModel(window_days=30)
@@ -296,7 +305,9 @@ class TestXGBoostModelEdgeCases:
         prediction = model.predict(X_new_1d)
         assert isinstance(prediction, float)
 
-    def test_predict_accepts_2d_array(self, sliding_window_data):
+    def test_predict_accepts_2d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 2D array (1, window_days)."""
         X, y = sliding_window_data
         model = XGBoostModel(window_days=30)
@@ -308,7 +319,7 @@ class TestXGBoostModelEdgeCases:
         assert isinstance(prediction, float)
 
     # E - Exceptions
-    def test_predict_before_training_raises_error(self):
+    def test_predict_before_training_raises_error(self) -> None:
         """Predict on untrained model should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(1, 30) * 50000
@@ -316,7 +327,7 @@ class TestXGBoostModelEdgeCases:
         with pytest.raises(ValueError, match="Model must be trained"):
             model.predict(X)
 
-    def test_train_with_mismatched_shapes_raises_error(self):
+    def test_train_with_mismatched_shapes_raises_error(self) -> None:
         """Train with mismatched X and y shapes should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(50, 30) * 50000
@@ -325,7 +336,7 @@ class TestXGBoostModelEdgeCases:
         with pytest.raises(ValueError, match="same number of samples"):
             model.train(X, y)
 
-    def test_train_with_wrong_feature_count_raises_error(self):
+    def test_train_with_wrong_feature_count_raises_error(self) -> None:
         """Train with wrong number of features should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(50, 20) * 50000  # 20 features instead of 30
@@ -334,7 +345,7 @@ class TestXGBoostModelEdgeCases:
         with pytest.raises(ValueError, match="must have 30 features"):
             model.train(X, y)
 
-    def test_train_with_nan_values_raises_error(self):
+    def test_train_with_nan_values_raises_error(self) -> None:
         """Train with NaN values should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(50, 30) * 50000
@@ -344,7 +355,7 @@ class TestXGBoostModelEdgeCases:
         with pytest.raises(ValueError, match="contains NaN"):
             model.train(X, y)
 
-    def test_train_with_inf_values_raises_error(self):
+    def test_train_with_inf_values_raises_error(self) -> None:
         """Train with infinite values should raise error."""
         model = XGBoostModel(window_days=30)
         X = np.random.rand(50, 30) * 50000
@@ -354,14 +365,14 @@ class TestXGBoostModelEdgeCases:
         with pytest.raises(ValueError, match="contains infinite"):
             model.train(X, y)
 
-    def test_deserialize_corrupted_bytes_raises_error(self):
+    def test_deserialize_corrupted_bytes_raises_error(self) -> None:
         """Deserialize corrupted bytes should raise error."""
         corrupted_bytes = b"not a valid pickle"
 
         with pytest.raises((pickle.UnpicklingError, ValueError)):
             XGBoostModel.deserialize(corrupted_bytes)
 
-    def test_deserialize_invalid_structure_raises_error(self):
+    def test_deserialize_invalid_structure_raises_error(self) -> None:
         """Deserialize bytes with invalid structure should raise error."""
         # Pickle a simple dict instead of model state
         invalid_data = pickle.dumps({"wrong": "structure"})
@@ -370,7 +381,7 @@ class TestXGBoostModelEdgeCases:
             XGBoostModel.deserialize(invalid_data)
 
     # S - Serialization
-    def test_serialize_untrained_model_works(self):
+    def test_serialize_untrained_model_works(self) -> None:
         """Serialize untrained model should work."""
         model = XGBoostModel(window_days=30)
         model_bytes = model.serialize()

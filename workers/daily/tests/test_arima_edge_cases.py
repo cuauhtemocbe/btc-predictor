@@ -4,7 +4,7 @@ import importlib
 import sys
 
 import numpy as np
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]  # pandas-stubs not installed
 import pytest
 
 from workers.daily.models import arima_model

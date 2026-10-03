@@ -168,11 +168,11 @@ exclude = [
     "shared/alembic/",
     "shared/\\.venv/",
     "shared/poetry\\.lock",
-    # Test code still not type-checked (hundreds of untyped fixtures and test
-    # functions), being typed package by package (#158). Typed already:
-    # shared/tests, workers/fetch_price/tests, workers/backtest/tests,
-    # workers/weekly/tests, api-service/tests (mounted as api/tests).
-    "^(workers/daily|scripts)/tests/",
+    # scripts/tests is the only test code still not type-checked (hundreds of
+    # untyped fixtures and test functions), being typed package by package (#158).
+    # Typed already: shared/tests, workers/*/tests, api-service/tests (mounted as
+    # api/tests).
+    "^scripts/tests/",
 ]
 
 [[tool.mypy.overrides]]

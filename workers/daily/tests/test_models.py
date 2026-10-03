@@ -20,7 +20,7 @@ from workers.daily.models import BaseModel, LinearRegressionModel
 class TestBaseModel:
     """Tests for BaseModel abstract class."""
 
-    def test_cannot_instantiate_abstract_base_model(self):
+    def test_cannot_instantiate_abstract_base_model(self) -> None:
         """
         Gherkin Scenario: BaseModel cannot be instantiated
 
@@ -28,13 +28,15 @@ class TestBaseModel:
         Then a TypeError is raised with message "Cannot instantiate abstract class"
         """
         with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-            BaseModel()
+            BaseModel()  # type: ignore[abstract]  # instantiating it is the test
 
 
 class TestLinearRegressionModel:
     """Tests for LinearRegressionModel implementation."""
 
-    def test_train_with_valid_data(self, sliding_window_data):
+    def test_train_with_valid_data(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """
         Gherkin Scenario: Train LinearRegressionModel with valid data
 
@@ -58,7 +60,11 @@ class TestLinearRegressionModel:
         # Then: Model is trained successfully
         assert model.is_trained
 
-    def test_predict_next_price(self, sliding_window_data, last_30_days):
+    def test_predict_next_price(
+        self,
+        sliding_window_data: tuple[np.ndarray, np.ndarray],
+        last_30_days: np.ndarray,
+    ) -> None:
         """
         Gherkin Scenario: Predict next price
 
@@ -83,7 +89,9 @@ class TestLinearRegressionModel:
         assert isinstance(predicted_price, float)
         assert predicted_price > 0
 
-    def test_serialize_model_to_bytes(self, sliding_window_data):
+    def test_serialize_model_to_bytes(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """
         Gherkin Scenario: Serialize model to bytes
 
@@ -105,7 +113,11 @@ class TestLinearRegressionModel:
         assert len(model_bytes) > 0
         assert len(model_bytes) < 1_000_000  # < 1MB
 
-    def test_deserialize_model_from_bytes(self, sliding_window_data, last_30_days):
+    def test_deserialize_model_from_bytes(
+        self,
+        sliding_window_data: tuple[np.ndarray, np.ndarray],
+        last_30_days: np.ndarray,
+    ) -> None:
         """
         Gherkin Scenario: Deserialize model from bytes
 
@@ -139,7 +151,7 @@ class TestLinearRegressionModelEdgeCases:
     """ZOMBIES edge case tests for LinearRegressionModel."""
 
     # Z - Zero
-    def test_train_with_zero_samples(self):
+    def test_train_with_zero_samples(self) -> None:
         """Train with 0 samples should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.array([]).reshape(0, 30)
@@ -149,7 +161,7 @@ class TestLinearRegressionModelEdgeCases:
             model.train(X, y)
 
     # O - One
-    def test_train_with_one_sample(self):
+    def test_train_with_one_sample(self) -> None:
         """Train with 1 sample should work (minimum valid)."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(1, 30)
@@ -159,7 +171,7 @@ class TestLinearRegressionModelEdgeCases:
         assert model.is_trained
 
     # M - Many
-    def test_train_with_many_samples(self):
+    def test_train_with_many_samples(self) -> None:
         """Train with 365 days of data (335 samples)."""
         model = LinearRegressionModel(window_days=30)
         prices = np.linspace(50000, 55000, 365)
@@ -173,7 +185,7 @@ class TestLinearRegressionModelEdgeCases:
         assert model.is_trained
 
     # B - Boundaries
-    def test_window_days_boundary_minimum(self):
+    def test_window_days_boundary_minimum(self) -> None:
         """Window size of 1 day (minimum)."""
         model = LinearRegressionModel(window_days=1)
         X = np.random.rand(10, 1)
@@ -182,18 +194,20 @@ class TestLinearRegressionModelEdgeCases:
         model.train(X, y)
         assert model.is_trained
 
-    def test_window_days_boundary_zero(self):
+    def test_window_days_boundary_zero(self) -> None:
         """Window size of 0 should raise error."""
         with pytest.raises(ValueError, match="window_days must be >= 1"):
             LinearRegressionModel(window_days=0)
 
-    def test_window_days_boundary_negative(self):
+    def test_window_days_boundary_negative(self) -> None:
         """Negative window size should raise error."""
         with pytest.raises(ValueError, match="window_days must be >= 1"):
             LinearRegressionModel(window_days=-1)
 
     # I - Interfaces
-    def test_predict_accepts_1d_array(self, sliding_window_data):
+    def test_predict_accepts_1d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 1D array (window_days,)."""
         X, y = sliding_window_data
         model = LinearRegressionModel(window_days=30)
@@ -204,7 +218,9 @@ class TestLinearRegressionModelEdgeCases:
         prediction = model.predict(X_new_1d)
         assert isinstance(prediction, float)
 
-    def test_predict_accepts_2d_array(self, sliding_window_data):
+    def test_predict_accepts_2d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 2D array (1, window_days)."""
         X, y = sliding_window_data
         model = LinearRegressionModel(window_days=30)
@@ -216,7 +232,7 @@ class TestLinearRegressionModelEdgeCases:
         assert isinstance(prediction, float)
 
     # E - Exceptions
-    def test_predict_before_training_raises_error(self):
+    def test_predict_before_training_raises_error(self) -> None:
         """Predict on untrained model should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(1, 30)
@@ -224,7 +240,7 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="Model must be trained"):
             model.predict(X)
 
-    def test_train_with_mismatched_shapes_raises_error(self):
+    def test_train_with_mismatched_shapes_raises_error(self) -> None:
         """Train with mismatched X and y shapes should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(10, 30)
@@ -233,7 +249,7 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="same number of samples"):
             model.train(X, y)
 
-    def test_train_with_wrong_feature_count_raises_error(self):
+    def test_train_with_wrong_feature_count_raises_error(self) -> None:
         """Train with wrong number of features should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(10, 20)  # 20 features instead of 30
@@ -242,7 +258,7 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="must have 30 features"):
             model.train(X, y)
 
-    def test_train_with_nan_values_raises_error(self):
+    def test_train_with_nan_values_raises_error(self) -> None:
         """Train with NaN values should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(10, 30)
@@ -252,7 +268,7 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="contains NaN"):
             model.train(X, y)
 
-    def test_train_with_inf_values_raises_error(self):
+    def test_train_with_inf_values_raises_error(self) -> None:
         """Train with infinite values should raise error."""
         model = LinearRegressionModel(window_days=30)
         X = np.random.rand(10, 30)
@@ -262,7 +278,9 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="contains infinite"):
             model.train(X, y)
 
-    def test_predict_with_wrong_shape_raises_error(self, sliding_window_data):
+    def test_predict_with_wrong_shape_raises_error(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict with wrong shape should raise error."""
         X, y = sliding_window_data
         model = LinearRegressionModel(window_days=30)
@@ -273,7 +291,9 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="must have 30 features"):
             model.predict(X_wrong)
 
-    def test_predict_with_multiple_samples_raises_error(self, sliding_window_data):
+    def test_predict_with_multiple_samples_raises_error(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict with multiple samples should raise error."""
         X, y = sliding_window_data
         model = LinearRegressionModel(window_days=30)
@@ -284,14 +304,14 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="must have shape"):
             model.predict(X_multiple)
 
-    def test_deserialize_corrupted_bytes_raises_error(self):
+    def test_deserialize_corrupted_bytes_raises_error(self) -> None:
         """Deserialize corrupted bytes should raise error."""
         corrupted_bytes = b"not a valid pickle"
 
         with pytest.raises((pickle.UnpicklingError, ValueError)):
             LinearRegressionModel.deserialize(corrupted_bytes)
 
-    def test_deserialize_invalid_structure_raises_error(self):
+    def test_deserialize_invalid_structure_raises_error(self) -> None:
         """Deserialize bytes with invalid structure should raise error."""
         # Pickle a simple dict instead of model state
         invalid_data = pickle.dumps({"wrong": "structure"})
@@ -299,7 +319,7 @@ class TestLinearRegressionModelEdgeCases:
         with pytest.raises(ValueError, match="Missing required keys"):
             LinearRegressionModel.deserialize(invalid_data)
 
-    def test_serialize_untrained_model_works(self):
+    def test_serialize_untrained_model_works(self) -> None:
         """Serialize untrained model should work."""
         model = LinearRegressionModel(window_days=30)
         model_bytes = model.serialize()

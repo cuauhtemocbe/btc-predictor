@@ -16,13 +16,14 @@ import time
 import numpy as np
 import pytest
 
+from shared.features import FeatureSet
 from workers.daily.models import BaseModel, LSTMModel
 
 
 class TestLSTMModel:
     """Tests for LSTMModel implementation."""
 
-    def test_lstm_implements_basemodel_interface(self):
+    def test_lstm_implements_basemodel_interface(self) -> None:
         """
         Gherkin Scenario: LSTMModel implements BaseModel interface
 
@@ -48,7 +49,9 @@ class TestLSTMModel:
         assert callable(model.serialize)
         assert callable(LSTMModel.deserialize)
 
-    def test_train_with_default_hyperparameters(self, sliding_window_data):
+    def test_train_with_default_hyperparameters(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """
         Gherkin Scenario: Train LSTM model with default hyperparameters
 
@@ -83,8 +86,8 @@ class TestLSTMModel:
         assert model.is_trained
 
     def test_lstm_predict_returns_valid_float(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: LSTM predicts the next-day log return
 
@@ -108,8 +111,11 @@ class TestLSTMModel:
         assert abs(predicted_return) < 1.0
 
     def test_lstm_prediction_is_not_clipped_at_zero(
-        self, return_training_set, latest_return_features, monkeypatch
-    ):
+        self,
+        return_training_set: FeatureSet,
+        latest_return_features: np.ndarray,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """
         Gherkin Scenario: LSTM can predict a down day
 
@@ -125,8 +131,8 @@ class TestLSTMModel:
         assert model.predict(latest_return_features) == pytest.approx(-0.03)
 
     def test_lstm_serialize_deserialize(
-        self, return_training_set, latest_return_features
-    ):
+        self, return_training_set: FeatureSet, latest_return_features: np.ndarray
+    ) -> None:
         """
         Gherkin Scenario: LSTM model serializes and deserializes correctly
 
@@ -166,7 +172,7 @@ class TestLSTMModel:
         assert np.isclose(original_prediction, restored_prediction, atol=1e-6)
 
     @pytest.mark.slow
-    def test_lstm_training_time_90_days(self):
+    def test_lstm_training_time_90_days(self) -> None:
         """
         Gherkin Scenario: LSTM training completes in reasonable time
 
@@ -197,7 +203,9 @@ class TestLSTMModel:
         )
         assert model.is_trained
 
-    def test_trains_on_the_return_features_of_the_reboot(self, return_training_set):
+    def test_trains_on_the_return_features_of_the_reboot(
+        self, return_training_set: FeatureSet
+    ) -> None:
         """
         Gherkin Scenario: LSTM trains on the reboot features and target
 
@@ -215,11 +223,13 @@ class TestLSTMModel:
         assert model.is_trained
         assert model.n_features == 21
 
-    def test_default_feature_count_is_the_window(self):
+    def test_default_feature_count_is_the_window(self) -> None:
         """Without n_features the model expects one column per day, as before."""
         assert LSTMModel(window_days=30).n_features == 30
 
-    def test_artifact_without_n_features_still_loads(self, sliding_window_data):
+    def test_artifact_without_n_features_still_loads(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """An artifact saved before n_features existed loads with n_features=window."""
         X, y = sliding_window_data
         model = LSTMModel(window_days=30, epochs=1)
@@ -237,7 +247,7 @@ class TestLSTMModelEdgeCases:
     """ZOMBIES edge case tests for LSTMModel."""
 
     # Z - Zero
-    def test_train_with_zero_samples(self):
+    def test_train_with_zero_samples(self) -> None:
         """Train with 0 samples should raise error."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.array([]).reshape(0, 30)
@@ -247,7 +257,7 @@ class TestLSTMModelEdgeCases:
             model.train(X, y)
 
     # O - One
-    def test_train_with_one_sample(self):
+    def test_train_with_one_sample(self) -> None:
         """Train with 1 sample should raise error (insufficient for LSTM)."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.random.rand(1, 30) * 50000
@@ -258,7 +268,7 @@ class TestLSTMModelEdgeCases:
             model.train(X, y)
 
     # M - Many
-    def test_train_with_many_samples(self):
+    def test_train_with_many_samples(self) -> None:
         """Train with 365 days of data (335 samples)."""
         model = LSTMModel(window_days=30, epochs=5)  # Reduced epochs for speed
         prices = np.linspace(50000, 55000, 365)
@@ -272,7 +282,7 @@ class TestLSTMModelEdgeCases:
         assert model.is_trained
 
     # B - Boundaries
-    def test_window_days_boundary_minimum(self):
+    def test_window_days_boundary_minimum(self) -> None:
         """Window size of 1 day (minimum)."""
         model = LSTMModel(window_days=1, epochs=5)
         X = np.random.rand(10, 1) * 50000
@@ -281,43 +291,45 @@ class TestLSTMModelEdgeCases:
         model.train(X, y)
         assert model.is_trained
 
-    def test_window_days_boundary_zero(self):
+    def test_window_days_boundary_zero(self) -> None:
         """Window size of 0 should raise error."""
         with pytest.raises(ValueError, match="window_days must be >= 1"):
             LSTMModel(window_days=0)
 
-    def test_lstm_units_boundary_zero(self):
+    def test_lstm_units_boundary_zero(self) -> None:
         """lstm_units of 0 should raise error."""
         with pytest.raises(ValueError, match="lstm_units must be >= 1"):
             LSTMModel(lstm_units=0)
 
-    def test_dropout_boundary_zero(self):
+    def test_dropout_boundary_zero(self) -> None:
         """dropout of 0.0 is valid."""
         model = LSTMModel(dropout=0.0)
         assert model.dropout == 0.0
 
-    def test_dropout_boundary_one(self):
+    def test_dropout_boundary_one(self) -> None:
         """dropout of 1.0 should raise error (must be < 1.0)."""
         with pytest.raises(ValueError, match="dropout must be in range"):
             LSTMModel(dropout=1.0)
 
-    def test_dropout_boundary_negative(self):
+    def test_dropout_boundary_negative(self) -> None:
         """Negative dropout should raise error."""
         with pytest.raises(ValueError, match="dropout must be in range"):
             LSTMModel(dropout=-0.1)
 
-    def test_epochs_boundary_zero(self):
+    def test_epochs_boundary_zero(self) -> None:
         """epochs of 0 should raise error."""
         with pytest.raises(ValueError, match="epochs must be >= 1"):
             LSTMModel(epochs=0)
 
-    def test_batch_size_boundary_zero(self):
+    def test_batch_size_boundary_zero(self) -> None:
         """batch_size of 0 should raise error."""
         with pytest.raises(ValueError, match="batch_size must be >= 1"):
             LSTMModel(batch_size=0)
 
     # I - Interfaces
-    def test_predict_accepts_1d_array(self, sliding_window_data):
+    def test_predict_accepts_1d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 1D array (window_days,)."""
         X, y = sliding_window_data
         model = LSTMModel(window_days=30, epochs=5)
@@ -328,7 +340,9 @@ class TestLSTMModelEdgeCases:
         prediction = model.predict(X_new_1d)
         assert isinstance(prediction, float)
 
-    def test_predict_accepts_2d_array(self, sliding_window_data):
+    def test_predict_accepts_2d_array(
+        self, sliding_window_data: tuple[np.ndarray, np.ndarray]
+    ) -> None:
         """Predict should accept 2D array (1, window_days)."""
         X, y = sliding_window_data
         model = LSTMModel(window_days=30, epochs=5)
@@ -340,7 +354,7 @@ class TestLSTMModelEdgeCases:
         assert isinstance(prediction, float)
 
     # E - Exceptions
-    def test_predict_before_training_raises_error(self):
+    def test_predict_before_training_raises_error(self) -> None:
         """Predict on untrained model should raise error."""
         model = LSTMModel(window_days=30)
         X = np.random.rand(1, 30) * 50000
@@ -348,7 +362,7 @@ class TestLSTMModelEdgeCases:
         with pytest.raises(ValueError, match="Model must be trained"):
             model.predict(X)
 
-    def test_train_with_mismatched_shapes_raises_error(self):
+    def test_train_with_mismatched_shapes_raises_error(self) -> None:
         """Train with mismatched X and y shapes should raise error."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.random.rand(50, 30) * 50000
@@ -357,7 +371,7 @@ class TestLSTMModelEdgeCases:
         with pytest.raises(ValueError, match="same number of samples"):
             model.train(X, y)
 
-    def test_train_with_wrong_feature_count_raises_error(self):
+    def test_train_with_wrong_feature_count_raises_error(self) -> None:
         """Train with wrong number of features should raise error."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.random.rand(50, 20) * 50000  # 20 features instead of 30
@@ -366,7 +380,7 @@ class TestLSTMModelEdgeCases:
         with pytest.raises(ValueError, match="must have 30 features"):
             model.train(X, y)
 
-    def test_train_with_nan_values_raises_error(self):
+    def test_train_with_nan_values_raises_error(self) -> None:
         """Train with NaN values should raise error."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.random.rand(50, 30) * 50000
@@ -376,7 +390,7 @@ class TestLSTMModelEdgeCases:
         with pytest.raises(ValueError, match="contains NaN"):
             model.train(X, y)
 
-    def test_train_with_inf_values_raises_error(self):
+    def test_train_with_inf_values_raises_error(self) -> None:
         """Train with infinite values should raise error."""
         model = LSTMModel(window_days=30, epochs=5)
         X = np.random.rand(50, 30) * 50000
@@ -386,14 +400,14 @@ class TestLSTMModelEdgeCases:
         with pytest.raises(ValueError, match="contains infinite"):
             model.train(X, y)
 
-    def test_deserialize_corrupted_bytes_raises_error(self):
+    def test_deserialize_corrupted_bytes_raises_error(self) -> None:
         """Deserialize corrupted bytes should raise error."""
         corrupted_bytes = b"not a valid pickle"
 
         with pytest.raises((pickle.UnpicklingError, ValueError)):
             LSTMModel.deserialize(corrupted_bytes)
 
-    def test_deserialize_invalid_structure_raises_error(self):
+    def test_deserialize_invalid_structure_raises_error(self) -> None:
         """Deserialize bytes with invalid structure should raise error."""
         # Pickle a simple dict instead of model state
         invalid_data = pickle.dumps({"wrong": "structure"})
@@ -402,7 +416,7 @@ class TestLSTMModelEdgeCases:
             LSTMModel.deserialize(invalid_data)
 
     # S - Serialization
-    def test_serialize_untrained_model_works(self):
+    def test_serialize_untrained_model_works(self) -> None:
         """Serialize untrained model should work."""
         model = LSTMModel(window_days=30)
         model_bytes = model.serialize()

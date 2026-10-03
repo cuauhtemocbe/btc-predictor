@@ -18,6 +18,9 @@ from shared.features import (
 )
 from workers.daily.models import LinearRegressionModel
 
+# One cached bar: (timestamp, open, high, low, close, volume).
+type BarRow = tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]
+
 
 @pytest.fixture
 def synthetic_prices_60_days() -> np.ndarray:
@@ -298,14 +301,14 @@ def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) ->
 
 
 @pytest.fixture(scope="module")
-def cached_price_data_31_days():
+def cached_price_data_31_days() -> list[BarRow]:
     """
     Module-scoped cached price data (pre-calculated values).
 
     Returns list of tuples: (timestamp, open, high, low, close, volume)
     Generated ONCE per module, reused by all tests.
     """
-    data = []
+    data: list[BarRow] = []
     today = datetime.now(UTC).date()
     base_date = today - timedelta(days=31)
 
@@ -335,7 +338,7 @@ def cached_price_data_31_days():
 
 @pytest.fixture
 def sample_btc_prices_31_days(
-    db_session: Session, cached_price_data_31_days
+    db_session: Session, cached_price_data_31_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 31 days of BTC price records using cached data.
@@ -346,7 +349,7 @@ def sample_btc_prices_31_days(
     Returns:
         List of 186 Price records (6 per day at 4-hour intervals)
     """
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_price, high, low, close, volume in cached_price_data_31_days:
         price_record = Price(
@@ -366,14 +369,14 @@ def sample_btc_prices_31_days(
 
 
 @pytest.fixture(scope="module")
-def cached_price_data_10_days():
+def cached_price_data_10_days() -> list[BarRow]:
     """
     Module-scoped cached price data for 10 days.
 
     Returns list of tuples: (timestamp, open, high, low, close, volume)
     Generated ONCE per module, reused by all tests.
     """
-    data = []
+    data: list[BarRow] = []
     today = datetime.now(UTC).date()
     base_date = today - timedelta(days=10)
 
@@ -403,7 +406,7 @@ def cached_price_data_10_days():
 
 @pytest.fixture
 def sample_btc_prices_10_days(
-    db_session: Session, cached_price_data_10_days
+    db_session: Session, cached_price_data_10_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 10 days of BTC price records using cached data.
@@ -412,7 +415,7 @@ def sample_btc_prices_10_days(
     Returns:
         List of 60 Price records (6 per day at 4-hour intervals)
     """
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_price, high, low, close, volume in cached_price_data_10_days:
         price_record = Price(
