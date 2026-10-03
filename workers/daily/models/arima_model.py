@@ -8,6 +8,7 @@ captures trends, seasonality, and autocorrelation patterns.
 
 import pickle
 import warnings
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -25,6 +26,13 @@ except ImportError as e:
     ) from e
 
 from workers.daily.models.base import BaseModel  # noqa: E402
+
+
+def _first_forecast(forecast: Any) -> float:
+    """First value of an ARIMA forecast (a pandas Series or an array)."""
+    if hasattr(forecast, "iloc"):
+        return float(forecast.iloc[0])
+    return float(forecast[0]) if len(forecast) > 0 else float(forecast)
 
 
 class ARIMAModel(BaseModel):
@@ -229,31 +237,7 @@ class ARIMAModel(BaseModel):
         if not self._is_trained:
             raise ValueError("Model must be trained before making predictions")
 
-        # Reshape if needed (accept both (window_days,) and (1, window_days))
-        if X.ndim == 1:
-            if X.shape[0] != self.window_days:
-                raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[0]}"
-                )
-            X = X.reshape(1, -1)
-        elif X.ndim == 2:
-            if X.shape[0] != 1:
-                raise ValueError(
-                    f"X must have shape (1, {self.window_days}), got {X.shape}"
-                )
-            if X.shape[1] != self.window_days:
-                raise ValueError(
-                    f"X must have {self.window_days} features, got {X.shape[1]}"
-                )
-        else:
-            raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
-
-        # Validate data quality
-        if np.isnan(X).any():
-            raise ValueError("X contains NaN values")
-
-        if np.isinf(X).any():
-            raise ValueError("X contains infinite values")
+        X = self._validated_features(X)
 
         # For ARIMA, we append the new data to the training series
         # and forecast 1 step ahead
@@ -272,31 +256,48 @@ class ARIMAModel(BaseModel):
                 recent_series, order=self.order, seasonal_order=self.seasonal_order
             )
             temp_fitted = temp_model.fit()
-
-            # Forecast 1 step ahead
-            forecast = temp_fitted.forecast(steps=1)
-            # forecast is a pandas Series, get the first value
-            if hasattr(forecast, "iloc"):
-                prediction = float(forecast.iloc[0])
-            else:
-                # If it's an array, get first element
-                prediction = (
-                    float(forecast[0]) if len(forecast) > 0 else float(forecast)
-                )
-
-            return prediction
+            return _first_forecast(temp_fitted.forecast(steps=1))
         except Exception:
             # Fallback: use original fitted model
-            forecast = self.fitted_model.forecast(steps=1)
-            # forecast is a pandas Series, get the first value
-            if hasattr(forecast, "iloc"):
-                prediction = float(forecast.iloc[0])
-            else:
-                # If it's an array, get first element
-                prediction = (
-                    float(forecast[0]) if len(forecast) > 0 else float(forecast)
+            return _first_forecast(self.fitted_model.forecast(steps=1))
+
+    def _validated_features(
+        self, X: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """
+        Check the shape and content of a prediction input.
+
+        Accepts ``(window_days,)`` and ``(1, window_days)`` and returns it as
+        ``(1, window_days)``.
+
+        Raises:
+            ValueError: If X has the wrong shape or contains NaN or infinite values.
+        """
+        if X.ndim == 1:
+            if X.shape[0] != self.window_days:
+                raise ValueError(
+                    f"X must have {self.window_days} features, got {X.shape[0]}"
                 )
-            return prediction
+            X = X.reshape(1, -1)
+        elif X.ndim == 2:
+            if X.shape[0] != 1:
+                raise ValueError(
+                    f"X must have shape (1, {self.window_days}), got {X.shape}"
+                )
+            if X.shape[1] != self.window_days:
+                raise ValueError(
+                    f"X must have {self.window_days} features, got {X.shape[1]}"
+                )
+        else:
+            raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
+
+        if np.isnan(X).any():
+            raise ValueError("X contains NaN values")
+
+        if np.isinf(X).any():
+            raise ValueError("X contains infinite values")
+
+        return X
 
     def serialize(self) -> bytes:
         """
