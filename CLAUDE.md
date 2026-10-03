@@ -13,7 +13,7 @@
 - **Language:** Python 3.13
 - **Framework:** FastAPI + Jinja2 (HTML templates)
 - **Database:** PostgreSQL + SQLAlchemy 2.0 + Alembic (migrations)
-- **ML:** scikit-learn (Linear Regression on log returns), pandas, numpy. XGBoost, LSTM and ARIMA exist but are disabled until #124.
+- **ML:** scikit-learn (Linear Regression on log returns), pandas, numpy. XGBoost, LSTM and ARIMA are re-enabled in code and tests (#124) but the crons train and predict with Linear Regression only.
 - **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback. Free, no API key.
 - **Assets:** `BTCUSDT` and `PAXGUSDT` (proxy for gold, see Design Decision 6)
 - **Deployment:** Railway (6 services: postgres, api, fetch-price, daily, weekly and monthly-backtest crons)
@@ -320,9 +320,8 @@ docker compose exec api pytest --cov --cov-report=term-missing
 # Use COVERAGE_CORE=sysmon if you combine -n with --cov.
 docker compose exec api pytest -n 4 --dist loadscope
 
-# Run the LSTM/XGBoost/ARIMA tests disabled during the Linear-only reboot (#124).
-# Their modules are not even collected without this flag (they import TensorFlow).
-docker compose exec api pytest --run-non-linear
+# The LSTM/XGBoost/ARIMA tests run with the rest (#124). Importing TensorFlow adds
+# a one-off cost to every pytest process that collects them.
 ```
 
 ### Code Quality (inside container)

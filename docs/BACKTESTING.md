@@ -352,7 +352,7 @@ ValueError: Every one of the 91 days failed to train the xgboost model, nothing 
 first error: X must have 5 features (window_days), got 11
 ```
 
-**Cause**: the model rejects what the production code gives it. XGBoost and LSTM still expect `window_days` feature columns, while the production builder (#104) produces `2 * window_days + 1`; re-adapting them is tracked in #124. The backtest reproduces the daily trainer's behaviour on purpose instead of working around it.
+**Cause**: the model rejects what the production code gives it. Every model is built with the feature count of the production builder (`2 * window_days + 1`, #104) through `workers.daily.models.factory`; this error means a model class was built with another width. The backtest reproduces the daily trainer's behaviour on purpose instead of working around it.
 
 ### Performance: Slow backtests
 
@@ -366,7 +366,7 @@ A year of Linear predictions (retrain every day) takes about 10 s. If a run take
 
 ### Current Limitations
 
-- **Heavy models**: XGBoost and LSTM do not accept the return features yet (#124); ARIMA runs. Their tests are marked `non_linear` (`pytest --run-non-linear`).
+- **Heavy models**: XGBoost, LSTM and ARIMA accept the return features (#124) but are slow, so use `--retrain-every` with them. The monthly cron backtests only the linear model.
 - **Expanding window only**: like production; there is no rolling-window mode.
 - **No hyperparameter search**: the validation/test split and its labelling make it possible to tune without leaking, but no tuner is built in.
 - **Sequential processing**: No parallelization
