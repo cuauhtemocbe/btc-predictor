@@ -9,7 +9,8 @@ Covers Gherkin acceptance criteria scenarios from US-022:
 """
 
 import math
-from datetime import date, timedelta
+import runpy
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -421,3 +422,82 @@ class TestMainWeeklyPredictor:
 
         finally:
             pred_module.SessionLocal = original_session
+
+
+# ============================================================================
+# Models the weekly predictor cannot load, and the module entry point (#159)
+# ============================================================================
+
+
+def _add_active_weekly_model(db_session: Session, name: str, artifact: bytes) -> Model:
+    record = Model(
+        name=name,
+        version="1.0.0",
+        params={"window_days": 30, "horizon_days": 7},
+        artifact=artifact,
+        trained_at=datetime.now(UTC),
+        train_from=date.today() - timedelta(days=60),
+        train_to=date.today() - timedelta(days=1),
+        timeframe="1w",
+        is_active=True,
+    )
+    db_session.add(record)
+    db_session.commit()
+    return record
+
+
+class TestUnloadableActiveModel:
+    """An active weekly model the predictor cannot deserialize."""
+
+    def test_unknown_model_type_is_a_runtime_error(self, db_session: Session) -> None:
+        _add_active_weekly_model(db_session, "mystery_weekly", b"")
+
+        with pytest.raises(RuntimeError, match="Unknown model type: mystery_weekly"):
+            predictor.get_active_model(db_session)
+
+    def test_corrupt_artifact_is_a_runtime_error(self, db_session: Session) -> None:
+        _add_active_weekly_model(db_session, "linear_weekly_v1", b"corrupt")
+
+        with pytest.raises(RuntimeError, match="Failed to deserialize model"):
+            predictor.get_active_model(db_session)
+
+    def test_main_returns_1_and_stores_nothing(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        sample_daily_close_prices_31_days: list[Price],
+    ) -> None:
+        _add_active_weekly_model(db_session, "mystery_weekly", b"")
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+
+        assert predictor.main() == 1
+
+        assert db_session.query(Prediction).count() == 0
+
+
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules:RuntimeWarning")
+def test_main_returns_1_on_an_unexpected_error(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode(*args: object, **kwargs: object) -> bool:
+        raise KeyError("boom")
+
+    monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(predictor, "check_existing_prediction", explode)
+
+    assert predictor.main() == 1
+
+
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules:RuntimeWarning")
+def test_running_the_module_exits_with_the_exit_code_of_main(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``python -m workers.weekly.predictor`` ends in ``sys.exit(main())``."""
+    # runpy re-executes the module, which re-imports SessionLocal from here. No
+    # active weekly model exists, so main() fails and the exit code is 1.
+    monkeypatch.setattr("shared.db.database.SessionLocal", lambda: db_session)
+
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_module("workers.weekly.predictor", run_name="__main__")
+
+    assert exit_info.value.code == 1
