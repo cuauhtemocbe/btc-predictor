@@ -17,6 +17,7 @@ from shared.db.crud import (
     get_active_model,
     get_all_models,
     get_evaluated_predictions,
+    get_evaluated_predictions_async,
 )
 from shared.db.models import Model, Prediction
 
@@ -757,3 +758,82 @@ def test_activate_model_only_one_active_version_per_name(
             "Only one version of linear_v1 should be active"
         )
         assert active_linear_versions[0].id == target_model.id
+
+
+def _persisted_model(session, name, timeframe, is_active):
+    model = Model(
+        name=name,
+        version="1.0.0",
+        params={},
+        artifact=b"artifact",
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=is_active,
+        timeframe=timeframe,
+    )
+    session.add(model)
+    session.commit()
+    return model
+
+
+def test_deactivate_all_models_scoped_to_a_timeframe(db_session):
+    """Only the models of the given timeframe are deactivated (#68)."""
+    daily = _persisted_model(db_session, "daily_model", "1d", is_active=True)
+    weekly = _persisted_model(db_session, "weekly_model", "1w", is_active=True)
+
+    count = deactivate_all_models(db_session, timeframe="1w")
+    db_session.commit()
+
+    assert count == 1
+    assert daily.is_active is True
+    assert weekly.is_active is False
+
+
+async def test_get_evaluated_predictions_async_filters_and_orders(async_db_session):
+    """The async query keeps evaluated rows only, filtered and newest first (#68)."""
+    model = Model(
+        name="async_model",
+        version="1.0.0",
+        params={},
+        artifact=b"artifact",
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=True,
+        timeframe="1d",
+    )
+    async_db_session.add(model)
+    await async_db_session.flush()
+
+    def prediction(day, timeframe, actual_price):
+        return Prediction(
+            model_id=model.id,
+            predicted_at=datetime.now(UTC),
+            predicted_for=date(2026, 5, day),
+            timeframe=timeframe,
+            price_at_prediction=50000.00,
+            predicted_price=51000.00,
+            actual_price=actual_price,
+        )
+
+    async_db_session.add_all(
+        [
+            prediction(10, "1d", 50500.00),
+            prediction(12, "1d", 50600.00),
+            prediction(14, "1d", None),  # pending, never returned
+            prediction(15, "1w", 50700.00),
+        ]
+    )
+    await async_db_session.flush()
+
+    everything = await get_evaluated_predictions_async(async_db_session)
+    daily_in_range = await get_evaluated_predictions_async(
+        async_db_session,
+        from_date=date(2026, 5, 11),
+        to_date=date(2026, 5, 15),
+        timeframe="1d",
+    )
+
+    assert [p.predicted_for.day for p in everything] == [15, 12, 10]
+    assert [p.predicted_for.day for p in daily_in_range] == [12]
