@@ -18,7 +18,7 @@ This job:
    currently-production single-model path in workers/daily/trainer.py:main())
 5. Saves the model with timeframe="1w" and horizon_days=7 in its params,
    then activates it via shared.db.crud.activate_model() -- which, since
-   issue #66, scopes deactivation to (name, timeframe) and therefore never
+   issue #66, scopes deactivation to (symbol, family, timeframe) and therefore never
    touches the active "1d" model.
 
 Entry point: python -m workers.weekly.trainer

@@ -8,6 +8,7 @@ Models:
 - BacktestResult: Walk-forward backtesting simulation results
 """
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -33,6 +34,24 @@ from sqlalchemy.types import NUMERIC
 
 # Asset every row belongs to unless told otherwise (the original BTC pipeline).
 DEFAULT_SYMBOL = "BTCUSDT"
+
+# Trailing "_v<N>" the trainers append to a model name ("linear_v2").
+VERSION_SUFFIX_PATTERN = r"_v[0-9]+$"
+
+
+# The same rule as model_family(), as a SQL expression on the ``name`` column.
+MODEL_FAMILY_SQL = f"regexp_replace(name, '{VERSION_SUFFIX_PATTERN}', '')"
+
+
+def model_family(name: str) -> str:
+    """
+    Model name without its trailing version suffix: "linear_v2" -> "linear".
+
+    The family is the "same model" scope of the one-active-version rule: the
+    trainers put the version in the name, so every version of a model has a
+    different name but the same family.
+    """
+    return re.sub(VERSION_SUFFIX_PATTERN, "", name)
 
 
 class Base(DeclarativeBase):
@@ -105,12 +124,14 @@ class Model(Base):
     parameters, and metadata. Supports model versioning and rollback.
     Each model is trained for one asset (``symbol``); predictions get their
     asset through ``model_id``. At most one active version per
-    (symbol, name, timeframe) is allowed at a time, enforced by the partial
+    (symbol, family, timeframe) is allowed at a time, enforced by the partial
     unique index ix_models_one_active_version_per_name_timeframe -- not just
-    application logic. Different model names (e.g. "linear_v1" and
-    "xgboost_v1") can be active at the same time within the same timeframe;
-    that's what powers multi-model prediction mode (US-025). The same model
-    name can be trained once per asset.
+    application logic. The family is the name without its ``_v<N>`` suffix
+    (see ``model_family``), so "linear_v1" and "linear_v2" are versions of
+    one model. Different families (e.g. "linear_v1" and "xgboost_v1") can be
+    active at the same time within the same timeframe; that's what powers
+    multi-model prediction mode (US-025). The same model name can be trained
+    once per asset.
     """
 
     __tablename__ = "models"
@@ -123,7 +144,7 @@ class Model(Base):
         Index(
             "ix_models_one_active_version_per_name_timeframe",
             "symbol",
-            "name",
+            text(MODEL_FAMILY_SQL),
             "timeframe",
             unique=True,
             postgresql_where=text("is_active = true"),
@@ -178,9 +199,9 @@ class Model(Base):
         comment=(
             "Prediction horizon this model was trained for: '1h' (hourly), "
             "'1d' (daily), '1w' (weekly). At most one active version per "
-            "(name, timeframe) is allowed at a time (enforced by "
+            "(symbol, family, timeframe) is allowed at a time (enforced by "
             "ix_models_one_active_version_per_name_timeframe); different "
-            "names can be active concurrently (multi-model mode)."
+            "families can be active concurrently (multi-model mode)."
         ),
     )
 

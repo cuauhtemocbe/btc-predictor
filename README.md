@@ -105,7 +105,7 @@ btc-predictor/
 
 2. **`models`** — Modelos ML entrenados (serializados con pickle)
    - Columna `artifact` (BYTEA) contiene el modelo
-   - Solo 1 modelo activo por `(symbol, name, timeframe)`
+   - Solo 1 modelo activo por `(symbol, familia, timeframe)` (familia = nombre sin el sufijo `_v<N>`)
 
 3. **`predictions`** — Predicciones + evaluación (horizontes `1d` y `1w`)
    - Fase 1: Insertar predicción (hoy predice mañana)

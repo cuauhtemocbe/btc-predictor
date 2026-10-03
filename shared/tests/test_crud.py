@@ -19,7 +19,7 @@ from shared.db.crud import (
     get_evaluated_predictions,
     get_evaluated_predictions_async,
 )
-from shared.db.models import Model, Prediction
+from shared.db.models import Model, Prediction, model_family
 
 
 @pytest.fixture
@@ -837,3 +837,68 @@ async def test_get_evaluated_predictions_async_filters_and_orders(async_db_sessi
 
     assert [p.predicted_for.day for p in everything] == [15, 12, 10]
     assert [p.predicted_for.day for p in daily_in_range] == [12]
+
+
+def _versioned_model(session, name, version, *, symbol="BTCUSDT", timeframe="1d"):
+    model = Model(
+        symbol=symbol,
+        name=name,
+        version=version,
+        params={},
+        artifact=b"artifact",
+        trained_at=datetime.now(UTC),
+        train_from=date(2024, 1, 1),
+        train_to=date(2024, 5, 1),
+        is_active=False,
+        timeframe=timeframe,
+    )
+    session.add(model)
+    session.commit()
+    return model
+
+
+def test_activate_model_replaces_previous_version_in_the_name(db_session):
+    """
+    Issue #169: the daily trainer names models "<family>_v<N>", so activating
+    linear_v2 must deactivate linear_v1 -- while xgboost_v1 stays active.
+    """
+    linear_v1 = _versioned_model(db_session, "linear_v1", "v1")
+    linear_v2 = _versioned_model(db_session, "linear_v2", "v2")
+    xgboost_v1 = _versioned_model(db_session, "xgboost_v1", "v1")
+    activate_model(db_session, linear_v1.id)
+    activate_model(db_session, xgboost_v1.id)
+
+    activate_model(db_session, linear_v2.id)
+
+    active = {m.name for m in get_all_models(db_session) if m.is_active}
+    assert active == {"linear_v2", "xgboost_v1"}
+
+
+def test_activate_model_does_not_touch_other_symbols_or_timeframes(db_session):
+    """The family scope stays within one (symbol, timeframe)."""
+    paxg = _versioned_model(db_session, "linear_v1", "v1", symbol="PAXGUSDT")
+    weekly = _versioned_model(db_session, "linear_v1", "v1", timeframe="1w")
+    new = _versioned_model(db_session, "linear_v2", "v2")
+    activate_model(db_session, paxg.id)
+    activate_model(db_session, weekly.id)
+
+    activate_model(db_session, new.id)
+
+    db_session.refresh(paxg)
+    db_session.refresh(weekly)
+    assert paxg.is_active is True
+    assert weekly.is_active is True
+
+
+@pytest.mark.parametrize(
+    ("name", "family"),
+    [
+        ("linear_v1", "linear"),
+        ("linear_v12", "linear"),
+        ("linear_weekly_v1", "linear_weekly"),
+        ("xgboost", "xgboost"),
+        ("model_v1_extra", "model_v1_extra"),
+    ],
+)
+def test_model_family_strips_only_a_trailing_version_suffix(name, family):
+    assert model_family(name) == family
