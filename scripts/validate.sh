@@ -1,6 +1,7 @@
 #!/bin/bash
 # Single source of truth for the local quality gate: lockfile validation,
-# ruff lint, ruff format check, and pytest with coverage. Reused by
+# ruff lint, ruff format check, pytest with coverage and the per-module
+# coverage thresholds (scripts/check_coverage_thresholds.py). Reused by
 # `make validate` and by the
 # pre-commit/pre-push git hooks so the checks never drift out of sync.
 set -e
@@ -25,6 +26,10 @@ echo "🎨 Ruff format check..."
 docker compose exec -T api ruff format --check shared api workers
 
 echo "🧪 Pytest with coverage..."
-docker compose exec -T api pytest --cov --cov-report=term-missing
+docker compose exec -T api pytest --cov --cov-report=term-missing \
+    --cov-report=xml:/tmp/coverage.xml
+
+echo "📏 Per-module coverage thresholds..."
+docker compose exec -T api python scripts/check_coverage_thresholds.py /tmp/coverage.xml
 
 echo "✅ Validation passed: lint, format, and tests (with coverage) are all green"

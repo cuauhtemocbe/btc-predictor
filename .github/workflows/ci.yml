@@ -49,6 +49,13 @@ jobs:
           docker compose exec -T api pytest --cov --cov-report=term-missing
           --cov-report=xml:/tmp/coverage.xml
 
+      # Reads the coverage.xml of the run above (the suite does not run twice)
+      # and fails naming each critical module below its minimum or missing.
+      - name: Check per-module coverage thresholds
+        run: >-
+          docker compose exec -T api python scripts/check_coverage_thresholds.py
+          /tmp/coverage.xml
+
       - name: Copy coverage report
         if: always()
         run: docker compose cp api:/tmp/coverage.xml ./coverage.xml || true

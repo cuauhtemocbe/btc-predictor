@@ -240,6 +240,9 @@ def test_validate_script_is_reused_by_pre_push_hook():
     assert "ruff check" in validate_script
     assert "ruff format --check" in validate_script
     assert "pytest --cov" in validate_script
+    # The same per-module coverage gate as CI, on the coverage.xml of that run.
+    assert "--cov-report=xml:/tmp/coverage.xml" in validate_script
+    assert "check_coverage_thresholds.py /tmp/coverage.xml" in validate_script
     # The pre-push hook must call validate.sh, not duplicate its checks.
     assert "validate.sh" in run_tests_hook
     assert "ruff check" not in run_tests_hook

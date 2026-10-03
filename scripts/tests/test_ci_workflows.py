@@ -9,6 +9,13 @@ def read_workflow(name: str) -> str:
     return (WORKFLOWS / name).read_text()
 
 
+def quality_runs() -> list[str]:
+    """The ``run`` command of every step of the Docker quality gate, in order."""
+    workflow = yaml.safe_load(read_workflow("ci.yml"))
+    steps = workflow["jobs"]["quality"]["steps"]
+    return [" ".join(step["run"].split()) for step in steps if "run" in step]
+
+
 def test_ci_runs_docker_quality_gate_on_push_and_pull_request():
     workflow = read_workflow("ci.yml")
 
@@ -20,6 +27,26 @@ def test_ci_runs_docker_quality_gate_on_push_and_pull_request():
     assert "ruff format --check shared api workers" in workflow
     assert "python -m mypy" in workflow
     assert "pytest --cov" in workflow
+
+
+def test_ci_checks_per_module_coverage_right_after_the_coverage_run():
+    # Scenario "Missing worker coverage fails the gate": the gate reuses the
+    # coverage.xml of the pytest step instead of running the suite again
+    runs = quality_runs()
+    pytest_index = next(i for i, run in enumerate(runs) if "pytest --cov" in run)
+
+    assert (
+        "scripts/check_coverage_thresholds.py /tmp/coverage.xml"
+        in runs[pytest_index + 1]
+    )
+    assert runs[pytest_index + 1].startswith("docker compose exec -T api python")
+    assert sum("pytest" in run for run in runs) == 1
+
+
+def test_ci_keeps_the_required_check_name():
+    workflow = yaml.safe_load(read_workflow("ci.yml"))
+
+    assert workflow["jobs"]["quality"]["name"] == "Docker quality gate"
 
 
 def test_ci_builds_with_the_default_docker_builder():
