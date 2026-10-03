@@ -226,7 +226,7 @@ def main() -> int:
         model.train(training_set.X, training_set.y)
 
         # Calculate training date range
-        # Assuming hourly data, approximate day range
+        # One row per day, so the series length is the day range
         train_to = date.today()
         train_from = train_to - timedelta(days=len(series))
 

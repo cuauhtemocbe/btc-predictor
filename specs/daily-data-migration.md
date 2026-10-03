@@ -8,6 +8,8 @@ issue: #38
 
 # Daily Data Frequency Migration
 
+> **Historical.** This spec describes the 4-hour candle design that #102 replaced with Binance daily bars. See `CLAUDE.md` (Design Decisions 5 and 6) for the current data strategy.
+
 ## Objective
 
 Migrate the BTC Predictor project from hourly to daily data frequency to fix a critical bug in the daily worker and improve prediction accuracy. The daily worker currently queries for 60 records expecting 60 DAYS but receives 60 HOURS (~2.5 days), causing models to be trained on 30-hour windows instead of 30-day windows. This migration will correct the bug, backfill 365 days of historical daily data, and align all components to use daily frequency consistently.

@@ -2,15 +2,22 @@
 
 Complete guide to deploy BTC Predictor to Railway.
 
+For the per-service Dockerfiles, start commands and dependency groups see
+[`RAILWAY_MULTISTAGE_CONFIG.md`](RAILWAY_MULTISTAGE_CONFIG.md). Start commands and
+cron schedules live in the Railway dashboard, not in the `railway.*.toml` files.
+
 ## 🏗️ Architecture on Railway
 
-Your project will have **4 services**:
+The project has **6 services**:
 
-1. **postgres** — PostgreSQL database (plugin)
-2. **api** — Web service (always running)
-3. **fetch-price** — Cron job (runs daily at 6am UTC)
-4. **daily** — Cron job (runs daily at 7am UTC)
-5. **weekly** — Cron job (runs weekly on Mondays at 7am UTC)
+| Service | Type | Schedule (UTC) | What it does |
+|---------|------|----------------|--------------|
+| **postgres** | Plugin | — | PostgreSQL database |
+| **api** | Web, always on | — | FastAPI + dashboard |
+| **fetch-price** | Cron | `0 6 * * *` (daily 6am) | Ingests the closed daily Binance bar of each symbol |
+| **daily** | Cron | `0 7 * * *` (daily 7am) | evaluator → trainer → predictor (1-day horizon) |
+| **weekly-predictor** | Cron | `0 7 * * 1` (Mondays 7am) | evaluator → trainer → predictor (7-day horizon) |
+| **monthly-backtest** | Cron | `0 0 1 * *` (1st of the month, 00:00) | Walk-forward backtest with the production configuration |
 
 ---
 
@@ -37,80 +44,91 @@ Your project will have **4 services**:
 
 ✅ **Done!** Your database is ready.
 
----
-
 ### Step 3: Configure API Service
-
-The API service should already be deployed (Railway auto-detects it). If not:
 
 1. Click **"New"** → **"GitHub Repo"** → Select `btc-predictor`
 2. Go to service **Settings**:
    - **Name:** `api`
    - **Root Directory:** `/` (leave empty)
-   - **Dockerfile Path:** `Dockerfile`
+   - **Dockerfile Path:** `Dockerfile.api`
 3. Go to **Variables** tab and verify:
-   - `DATABASE_URL` — Auto-injected ���
+   - `DATABASE_URL` — Auto-injected ✅
    - `PORT` — Auto-injected ✅
    - `TZ` — Add manually: `America/Mexico_City`
 4. Go to **Settings** → **Networking**:
    - Enable **"Generate Domain"** (to get a public URL)
 
-**Deploy Command:**
+The container starts through `entrypoint.sh` (migrations, then Uvicorn).
+
+### Step 4: Load the Price History (once)
+
+The cron jobs refuse to run for a symbol that has no stored bars, so load the history first:
+
 ```bash
-uvicorn src.app.main:app --host 0.0.0.0 --port $PORT
+railway run -s api python scripts/load_binance_history.py --check   # host reachable from Railway? (no DB writes)
+railway run -s api python scripts/load_binance_history.py           # BTCUSDT from 2017-08, PAXGUSDT from 2020-08
 ```
 
-Railway will automatically use this from the Dockerfile.
+The loader verifies the SHA256 checksum of every monthly zip, is idempotent, and reports missing days at the end.
 
----
-
-### Step 4: Configure Fetch-Price Cron Job
+### Step 5: Configure Fetch-Price Cron Job
 
 1. Click **"New"** → **"Empty Service"**
 2. **Settings**:
    - **Name:** `fetch-price`
    - Connect to your GitHub repo
-   - **Dockerfile Path:** `Dockerfile`
+   - **Dockerfile Path:** `Dockerfile.fetch`
 3. **Variables**:
    - `DATABASE_URL` — Auto-inherited from postgres ✅
    - `TZ` — `America/Mexico_City`
-   - `BINANCE_BASE_URL` — (Optional) Default: `https://api.binance.com`
 4. **Settings** → **Deploy**:
-   - **Start Command:** `python -m workers.fetch_price.main`
+   - **Start Command:** `python -m fetch_price.main`
+   - **Restart Policy:** Never
 5. **Settings** → **Cron Schedule**:
    - **Schedule:** `0 6 * * *` (daily at 6am UTC)
    - **Region:** Use same as your database
 
 ✅ **Ready to deploy!** This service will:
-- Ingest the closed daily bar (UTC) of each supported symbol from Binance, with volume
+- Ingest the closed daily bar (UTC) of each supported symbol (`BTCUSDT`, `PAXGUSDT`) from Binance, with volume
 - Read the `daily/` file of data.binance.vision, falling back to the REST klines endpoint (`data-api.binance.vision`) if the file is not published yet
 - Backfill days missed by earlier runs, never store the still-open day
 - Be idempotent (existing `(symbol, timestamp)` rows are skipped) and exit non-zero if both sources fail
 
-**Note:** the `daily/` file is published ~01:40 UTC, so the 6am UTC cron finds it; the REST fallback covers late publications. Load the history first with `scripts/load_binance_history.py` (the job refuses to run for a symbol with no stored bars).
+**Note:** the `daily/` file is published ~01:40 UTC, so the 6am UTC cron finds it; the REST fallback covers late publications. Binance's main REST API (`api.binance.com`) is geo-blocked from Railway (HTTP 451), which is why only `data.binance.vision` and `data-api.binance.vision` are used.
 
----
-
-### Step 5: Configure Daily Cron Job
+### Step 6: Configure Daily Cron Job
 
 1. Click **"New"** → **"Empty Service"**
 2. **Settings**:
    - **Name:** `daily`
    - Connect to your GitHub repo
-   - **Dockerfile Path:** `Dockerfile`
+   - **Dockerfile Path:** `Dockerfile.ml`
 3. **Variables**:
    - `DATABASE_URL` — Auto-inherited ✅
    - `TZ` — `America/Mexico_City`
+   - `TRAINING_WINDOW_DAYS` — (optional) default `21`
 4. **Settings** → **Deploy**:
    - **Start Command:** `python -m workers.daily`
+   - **Restart Policy:** Never
 5. **Settings** → **Cron Schedule**:
-   - **Schedule:** `0 13 * * *` (7am Mexico City = 1pm UTC)
+   - **Schedule:** `0 7 * * *` (daily at 7am UTC, after `fetch-price`)
    - **Region:** Use same as your database
 
-✅ **Ready to deploy!** US-006 to US-010 are complete. This service will:
-- **Evaluator**: Evaluate yesterday's prediction (update with actual price, errors, PnL)
-- **Predictor**: Generate tomorrow's prediction using active ML model
-- Run daily orchestration: evaluator → predictor
+✅ **Ready to deploy!** This service runs, in order, stopping at the first failure:
+- **Evaluator**: settles every pending 1-day prediction whose settling bar is stored (a missing bar leaves it pending)
+- **Trainer**: trains the Linear model on every stored `BTCUSDT` daily row (log-return features, window `TRAINING_WINDOW_DAYS`) and fails with the required and available row counts if there is too little history
+- **Predictor**: predicts the next day with the active model
+
+### Step 7: Configure Weekly and Monthly Cron Jobs
+
+Same image and variables as `daily`, different start command and schedule:
+
+| Service | Dockerfile | Start Command | Cron Schedule |
+|---------|-----------|---------------|---------------|
+| `weekly-predictor` | `Dockerfile.ml` | `python -m workers.weekly` | `0 7 * * 1` |
+| `monthly-backtest` | `Dockerfile.backtest` | `python -m workers.backtest.main` | `0 0 1 * *` |
+
+`monthly-backtest` runs the walk-forward backtest with the production window, the last 365 days and the last 100 days as the out-of-sample test slice, and stores the rows in `backtest_results`. It exits 1 when there is too little history instead of shrinking the window. See [`docs/BACKTESTING.md`](docs/BACKTESTING.md).
 
 ---
 
@@ -122,10 +140,10 @@ All services automatically inherit these from Railway:
 |----------|--------|-------------|
 | `DATABASE_URL` | PostgreSQL plugin | Connection string (auto-injected) |
 | `PORT` | Railway | Service port (api only) |
-| `TZ` | Manual | Timezone for cron jobs |
-| `BINANCE_BASE_URL` | Manual (optional) | Binance API endpoint (default: `https://api.binance.com`) |
+| `TZ` | Manual | Timezone for logs |
+| `TRAINING_WINDOW_DAYS` | Manual (optional) | Sliding-window size in days used by the trainers and the backtest (default `21`) |
 
-**No `.env` file needed** — Railway injects everything!
+**No `.env` file needed** — Railway injects everything. No data-source API key is needed either: the Binance public data is free.
 
 ---
 
@@ -134,10 +152,9 @@ All services automatically inherit these from Railway:
 ### After Each Git Push to `main`:
 
 1. Railway detects changes
-2. Builds new Docker image
-3. Runs tests (if configured)
-4. Deploys to production
-5. Zero-downtime restart
+2. Builds a new Docker image per service
+3. Deploys to production
+4. Run `./scripts/hooks/monitor-railway.sh` to check that every service is online
 
 ### Manual Deploy:
 
@@ -174,12 +191,27 @@ Expected response:
 ### Check Logs:
 
 ```bash
-# Via CLI
 railway logs --service api
-
-# Or via dashboard
-# Go to service → View Logs
+railway logs --service fetch-price
+railway logs --service daily
+railway logs --service weekly-predictor
+railway logs --service monthly-backtest
 ```
+
+### Check the data:
+
+```bash
+railway run --service api python -c "
+from sqlalchemy import text
+from shared.db.database import SessionLocal
+with SessionLocal() as db:
+    rows = db.execute(text('SELECT symbol, COUNT(*), MAX(timestamp) FROM prices GROUP BY symbol'))
+    for symbol, count, last in rows:
+        print(symbol, count, last)
+"
+```
+
+Expected: one row per symbol, with `MAX(timestamp)` equal to yesterday 00:00 UTC after the 6am UTC `fetch-price` run.
 
 ---
 
@@ -187,125 +219,35 @@ railway logs --service api
 
 ### Issue: `DATABASE_URL` not found
 
-**Solution:** Make sure PostgreSQL plugin is added and linked to your services.
+**Solution:** Make sure the PostgreSQL plugin is added and linked to your services.
 
 1. Go to postgres service
 2. Click **"Variables"** tab
 3. Copy `DATABASE_URL`
 4. Go to each service → **"Variables"** → Add `DATABASE_URL` manually if not auto-injected
 
-### Issue: Shared package import fails
-
-**Solution:** Make sure Dockerfile includes shared package:
-
-```dockerfile
-COPY shared/btc_shared/ ./shared/btc_shared/
-```
-
 ### Issue: Cron jobs not running
 
 **Solution:**
-1. Verify cron schedule syntax: `0 * * * *` (cron format)
+1. Verify the cron schedule syntax in the service settings (see the table above)
 2. Check service logs for errors
-3. Ensure `python -m workers.fetch_price.main` can run locally first
+3. Check the **Start Command** in the dashboard: it must match the table above (the `railway.*.toml` files are not connected to the services)
+4. Ensure `python -m workers.daily` can run locally first (`docker compose exec api python -m workers.daily`)
 
-### Issue: Binance API errors
+### Issue: `fetch-price` fails or stores nothing
 
 **Solution:**
-1. Check if Binance API is accessible: `curl https://api.binance.com/api/v3/ping`
-2. Verify `BINANCE_BASE_URL` environment variable is correct
-3. Check logs for rate limiting errors (429 status code)
-4. Binance public API has rate limits: 1200 requests/minute, 20 orders/second
+1. Check that the host is reachable from Railway: `railway run -s api python scripts/load_binance_history.py --check`
+2. The job refuses to run for a symbol with no stored bars: load the history first (Step 4)
+3. Check that `https://data.binance.vision` and `https://data-api.binance.vision/api/v3/ping` answer from your network
 
----
+### Issue: Predictions stay pending (`actual_price` is NULL)
 
-## 🎯 Fetch-Price Service Details
+**Solution:** The evaluator settles a prediction only when the bar that closes it is stored. Check that `fetch-price` ran successfully before `daily` and that `prices` has yesterday's bar (see "Check the data").
 
-### What it does:
-- Runs every hour (`0 * * * *`)
-- Fetches latest BTC/USDT price from Binance API
-- Stores OHLCV data (Open, High, Low, Close, Volume) in `prices` table
-- Implements idempotency: skips if data for that hour already exists
+### Issue: `daily` fails with "Insufficient training data"
 
-### API endpoint used:
-```bash
-GET https://api.binance.com/api/v3/klines
-  ?symbol=BTCUSDT
-  &interval=1h
-  &limit=1
-```
-
-### Expected behavior:
-- **First run:** Inserts 1 row into `prices`
-- **Subsequent runs (same hour):** Skips insertion (UNIQUE constraint on timestamp)
-- **Next hour:** Inserts new row
-
-### How to verify it's working:
-
-```bash
-# Check logs
-railway logs --service fetch-price
-
-# Expected output (success):
-INFO: Fetched price for 2026-05-16 15:00:00: $67234.56
-INFO: Successfully saved price to database
-
-# Expected output (duplicate):
-INFO: Fetched price for 2026-05-16 15:00:00: $67234.56
-INFO: Price already exists, skipping (idempotent)
-```
-
-### Query the database:
-
-```bash
-# Via Railway CLI
-railway run --service api python -c "
-from shared.db.database import get_engine
-from sqlalchemy import text
-engine = get_engine()
-with engine.connect() as conn:
-    result = conn.execute(text('SELECT COUNT(*) FROM prices'))
-    print(f'Total prices: {result.scalar()}')
-"
-```
-
----
-
-## 📊 Current Status
-
-**All User Stories Complete! (US-001 to US-016)**
-
-| Service | Status | Implementation | Ready to Deploy? |
-|---------|--------|----------------|------------------|
-| **postgres** | ✅ Deployed | US-001, US-002 | Yes |
-| **api** | ✅ Deployed | US-005, US-011, US-012, US-014 | Yes |
-| **fetch-price** | 🚀 Ready | US-003, US-004, **US-015** | **Deploy Now!** |
-| **daily** | 🚀 Ready | US-006 to US-010, **US-016** | **Deploy Now!** |
-
-### Deployment Guides
-
-- **US-015 (fetch-price cron)**: See `US-015-DEPLOYMENT.md` for step-by-step guide
-- **US-016 (daily cron)**: See `US-016-DEPLOYMENT.md` for step-by-step guide
-
----
-
-## 🎯 Deployment Checklist
-
-### Completed ✅
-1. ✅ Deploy **postgres** database
-2. ✅ Deploy **api** service
-3. ✅ Implement US-001 to US-014 (all core features)
-4. ✅ Create deployment guides for cron services
-
-### Ready to Deploy Now 🚀
-5. 🚀 **Deploy fetch-price cron** (US-015) - Follow `US-015-DEPLOYMENT.md`
-6. 🚀 **Deploy daily cron** (US-016) - Follow `US-016-DEPLOYMENT.md`
-
-### Post-Deployment
-7. ⏭️ Monitor cron executions for 24-48 hours
-8. ⏭️ Verify predictions are being created daily
-9. ⏭️ Check PnL calculations are working
-10. ⏭️ Close GitHub issues #16 and #17
+**Solution:** The trainer needs `(window + 1) * 5` daily rows (`required_training_days()`). Load more history with `scripts/load_binance_history.py` or lower `TRAINING_WINDOW_DAYS`.
 
 ---
 
@@ -314,4 +256,5 @@ with engine.connect() as conn:
 - [Railway Docs](https://docs.railway.app/)
 - [Railway CLI](https://docs.railway.app/develop/cli)
 - [Cron Schedule Syntax](https://crontab.guru/)
+- [Binance public data](https://data.binance.vision)
 - Project Repository: https://github.com/cuauhtemocbe/btc-predictor

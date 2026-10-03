@@ -219,27 +219,37 @@ ORDER BY predicted_for;
 
 ## Reading the report
 
-Every run ends with a report; `scripts/backtest_report.py --run-id=<UUID>` prints it again. Real output (Linear, window 21, 2024-01-01 to 2025-12-31, dev data):
+Every run ends with a report; `scripts/backtest_report.py --run-id=<UUID>` prints it again. Real output (Linear, window 21, seed 42, retrain every day, `BTCUSDT` daily data up to 2026-08-31):
 
 ```
 Model: linear  window: 21d  seed: 42  retrain every: 1 day(s)
-Range: 2024-01-01 to 2025-12-31
-Test slice starts: 2025-05-26
+Range: 2019-01-01 to 2026-08-31
+Test slice starts: 2024-01-01
 
-== Headline: test slice (out-of-sample), 220 evaluated days ==
-  Model accuracy:          51.36%
-  Always-up accuracy:      49.55%
-  Persistence accuracy:    50.45% (220 days)
-  Best baseline:           persistence
-  Edge over best baseline: +0.91 pp (p = 0.4200, not significant at 0.05)
-  Model PnL (simple):      -$10,750.12
-  Always-up PnL:           -$21,355.97
-  Persistence PnL:         -$5,970.34
-  Buy-and-hold PnL:        -$21,355.97
+== Headline: test slice (out-of-sample), 974 evaluated days ==
+  Model accuracy:          51.23%
+  Always-up accuracy:      50.72%
+  Persistence accuracy:    49.08% (974 days)
+  Best baseline:           always_up
+  Edge over best baseline: +0.51 pp (p = 0.3866, not significant at 0.05)
+  Model PnL (simple):      $38,486.31
+  Always-up PnL:           $36,297.71
+  Persistence PnL:         $23,099.84
+  Buy-and-hold PnL:        $36,297.71
 
--- Validation slice (tuning only, never a result), 511 evaluated days --
-  ...
+-- Validation slice (tuning only, never a result), 1826 evaluated days --
+  Model accuracy:          48.69%
+  Always-up accuracy:      51.20%
+  Persistence accuracy:    45.29% (1826 days)
+  Best baseline:           always_up
+  Edge over best baseline: -2.52 pp (p = 0.9852, not significant at 0.05)
+  Model PnL (simple):      -$8,659.53
+  Always-up PnL:           $38,580.68
+  Persistence PnL:         -$9,998.53
+  Buy-and-hold PnL:        $38,580.68
 ```
+
+This run, and the one with the monthly-cron configuration (last 365 days, last 100 as test), are summarised in the "Resultados" section of the [README](../README.md#-resultados). Neither shows a statistically significant edge over the baselines.
 
 - **Headline = test slice only.** Validation numbers are a separate, labelled section.
 - **Baselines are computed on exactly the days the model was evaluated on**, so the comparison is like for like.
@@ -304,18 +314,19 @@ docker compose exec api python scripts/load_binance_history.py
 ### Error: "No actual price data"
 
 ```
-WARNING: Skipping 2024-05-15: no actual price data
+WARNING: Skipping 2024-05-15: no actual price
 ```
 
-**Cause**: Gap in historical data (exchange downtime, API failure)
+**Cause**: A day is missing from the stored daily series (a gap in the history load or in the daily ingest)
 
-**Solution**: The script automatically skips days with missing data. Check data quality:
+**Solution**: The script automatically skips days with missing data. Look for gaps in the daily series:
 ```sql
-SELECT DATE(timestamp), COUNT(*) AS hourly_records
+SELECT DATE(timestamp) AS day,
+       LEAD(DATE(timestamp)) OVER (ORDER BY timestamp) AS next_day
 FROM prices
-GROUP BY DATE(timestamp)
-HAVING COUNT(*) < 24
-ORDER BY DATE(timestamp);
+WHERE symbol = 'BTCUSDT'
+ORDER BY timestamp;
+-- a gap is any row where next_day - day > 1; fill it with scripts/load_binance_history.py
 ```
 
 ### Error: "Model training failed"
@@ -324,14 +335,13 @@ ORDER BY DATE(timestamp);
 WARNING: Skipping 2024-05-20: training failed - X contains NaN values
 ```
 
-**Cause**: Data quality issue (NaN, infinite values)
+**Cause**: Data quality issue (NaN, infinite values) in the stored daily rows
 
-**Solution**: Investigate data source and re-run backfill. Check for outliers:
+**Solution**: Investigate the stored rows and reload them with `scripts/load_binance_history.py`. Check for outliers:
 ```sql
 SELECT * FROM prices
-WHERE close IS NULL 
-   OR close = 0 
-   OR close > 1000000
+WHERE symbol = 'BTCUSDT'
+  AND (close IS NULL OR close = 0 OR close > 1000000)
 ORDER BY timestamp;
 ```
 
@@ -360,7 +370,7 @@ A year of Linear predictions (retrain every day) takes about 10 s. If a run take
 - **Expanding window only**: like production; there is no rolling-window mode.
 - **No hyperparameter search**: the validation/test split and its labelling make it possible to tune without leaking, but no tuner is built in.
 - **Sequential processing**: No parallelization
-- **One asset**: `BTCUSDT`
+- **One asset in the CLI**: the script backtests `BTCUSDT` only; `PAXGUSDT` (the gold proxy) is ingested and shown on the dashboard but has no backtest or production model
 
 ### Future Enhancements (US-021+)
 
@@ -399,8 +409,6 @@ The monthly Railway cron (`Dockerfile.backtest`) runs `scripts/backtest.py` with
 ## Related Documentation
 
 - [Baselines and walk-forward backtest spec](../specs/baselines-and-walk-forward-backtest.md) (#105, #106)
-- [US-020 Specification](../specs/us-020-walk-forward-backtesting.md)
-- [US-020 Implementation Plan](../specs/us-020-walk-forward-backtesting-plan.md)
 - [Implementation History](../docs/archive/specs/IMPLEMENTATION_HISTORY.md)
 - [US-021: Backtesting Dashboard](https://github.com/cuauhtemocbe/btc-predictor/issues/23) (future)
 
@@ -423,6 +431,6 @@ A: One that beats the baselines on the test slice with a sample large enough to 
 
 ---
 
-**Last Updated**: 2026-09-30  
+**Last Updated**: 2026-10-02  
 **Issues**: US-020 Walk-Forward Backtesting System; #105 baselines; #106 production-parity walk-forward  
 **Status**: ✅ Implemented
