@@ -9,10 +9,16 @@ skipped days, stored parameters, progress logging) keep their tests here too.
 """
 
 import logging
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
-from uuid import uuid4
+from decimal import Decimal
+from typing import Any
+from uuid import UUID, uuid4
 
+import numpy as np
+import numpy.typing as npt
 import pytest
+from sqlalchemy.orm import Session
 
 import scripts.backtest_engine as engine
 import shared.features as features
@@ -20,8 +26,10 @@ from scripts.backtest_engine import (
     BacktestConfig,
     InsufficientHistoryError,
 )
+from scripts.tests.helpers import DailyRows, params_of
 from shared.config import settings
 from shared.db.models import BacktestResult
+from shared.features import FeatureSet
 from shared.utils import calculate_pnl, calculate_pnl_long_short
 from workers.daily.models import factory
 from workers.daily.trainer import required_training_days
@@ -30,7 +38,7 @@ WINDOW = 5
 FIRST_DAY = date(2023, 1, 1)
 
 
-def config(start: date, end: date, **overrides) -> BacktestConfig:
+def config(start: date, end: date, **overrides: Any) -> BacktestConfig:
     return BacktestConfig(
         model_name=overrides.pop("model_name", "linear"),
         window_days=overrides.pop("window_days", WINDOW),
@@ -40,7 +48,7 @@ def config(start: date, end: date, **overrides) -> BacktestConfig:
     )
 
 
-def stored(db_session, run_id) -> list[BacktestResult]:
+def stored(db_session: Session, run_id: UUID) -> list[BacktestResult]:
     return (
         db_session.query(BacktestResult)
         .filter_by(backtest_run_id=run_id)
@@ -52,14 +60,21 @@ def stored(db_session, run_id) -> list[BacktestResult]:
 # --- Scenario: No future data reaches training ---
 
 
-def test_training_set_ends_before_predicted_day(db_session, seeded_prices, monkeypatch):
+def test_training_set_ends_before_predicted_day(
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Given a backtest predicting 2024-06-10
     target = date(2024, 6, 10)
     by_day = {day: (close, volume) for day, close, volume in seeded_prices}
-    seen: list[tuple[list, list]] = []
-    real = engine.build_training_set
+    seen: list[tuple[list[Decimal], list[Decimal]]] = []
+    real = features.build_training_set
 
-    def spy(closes, volumes, window_days, horizon_days=1):
+    def spy(
+        closes: Sequence[Decimal],
+        volumes: Sequence[Decimal],
+        window_days: int,
+        horizon_days: int = 1,
+    ) -> FeatureSet:
         seen.append((list(closes), list(volumes)))
         return real(closes, volumes, window_days, horizon_days)
 
@@ -78,13 +93,15 @@ def test_training_set_ends_before_predicted_day(db_session, seeded_prices, monke
 
 
 def test_every_prediction_uses_only_strictly_earlier_closes(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     by_close = {close: day for day, close, _ in seeded_prices}
     calls: list[tuple[date, date]] = []
-    real = engine.build_prediction_features
+    real = features.build_prediction_features
 
-    def spy(closes, volumes, window_days):
+    def spy(
+        closes: Sequence[Decimal], volumes: Sequence[Decimal], window_days: int
+    ) -> npt.NDArray[np.float64]:
         calls.append((by_close[closes[-1]], by_close[closes[0]]))
         return real(closes, volumes, window_days)
 
@@ -101,20 +118,23 @@ def test_every_prediction_uses_only_strictly_earlier_closes(
 # --- Scenario: The backtest uses the production feature and prediction code ---
 
 
-def test_backtest_uses_the_production_builders_and_factory():
-    assert engine.build_training_set is features.build_training_set
-    assert engine.build_prediction_features is features.build_prediction_features
-    assert engine.price_from_return is features.price_from_return
-    assert engine.build_model is factory.build_model
+def test_backtest_uses_the_production_builders_and_factory() -> None:
+    assert getattr(engine, "build_training_set") is features.build_training_set
+    assert (
+        getattr(engine, "build_prediction_features")
+        is features.build_prediction_features
+    )
+    assert getattr(engine, "price_from_return") is features.price_from_return
+    assert getattr(engine, "build_model") is factory.build_model
 
 
 def test_backtest_calls_production_builders_and_factory(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls = {"training": 0, "prediction": 0, "factory": 0, "price": 0}
 
-    def counted(name, real):
-        def wrapper(*args, **kwargs):
+    def counted(name: str, real: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             calls[name] += 1
             return real(*args, **kwargs)
 
@@ -140,8 +160,8 @@ def test_backtest_calls_production_builders_and_factory(
 
 
 def test_stored_prediction_is_last_close_times_exp_of_the_predicted_return(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     import math
 
     run_id = uuid4()
@@ -164,7 +184,9 @@ def test_stored_prediction_is_last_close_times_exp_of_the_predicted_return(
 # --- Scenario Outline: Every model type can be backtested (linear row) ---
 
 
-def test_one_result_is_stored_per_day_for_linear(db_session, seeded_prices):
+def test_one_result_is_stored_per_day_for_linear(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     # Given the "linear" model, when I backtest 2024-01-01 to 2024-03-31
     run_id = uuid4()
     start, end = date(2024, 1, 1), date(2024, 3, 31)
@@ -183,7 +205,9 @@ def test_one_result_is_stored_per_day_for_linear(db_session, seeded_prices):
 # --- Scenario: A date range without enough history fails clearly ---
 
 
-def test_start_before_enough_history_names_earliest_date(db_session, seeded_prices):
+def test_start_before_enough_history_names_earliest_date(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     needed = required_training_days(WINDOW)
     earliest = FIRST_DAY + timedelta(days=needed)
 
@@ -203,7 +227,9 @@ def test_start_before_enough_history_names_earliest_date(db_session, seeded_pric
     assert db_session.query(BacktestResult).count() == 0
 
 
-def test_the_earliest_allowed_start_date_works(db_session, seeded_prices):
+def test_the_earliest_allowed_start_date_works(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     earliest = FIRST_DAY + timedelta(days=required_training_days(WINDOW))
     run_id = uuid4()
 
@@ -212,7 +238,7 @@ def test_the_earliest_allowed_start_date_works(db_session, seeded_prices):
     assert len(stored(db_session, run_id)) == 1
 
 
-def test_empty_price_table_fails_clearly(db_session):
+def test_empty_price_table_fails_clearly(db_session: Session) -> None:
     with pytest.raises(InsufficientHistoryError, match="No BTCUSDT prices"):
         engine.run_walk_forward(
             db_session, config(date(2024, 1, 1), date(2024, 1, 2)), uuid4()
@@ -222,7 +248,9 @@ def test_empty_price_table_fails_clearly(db_session):
 # --- Behaviours inherited from the previous backtest ---
 
 
-def test_all_four_pnl_strategies_are_stored(db_session, seeded_prices):
+def test_all_four_pnl_strategies_are_stored(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
     day = date(2024, 6, 10)
     engine.run_walk_forward(db_session, config(day, day), run_id)
@@ -239,7 +267,7 @@ def test_all_four_pnl_strategies_are_stored(db_session, seeded_prices):
     assert row.pnl_realistic is not None
 
 
-def test_each_run_has_its_own_id(db_session, seeded_prices):
+def test_each_run_has_its_own_id(db_session: Session, seeded_prices: DailyRows) -> None:
     first, second = uuid4(), uuid4()
     day = date(2024, 6, 10)
 
@@ -251,8 +279,8 @@ def test_each_run_has_its_own_id(db_session, seeded_prices):
 
 
 def test_days_without_an_actual_price_are_skipped_and_counted(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     last_loaded = FIRST_DAY + timedelta(days=len(seeded_prices) - 1)
     run_id = uuid4()
 
@@ -268,21 +296,25 @@ def test_days_without_an_actual_price_are_skipped_and_counted(
     assert len(stored(db_session, run_id)) == 3
 
 
-def test_model_parameters_are_stored_for_reproducibility(db_session, seeded_prices):
+def test_model_parameters_are_stored_for_reproducibility(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
     day = date(2024, 6, 10)
     engine.run_walk_forward(db_session, config(day, day), run_id)
 
     (row,) = stored(db_session, run_id)
 
-    assert row.model_params["model_name"] == "linear"
-    assert row.model_params["window_days"] == WINDOW
-    assert row.model_params["target"] == features.LOG_RETURN_TARGET
-    assert row.model_params["train_to"] == "2024-06-09"
+    assert params_of(row)["model_name"] == "linear"
+    assert params_of(row)["window_days"] == WINDOW
+    assert params_of(row)["target"] == features.LOG_RETURN_TARGET
+    assert params_of(row)["train_to"] == "2024-06-09"
     assert row.predicted_at.date() == date(2024, 6, 9)
 
 
-def test_progress_is_logged_every_ten_days(db_session, seeded_prices, caplog):
+def test_progress_is_logged_every_ten_days(
+    db_session: Session, seeded_prices: DailyRows, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.INFO, logger="scripts.backtest_engine")
 
     engine.run_walk_forward(
@@ -293,18 +325,22 @@ def test_progress_is_logged_every_ten_days(db_session, seeded_prices, caplog):
     assert len(progress) == 2  # days 10 and 20
 
 
-def test_default_window_is_the_production_window():
+def test_default_window_is_the_production_window() -> None:
     assert BacktestConfig.default_window() == settings.training_window_days
 
 
-def test_start_must_not_be_after_end(db_session, seeded_prices):
+def test_start_must_not_be_after_end(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     with pytest.raises(ValueError, match="start.*before.*end"):
         engine.run_walk_forward(
             db_session, config(date(2024, 6, 10), date(2024, 6, 9)), uuid4()
         )
 
 
-def test_unknown_model_name_fails_before_writing(db_session, seeded_prices):
+def test_unknown_model_name_fails_before_writing(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     with pytest.raises(ValueError, match="Unknown model"):
         engine.run_walk_forward(
             db_session,
@@ -315,12 +351,12 @@ def test_unknown_model_name_fails_before_writing(db_session, seeded_prices):
 
 
 def test_nothing_is_written_when_a_day_fails_midway(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls = {"n": 0}
-    real = engine.build_prediction_features
+    real = features.build_prediction_features
 
-    def explode_on_third_day(*args, **kwargs):
+    def explode_on_third_day(*args: Any, **kwargs: Any) -> npt.NDArray[np.float64]:
         calls["n"] += 1
         if calls["n"] == 3:
             raise RuntimeError("boom")
@@ -337,11 +373,16 @@ def test_nothing_is_written_when_a_day_fails_midway(
 
 
 def test_a_day_whose_training_fails_is_skipped_and_counted(
-    db_session, seeded_prices, monkeypatch
-):
-    real = engine.build_training_set
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = features.build_training_set
 
-    def fail_on_one_day(closes, volumes, window_days, horizon_days=1):
+    def fail_on_one_day(
+        closes: Sequence[Decimal],
+        volumes: Sequence[Decimal],
+        window_days: int,
+        horizon_days: int = 1,
+    ) -> FeatureSet:
         if len(closes) == (date(2024, 6, 3) - FIRST_DAY).days:  # predicting 06-03
             raise ValueError("bad data")
         return real(closes, volumes, window_days, horizon_days)
@@ -364,22 +405,24 @@ def test_a_day_whose_training_fails_is_skipped_and_counted(
 class NoisyModel:
     """A model whose output depends on the global RNGs, to prove the engine seeds."""
 
-    def train(self, X, y):
+    def train(self, X: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> None:
         import random
 
         import numpy as np
 
         self.offset = float(np.random.normal(0, 0.01)) + random.random() * 0.01
 
-    def predict(self, X):
+    def predict(self, X: npt.NDArray[np.float64]) -> float:
         return self.offset
 
 
-def predicted_prices(db_session, run_id) -> list:
+def predicted_prices(db_session: Session, run_id: UUID) -> list[Decimal]:
     return [row.predicted_price for row in stored(db_session, run_id)]
 
 
-def test_same_seed_same_predictions(db_session, seeded_prices, monkeypatch):
+def test_same_seed_same_predictions(
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Given a fixed random seed, when I run the same backtest twice
     monkeypatch.setattr(engine, "build_model", lambda *args: NoisyModel())
     first, second = uuid4(), uuid4()
@@ -394,8 +437,8 @@ def test_same_seed_same_predictions(db_session, seeded_prices, monkeypatch):
 
 
 def test_a_different_seed_changes_a_seed_dependent_model(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(engine, "build_model", lambda *args: NoisyModel())
     first, second = uuid4(), uuid4()
     days = (date(2024, 6, 1), date(2024, 6, 10))
@@ -406,7 +449,9 @@ def test_a_different_seed_changes_a_seed_dependent_model(
     assert predicted_prices(db_session, first) != predicted_prices(db_session, second)
 
 
-def test_linear_runs_are_identical_with_the_default_seed(db_session, seeded_prices):
+def test_linear_runs_are_identical_with_the_default_seed(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     first, second = uuid4(), uuid4()
     days = (date(2024, 6, 1), date(2024, 6, 20))
 
@@ -416,27 +461,34 @@ def test_linear_runs_are_identical_with_the_default_seed(db_session, seeded_pric
     assert predicted_prices(db_session, first) == predicted_prices(db_session, second)
 
 
-def test_the_seed_is_stored_with_every_result(db_session, seeded_prices):
+def test_the_seed_is_stored_with_every_result(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
     engine.run_walk_forward(
         db_session, config(date(2024, 6, 1), date(2024, 6, 3), seed=123), run_id
     )
 
-    assert {r.model_params["seed"] for r in stored(db_session, run_id)} == {123}
+    assert {params_of(r)["seed"] for r in stored(db_session, run_id)} == {123}
 
 
-def test_the_default_seed_is_42():
+def test_the_default_seed_is_42() -> None:
     assert config(date(2024, 6, 1), date(2024, 6, 2)).seed == 42
 
 
 # --- Retrain frequency ---
 
 
-def count_trainings(monkeypatch) -> list[int]:
+def count_trainings(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     trained_on: list[int] = []
-    real = engine.build_training_set
+    real = features.build_training_set
 
-    def spy(closes, volumes, window_days, horizon_days=1):
+    def spy(
+        closes: Sequence[Decimal],
+        volumes: Sequence[Decimal],
+        window_days: int,
+        horizon_days: int = 1,
+    ) -> FeatureSet:
         trained_on.append(len(closes))
         return real(closes, volumes, window_days, horizon_days)
 
@@ -445,8 +497,8 @@ def count_trainings(monkeypatch) -> list[int]:
 
 
 def test_retrain_every_n_days_trains_on_day_0_n_2n(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     trained_on = count_trainings(monkeypatch)
     start = date(2024, 6, 1)
 
@@ -458,7 +510,9 @@ def test_retrain_every_n_days_trains_on_day_0_n_2n(
     assert trained_on == [first, first + 3, first + 6, first + 9]
 
 
-def test_retrain_every_defaults_to_every_day(db_session, seeded_prices, monkeypatch):
+def test_retrain_every_defaults_to_every_day(
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     trained_on = count_trainings(monkeypatch)
 
     engine.run_walk_forward(
@@ -469,13 +523,15 @@ def test_retrain_every_defaults_to_every_day(db_session, seeded_prices, monkeypa
 
 
 def test_reused_model_still_predicts_from_data_before_each_day(
-    db_session, seeded_prices, monkeypatch
-):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
     by_close = {close: day for day, close, _ in seeded_prices}
     last_closes: list[date] = []
-    real = engine.build_prediction_features
+    real = features.build_prediction_features
 
-    def spy(closes, volumes, window_days):
+    def spy(
+        closes: Sequence[Decimal], volumes: Sequence[Decimal], window_days: int
+    ) -> npt.NDArray[np.float64]:
         last_closes.append(by_close[closes[-1]])
         return real(closes, volumes, window_days)
 
@@ -490,8 +546,8 @@ def test_reused_model_still_predicts_from_data_before_each_day(
 
 
 def test_stored_params_say_how_often_the_model_was_retrained_and_on_what_data(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
     start = date(2024, 6, 1)
 
@@ -500,20 +556,25 @@ def test_stored_params_say_how_often_the_model_was_retrained_and_on_what_data(
     )
 
     rows = stored(db_session, run_id)
-    assert {r.model_params["retrain_every"] for r in rows} == {3}
-    train_to = [r.model_params["train_to"] for r in rows]
+    assert {params_of(r)["retrain_every"] for r in rows} == {3}
+    train_to = [params_of(r)["train_to"] for r in rows]
     assert train_to == ["2024-05-31"] * 3 + ["2024-06-03"] * 3 + ["2024-06-06"]
     for row in rows:  # a reused model never saw the day it predicts
-        assert date.fromisoformat(row.model_params["train_to"]) < row.predicted_for
+        assert date.fromisoformat(params_of(row)["train_to"]) < row.predicted_for
 
 
 def test_a_failed_training_is_retried_the_next_day(
-    db_session, seeded_prices, monkeypatch
-):
-    real = engine.build_training_set
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = features.build_training_set
     calls = {"n": 0}
 
-    def fail_first(closes, volumes, window_days, horizon_days=1):
+    def fail_first(
+        closes: Sequence[Decimal],
+        volumes: Sequence[Decimal],
+        window_days: int,
+        horizon_days: int = 1,
+    ) -> FeatureSet:
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("bad data")
@@ -532,7 +593,9 @@ def test_a_failed_training_is_retried_the_next_day(
 
 
 @pytest.mark.parametrize("retrain_every", [0, -1])
-def test_retrain_every_must_be_positive(db_session, seeded_prices, retrain_every):
+def test_retrain_every_must_be_positive(
+    db_session: Session, seeded_prices: DailyRows, retrain_every: int
+) -> None:
     with pytest.raises(ValueError, match="retrain_every must be >= 1"):
         engine.run_walk_forward(
             db_session,
@@ -544,13 +607,13 @@ def test_retrain_every_must_be_positive(db_session, seeded_prices, retrain_every
 # --- Validation / test split ---
 
 
-def slices(db_session, run_id) -> dict[date, str | None]:
+def slices(db_session: Session, run_id: UUID) -> dict[date, str | None]:
     return {r.predicted_for: r.evaluation_slice for r in stored(db_session, run_id)}
 
 
 def test_the_last_30_percent_of_the_range_is_the_default_test_slice(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
 
     engine.run_walk_forward(
@@ -562,7 +625,9 @@ def test_the_last_30_percent_of_the_range_is_the_default_test_slice(
     assert [d.day for d, s in labels.items() if s == "test"] == [8, 9, 10]
 
 
-def test_an_explicit_test_start_date_splits_the_range(db_session, seeded_prices):
+def test_an_explicit_test_start_date_splits_the_range(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
 
     engine.run_walk_forward(
@@ -579,8 +644,8 @@ def test_an_explicit_test_start_date_splits_the_range(db_session, seeded_prices)
 
 
 def test_a_test_start_on_the_first_day_leaves_no_validation_rows(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
 
     engine.run_walk_forward(
@@ -592,7 +657,9 @@ def test_a_test_start_on_the_first_day_leaves_no_validation_rows(
     assert set(slices(db_session, run_id).values()) == {"test"}
 
 
-def test_a_one_day_range_is_all_test(db_session, seeded_prices):
+def test_a_one_day_range_is_all_test(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
 
     engine.run_walk_forward(
@@ -604,8 +671,8 @@ def test_a_one_day_range_is_all_test(db_session, seeded_prices):
 
 @pytest.mark.parametrize("test_start", [date(2024, 5, 31), date(2024, 6, 11)])
 def test_a_test_start_outside_the_range_is_rejected_before_writing(
-    db_session, seeded_prices, test_start
-):
+    db_session: Session, seeded_prices: DailyRows, test_start: date
+) -> None:
     with pytest.raises(ValueError, match="test start date.*within"):
         engine.run_walk_forward(
             db_session,
@@ -615,22 +682,29 @@ def test_a_test_start_outside_the_range_is_rejected_before_writing(
     assert db_session.query(BacktestResult).count() == 0
 
 
-def test_the_test_start_date_is_stored_with_every_result(db_session, seeded_prices):
+def test_the_test_start_date_is_stored_with_every_result(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     run_id = uuid4()
 
     engine.run_walk_forward(
         db_session, config(date(2024, 6, 1), date(2024, 6, 10)), run_id
     )
 
-    assert {r.model_params["test_start_date"] for r in stored(db_session, run_id)} == {
+    assert {params_of(r)["test_start_date"] for r in stored(db_session, run_id)} == {
         "2024-06-08"
     }
 
 
 def test_a_run_where_every_day_fails_to_train_raises_instead_of_storing_nothing(
-    db_session, seeded_prices, monkeypatch
-):
-    def always_fail(closes, volumes, window_days, horizon_days=1):
+    db_session: Session, seeded_prices: DailyRows, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def always_fail(
+        closes: Sequence[Decimal],
+        volumes: Sequence[Decimal],
+        window_days: int,
+        horizon_days: int = 1,
+    ) -> FeatureSet:
         raise ValueError("X must have 5 features (window_days), got 11")
 
     monkeypatch.setattr(engine, "build_training_set", always_fail)
@@ -645,8 +719,8 @@ def test_a_run_where_every_day_fails_to_train_raises_instead_of_storing_nothing(
 
 @pytest.mark.slow
 def test_a_year_of_linear_predictions_stays_within_the_time_budget(
-    db_session, seeded_prices
-):
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     import time
 
     started = time.perf_counter()

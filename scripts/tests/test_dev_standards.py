@@ -18,14 +18,15 @@ import re
 import subprocess
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]  # PyYAML ships no stubs; types-PyYAML is not a dependency
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_license_file_is_present_and_mit():
+def test_license_file_is_present_and_mit() -> None:
     license_path = REPO_ROOT / "LICENSE"
     assert license_path.exists(), "LICENSE file must exist at repo root"
 
@@ -34,7 +35,7 @@ def test_license_file_is_present_and_mit():
     assert "Permission is hereby granted, free of charge" in content
 
 
-def test_changelog_has_unreleased_and_versioned_sections():
+def test_changelog_has_unreleased_and_versioned_sections() -> None:
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text()
 
     assert "## [Unreleased]" in changelog
@@ -54,7 +55,7 @@ def test_changelog_has_unreleased_and_versioned_sections():
         )
 
 
-def test_changelog_version_matches_pyproject():
+def test_changelog_version_matches_pyproject() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     manifest_version = pyproject["tool"]["poetry"]["version"]
 
@@ -67,14 +68,14 @@ def test_changelog_version_matches_pyproject():
     )
 
 
-def test_gitleaks_hook_configured_in_pre_commit():
+def test_gitleaks_hook_configured_in_pre_commit() -> None:
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text()
 
     assert "gitleaks/gitleaks" in config
     assert "id: gitleaks" in config
 
 
-def test_mypy_strict_configured_for_shared():
+def test_mypy_strict_configured_for_shared() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     mypy_config = pyproject["tool"]["mypy"]
 
@@ -87,8 +88,9 @@ def test_mypy_strict_configured_for_shared():
         "api",
         "scripts",
     ]
-    # Test code outside shared/ is not type-checked yet (documented debt)
-    assert any("/tests/" in pattern for pattern in mypy_config["exclude"])
+    # No test directory is excluded: workers/*/tests, api/tests and scripts/tests
+    # are type-checked with the rest (#158)
+    assert not any("tests" in pattern for pattern in mypy_config["exclude"])
 
     test_overrides = [
         o for o in pyproject["tool"]["mypy"]["overrides"] if o["module"] == "tests.*"
@@ -98,13 +100,13 @@ def test_mypy_strict_configured_for_shared():
     assert test_overrides[0]["strict_optional"] is False
 
 
-def test_mypy_hook_configured_in_pre_commit():
+def test_mypy_hook_configured_in_pre_commit() -> None:
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text()
 
     assert "id: mypy-docker" in config
 
 
-def _pre_push_hook(hook_id: str) -> dict:
+def _pre_push_hook(hook_id: str) -> dict[str, Any]:
     config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
     hooks = [h for repo in config["repos"] for h in repo["hooks"]]
     return next(h for h in hooks if h["id"] == hook_id)
@@ -125,7 +127,7 @@ def _pre_push_hook(hook_id: str) -> dict:
         "Dockerfile.dev",
     ],
 )
-def test_pytest_pre_push_hook_runs_when_code_or_infra_changes(path):
+def test_pytest_pre_push_hook_runs_when_code_or_infra_changes(path: str) -> None:
     hook = _pre_push_hook("pytest-docker")
 
     assert "always_run" not in hook
@@ -136,13 +138,13 @@ def test_pytest_pre_push_hook_runs_when_code_or_infra_changes(path):
     "path",
     ["README.md", "CLAUDE.md", "CHANGELOG.md", ".engram/config.json", "docs/a.md"],
 )
-def test_pytest_pre_push_hook_skips_docs_and_config_only_changes(path):
+def test_pytest_pre_push_hook_skips_docs_and_config_only_changes(path: str) -> None:
     hook = _pre_push_hook("pytest-docker")
 
     assert not re.search(hook["files"], path)
 
 
-def test_dev_api_container_mounts_whole_workspace():
+def test_dev_api_container_mounts_whole_workspace() -> None:
     compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
     volumes = compose["services"]["api"]["volumes"]
 
@@ -151,7 +153,7 @@ def test_dev_api_container_mounts_whole_workspace():
     assert "./api-service:/app/api" in volumes
 
 
-def test_dev_api_container_has_no_single_file_mounts():
+def test_dev_api_container_has_no_single_file_mounts() -> None:
     # A single-file bind mount pins the inode: editing the file on the host
     # (editors replace it) leaves the container with a stale copy.
     compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
@@ -162,13 +164,13 @@ def test_dev_api_container_has_no_single_file_mounts():
         assert not (REPO_ROOT / host_path).is_file(), f"single-file mount: {volume}"
 
 
-def test_trivy_pre_push_hook_always_runs():
+def test_trivy_pre_push_hook_always_runs() -> None:
     hook = _pre_push_hook("trivy-cve-gate")
 
     assert hook["always_run"] is True
 
 
-def test_ci_runs_once_per_change():
+def test_ci_runs_once_per_change() -> None:
     # push on every branch plus pull_request ran the same job twice per commit
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
     triggers = workflow.get("on") or workflow[True]  # PyYAML parses `on` as True
@@ -177,7 +179,7 @@ def test_ci_runs_once_per_change():
     assert "pull_request" in triggers
 
 
-def test_coverage_fail_under_90_configured():
+def test_coverage_fail_under_90_configured() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
 
@@ -200,12 +202,12 @@ REQUIRED_MAKE_TARGETS = [
 ]
 
 
-def test_makefile_default_goal_is_help():
+def test_makefile_default_goal_is_help() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text()
     assert ".DEFAULT_GOAL := help" in makefile
 
 
-def test_makefile_every_target_has_a_description():
+def test_makefile_every_target_has_a_description() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text()
 
     for target in REQUIRED_MAKE_TARGETS:
@@ -214,7 +216,7 @@ def test_makefile_every_target_has_a_description():
         )
 
 
-def test_makefile_local_targets_are_in_a_distinct_section():
+def test_makefile_local_targets_are_in_a_distinct_section() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text()
 
     local_section = makefile.index("##@ Local")
@@ -224,7 +226,7 @@ def test_makefile_local_targets_are_in_a_distinct_section():
         )
 
 
-def test_makefile_test_target_waits_for_postgres_before_pytest():
+def test_makefile_test_target_waits_for_postgres_before_pytest() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text()
 
     test_recipe = makefile.split("\ntest:")[1].split("\n\n")[0]
@@ -238,7 +240,7 @@ def test_makefile_test_target_waits_for_postgres_before_pytest():
     assert pytest_line is not None and wait_line < pytest_line
 
 
-def test_validate_script_is_reused_by_pre_push_hook():
+def test_validate_script_is_reused_by_pre_push_hook() -> None:
     validate_script = (REPO_ROOT / "scripts" / "validate.sh").read_text()
     run_tests_hook = (REPO_ROOT / "scripts" / "hooks" / "run-tests.sh").read_text()
 
@@ -253,7 +255,7 @@ def test_validate_script_is_reused_by_pre_push_hook():
     assert "ruff check" not in run_tests_hook
 
 
-def test_validate_script_checks_lockfile_before_tests():
+def test_validate_script_checks_lockfile_before_tests() -> None:
     validate_script = (REPO_ROOT / "scripts" / "validate.sh").read_text()
 
     lockfile_check = "docker compose exec -T api poetry check --lock"
@@ -262,7 +264,9 @@ def test_validate_script_checks_lockfile_before_tests():
     assert "Lockfile out of sync" in validate_script
 
 
-def test_validate_script_stops_before_pytest_when_lockfile_is_stale(tmp_path):
+def test_validate_script_stops_before_pytest_when_lockfile_is_stale(
+    tmp_path: Path,
+) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     calls = tmp_path / "calls.log"
@@ -292,7 +296,7 @@ def test_validate_script_stops_before_pytest_when_lockfile_is_stale(tmp_path):
     assert "pytest --cov" not in calls.read_text()
 
 
-def test_production_dockerfile_base_pinned_by_digest():
+def test_production_dockerfile_base_pinned_by_digest() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
 
     assert re.search(
@@ -302,7 +306,7 @@ def test_production_dockerfile_base_pinned_by_digest():
     ), "Production Dockerfile base stage must be pinned by a sha256 digest"
 
 
-def test_api_service_caps_sqlalchemy_below_2_1():
+def test_api_service_caps_sqlalchemy_below_2_1() -> None:
     # api-service has no lock, so a clean dev build re-resolves it. SQLAlchemy
     # 2.1 defaults to psycopg v3 (we ship psycopg2) and the API fails to boot.
     pyproject = tomllib.loads(
@@ -312,7 +316,7 @@ def test_api_service_caps_sqlalchemy_below_2_1():
     assert pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"] == ">=2.0,<2.1"
 
 
-def test_dev_dockerfile_keeps_floating_tag():
+def test_dev_dockerfile_keeps_floating_tag() -> None:
     dockerfile_dev = (REPO_ROOT / "Dockerfile.dev").read_text()
 
     assert re.search(r"^FROM python:3\.13-slim$", dockerfile_dev, re.MULTILINE), (
@@ -321,7 +325,7 @@ def test_dev_dockerfile_keeps_floating_tag():
     assert "@sha256:" not in dockerfile_dev
 
 
-def test_production_dockerfile_api_stage_has_healthcheck():
+def test_production_dockerfile_api_stage_has_healthcheck() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
 
     api_stage = dockerfile.split("FROM base AS api")[1].split("FROM base AS")[0]
@@ -329,7 +333,7 @@ def test_production_dockerfile_api_stage_has_healthcheck():
     assert "/health" in api_stage
 
 
-def test_production_dockerfile_batch_stages_have_no_healthcheck():
+def test_production_dockerfile_batch_stages_have_no_healthcheck() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
 
     fetch_stage = dockerfile.split("FROM base AS fetch")[1].split(
@@ -341,7 +345,7 @@ def test_production_dockerfile_batch_stages_have_no_healthcheck():
     assert "HEALTHCHECK" not in ml_worker_stage
 
 
-def test_docker_compose_api_service_has_healthcheck():
+def test_docker_compose_api_service_has_healthcheck() -> None:
     compose = (REPO_ROOT / "docker-compose.yml").read_text()
 
     api_service = compose.split("\n  api:")[1].split("\nvolumes:")[0]

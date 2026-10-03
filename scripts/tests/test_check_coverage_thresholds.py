@@ -55,7 +55,7 @@ def write_config(path: Path, thresholds: dict[str, object]) -> Path:
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path: Path) -> Path:
     return write_config(tmp_path / "pyproject.toml", {TRAINER: 90, MODEL: 80})
 
 
@@ -67,8 +67,8 @@ def run_gate(report: Path, config: Path) -> int:
 
 
 def test_gate_passes_when_every_critical_module_meets_its_threshold(
-    tmp_path, config, capsys
-):
+    tmp_path: Path, config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     report = write_report(
         tmp_path / "coverage.xml",
         {TRAINER: (95, 5), MODEL: (85, 15), "other.py": (1, 9)},
@@ -78,13 +78,13 @@ def test_gate_passes_when_every_critical_module_meets_its_threshold(
     assert "All 2 critical modules meet their threshold" in capsys.readouterr().out
 
 
-def test_a_module_exactly_at_its_threshold_passes(tmp_path, config):
+def test_a_module_exactly_at_its_threshold_passes(tmp_path: Path, config: Path) -> None:
     report = write_report(tmp_path / "coverage.xml", {TRAINER: (90, 10), MODEL: (4, 1)})
 
     assert run_gate(report, config) == 0
 
 
-def test_the_real_thresholds_pass_on_a_fully_covered_report(tmp_path):
+def test_the_real_thresholds_pass_on_a_fully_covered_report(tmp_path: Path) -> None:
     thresholds = load_thresholds(DEFAULT_CONFIG)
     report = write_report(
         tmp_path / "coverage.xml", {module: (10, 0) for module in thresholds}
@@ -96,7 +96,9 @@ def test_the_real_thresholds_pass_on_a_fully_covered_report(tmp_path):
 # Scenario: Missing worker coverage fails the gate
 
 
-def test_gate_fails_and_names_a_module_below_its_threshold(tmp_path, config, capsys):
+def test_gate_fails_and_names_a_module_below_its_threshold(
+    tmp_path: Path, config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     report = write_report(tmp_path / "coverage.xml", {TRAINER: (50, 50), MODEL: (9, 1)})
 
     assert run_gate(report, config) == 1
@@ -106,8 +108,8 @@ def test_gate_fails_and_names_a_module_below_its_threshold(tmp_path, config, cap
 
 
 def test_gate_fails_and_names_a_module_missing_from_the_report(
-    tmp_path, config, capsys
-):
+    tmp_path: Path, config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     report = write_report(tmp_path / "coverage.xml", {MODEL: (10, 0)})
 
     assert run_gate(report, config) == 1
@@ -115,15 +117,17 @@ def test_gate_fails_and_names_a_module_missing_from_the_report(
 
 
 def test_a_module_with_no_executed_lines_fails_with_zero_coverage(
-    tmp_path, config, capsys
-):
+    tmp_path: Path, config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     report = write_report(tmp_path / "coverage.xml", {TRAINER: (0, 40), MODEL: (10, 0)})
 
     assert run_gate(report, config) == 1
     assert f"{TRAINER}: 0.0% covered" in capsys.readouterr().err
 
 
-def test_the_real_thresholds_fail_naming_an_unexercised_worker(tmp_path, capsys):
+def test_the_real_thresholds_fail_naming_an_unexercised_worker(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     thresholds = load_thresholds(DEFAULT_CONFIG)
     covered = {module: (10, 0) for module in thresholds if module != TRAINER}
     report = write_report(tmp_path / "coverage.xml", covered)
@@ -132,7 +136,9 @@ def test_the_real_thresholds_fail_naming_an_unexercised_worker(tmp_path, capsys)
     assert TRAINER in capsys.readouterr().err
 
 
-def test_api_files_are_matched_after_the_container_path_is_normalized(tmp_path):
+def test_api_files_are_matched_after_the_container_path_is_normalized(
+    tmp_path: Path,
+) -> None:
     report = write_report(tmp_path / "coverage.xml", {"api/api/main.py": (10, 0)})
     config = write_config(tmp_path / "pyproject.toml", {"api-service/api/main.py": 95})
 
@@ -152,11 +158,13 @@ def test_api_files_are_matched_after_the_container_path_is_normalized(tmp_path):
         ("workers/daily/trainer.py", "workers/daily/trainer.py"),
     ],
 )
-def test_normalize_filename_matches_the_sonar_coverage_target(filename, expected):
+def test_normalize_filename_matches_the_sonar_coverage_target(
+    filename: str, expected: str
+) -> None:
     assert normalize_filename(filename) == expected
 
 
-def test_parse_coverage_xml_counts_lines_that_were_hit(tmp_path):
+def test_parse_coverage_xml_counts_lines_that_were_hit(tmp_path: Path) -> None:
     report = write_report(
         tmp_path / "coverage.xml", {TRAINER: (3, 1), "empty.py": (0, 0)}
     )
@@ -167,7 +175,7 @@ def test_parse_coverage_xml_counts_lines_that_were_hit(tmp_path):
     assert parsed["empty.py"].percent == 100.0
 
 
-def test_evaluate_lists_every_failing_module_in_order():
+def test_evaluate_lists_every_failing_module_in_order() -> None:
     coverage = {"b.py": FileCoverage(1, 2), "c.py": FileCoverage(2, 2)}
 
     failures = evaluate({"c.py": 100, "b.py": 90, "a.py": 50}, coverage)
@@ -180,8 +188,8 @@ def test_evaluate_lists_every_failing_module_in_order():
 
 @pytest.mark.parametrize("bad_value", ['"95"', "true", "-1", "101"])
 def test_a_threshold_outside_0_to_100_is_a_configuration_error(
-    tmp_path, bad_value, capsys
-):
+    tmp_path: Path, bad_value: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = write_config(tmp_path / "pyproject.toml", {TRAINER: bad_value})
     report = write_report(tmp_path / "coverage.xml", {TRAINER: (10, 0)})
 
@@ -189,7 +197,9 @@ def test_a_threshold_outside_0_to_100_is_a_configuration_error(
     assert TRAINER in capsys.readouterr().err
 
 
-def test_a_config_without_the_section_is_a_configuration_error(tmp_path, capsys):
+def test_a_config_without_the_section_is_a_configuration_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = tmp_path / "pyproject.toml"
     config.write_text("[tool.other]\nx = 1\n")
     report = write_report(tmp_path / "coverage.xml", {TRAINER: (10, 0)})
@@ -198,7 +208,9 @@ def test_a_config_without_the_section_is_a_configuration_error(tmp_path, capsys)
     assert "coverage_thresholds" in capsys.readouterr().err
 
 
-def test_a_missing_report_is_an_error_not_a_pass(tmp_path, config, capsys):
+def test_a_missing_report_is_an_error_not_a_pass(
+    tmp_path: Path, config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert run_gate(tmp_path / "absent.xml", config) == 2
     assert "Cannot check coverage thresholds" in capsys.readouterr().err
 
@@ -206,7 +218,7 @@ def test_a_missing_report_is_an_error_not_a_pass(tmp_path, config, capsys):
 # The configuration itself
 
 
-def test_every_configured_module_exists_in_the_repo():
+def test_every_configured_module_exists_in_the_repo() -> None:
     orphans = [
         module
         for module in load_thresholds(DEFAULT_CONFIG)
@@ -237,5 +249,5 @@ REQUIRED_CRITICAL_MODULES = [
 
 
 @pytest.mark.parametrize("module", REQUIRED_CRITICAL_MODULES)
-def test_critical_modules_keep_a_threshold(module):
+def test_critical_modules_keep_a_threshold(module: str) -> None:
     assert module in load_thresholds(DEFAULT_CONFIG)

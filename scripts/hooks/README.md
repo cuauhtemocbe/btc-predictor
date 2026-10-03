@@ -20,7 +20,7 @@ pre-commit install --hook-type pre-push
 ### Pre-commit (before each commit)
 - ✅ **Ruff lint** - Catches code issues, auto-fixes when possible (`shared`, `api-service`, `workers`, `scripts`)
 - ✅ **Ruff format** - Ensures consistent code style (same paths)
-- ✅ **mypy --strict** - Runs in Docker on `shared`, `workers`, `api` and `scripts` (`scripts/hooks/run-mypy.sh`, same command as CI)
+- ✅ **mypy --strict** - Runs in Docker on `shared`, `workers`, `api` and `scripts`, test code included (`scripts/hooks/run-mypy.sh`, same command as CI)
 
 ### Pre-push (before pushing to remote)
 - ✅ **Trivy CVE gate** - Fails closed on CRITICAL, fixable vulnerabilities (runs before tests, fast-fail)

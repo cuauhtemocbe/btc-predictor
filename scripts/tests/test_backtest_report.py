@@ -8,12 +8,14 @@ report puts the model next to the baselines, with the sample size and the edge.
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.orm import Session
 
 from scripts import backtest_report
 from scripts.backtest_report import build_report, format_report
+from scripts.tests.helpers import DailyRows
 from shared.baselines import EvaluatedDay, evaluate_baselines
 from shared.db.models import BacktestResult
 
@@ -21,7 +23,15 @@ VALIDATION_DAYS = [date(2024, 6, d) for d in range(1, 11)]  # 10 days
 TEST_DAYS = [date(2024, 6, d) for d in range(11, 21)]  # 10 days
 
 
-def add_rows(db_session, closes, days, evaluation_slice, *, correct, run_id):
+def add_rows(
+    db_session: Session,
+    closes: dict[date, Decimal],
+    days: list[date],
+    evaluation_slice: str | None,
+    *,
+    correct: bool,
+    run_id: UUID,
+) -> None:
     """Store rows whose predicted direction is always right or always wrong."""
     for day in days:
         before, actual = closes[day - timedelta(days=1)], closes[day]
@@ -51,12 +61,12 @@ def add_rows(db_session, closes, days, evaluation_slice, *, correct, run_id):
 
 
 @pytest.fixture
-def closes(seeded_prices):
+def closes(seeded_prices: DailyRows) -> dict[date, Decimal]:
     return {day: close for day, close, _ in seeded_prices}
 
 
 @pytest.fixture
-def split_run(db_session, closes):
+def split_run(db_session: Session, closes: dict[date, Decimal]) -> UUID:
     """A run whose validation slice is all right and whose test slice is all wrong."""
     run_id = uuid4()
     add_rows(
@@ -66,9 +76,11 @@ def split_run(db_session, closes):
     return run_id
 
 
-def independent_days(closes, days, correct):
+def independent_days(
+    closes: dict[date, Decimal], days: list[date], correct: bool
+) -> list[EvaluatedDay]:
     """Evaluated days built straight from the prices, not from stored rows."""
-    out = []
+    out: list[EvaluatedDay] = []
     for day in days:
         before, actual = closes[day - timedelta(days=1)], closes[day]
         went_up = actual >= before
@@ -88,7 +100,9 @@ def independent_days(closes, days, correct):
 # --- Scenario: Metrics are computed only on the out-of-sample period ---
 
 
-def test_headline_metrics_use_only_the_test_slice(db_session, split_run):
+def test_headline_metrics_use_only_the_test_slice(
+    db_session: Session, split_run: UUID
+) -> None:
     # Given a backtest with a validation slice used for tuning and a test slice
     # When the report is produced
     report = build_report(db_session, split_run)
@@ -104,7 +118,9 @@ def test_headline_metrics_use_only_the_test_slice(db_session, split_run):
     assert validation.baselines.n_days == len(VALIDATION_DAYS)
 
 
-def test_the_text_keeps_validation_out_of_the_headline(db_session, split_run):
+def test_the_text_keeps_validation_out_of_the_headline(
+    db_session: Session, split_run: UUID
+) -> None:
     text = format_report(build_report(db_session, split_run))
 
     headline, _, validation = text.partition("Validation slice")
@@ -119,8 +135,8 @@ def test_the_text_keeps_validation_out_of_the_headline(db_session, split_run):
 
 
 def test_baselines_are_computed_on_exactly_the_headline_days(
-    db_session, split_run, closes
-):
+    db_session: Session, split_run: UUID, closes: dict[date, Decimal]
+) -> None:
     report = build_report(db_session, split_run)
 
     expected = evaluate_baselines(independent_days(closes, TEST_DAYS, correct=False))
@@ -130,8 +146,8 @@ def test_baselines_are_computed_on_exactly_the_headline_days(
 
 
 def test_persistence_covers_every_day_because_previous_close_comes_from_prices(
-    db_session, split_run
-):
+    db_session: Session, split_run: UUID
+) -> None:
     # a run's first row has no previous row, but its D-2 close is in `prices`
     report = build_report(db_session, split_run)
 
@@ -141,8 +157,8 @@ def test_persistence_covers_every_day_because_previous_close_comes_from_prices(
 
 
 def test_buy_and_hold_pnl_is_reported_for_the_test_period(
-    db_session, split_run, closes
-):
+    db_session: Session, split_run: UUID, closes: dict[date, Decimal]
+) -> None:
     report = build_report(db_session, split_run)
 
     assert report.headline.baselines.buy_and_hold_pnl == (
@@ -151,13 +167,13 @@ def test_buy_and_hold_pnl_is_reported_for_the_test_period(
 
 
 def test_model_pnl_is_the_sum_of_its_simple_strategy_over_the_slice(
-    db_session, split_run
-):
+    db_session: Session, split_run: UUID
+) -> None:
     report = build_report(db_session, split_run)
 
     expected = sum(
         (
-            r.pnl_simple
+            r.pnl_simple or Decimal(0)
             for r in db_session.query(BacktestResult).filter_by(evaluation_slice="test")
         ),
         Decimal(0),
@@ -165,7 +181,9 @@ def test_model_pnl_is_the_sum_of_its_simple_strategy_over_the_slice(
     assert report.headline.model_pnl == expected
 
 
-def test_the_report_states_the_sample_size_and_the_edge(db_session, split_run):
+def test_the_report_states_the_sample_size_and_the_edge(
+    db_session: Session, split_run: UUID
+) -> None:
     text = format_report(build_report(db_session, split_run))
 
     assert f"{len(TEST_DAYS)} evaluated days" in text
@@ -175,7 +193,9 @@ def test_the_report_states_the_sample_size_and_the_edge(db_session, split_run):
     assert "approximation" in text.lower()
 
 
-def test_run_configuration_is_part_of_the_report(db_session, split_run):
+def test_run_configuration_is_part_of_the_report(
+    db_session: Session, split_run: UUID
+) -> None:
     text = format_report(build_report(db_session, split_run))
 
     assert "Model: linear" in text
@@ -188,7 +208,9 @@ def test_run_configuration_is_part_of_the_report(db_session, split_run):
 # --- Scenario: no evaluated days, legacy rows ---
 
 
-def test_an_empty_test_slice_is_unavailable_not_zero(db_session, closes):
+def test_an_empty_test_slice_is_unavailable_not_zero(
+    db_session: Session, closes: dict[date, Decimal]
+) -> None:
     run_id = uuid4()
     add_rows(
         db_session, closes, VALIDATION_DAYS, "validation", correct=True, run_id=run_id
@@ -204,7 +226,9 @@ def test_an_empty_test_slice_is_unavailable_not_zero(db_session, closes):
     assert "0.00%" not in headline
 
 
-def test_rows_without_a_slice_are_reported_as_unsplit(db_session, closes):
+def test_rows_without_a_slice_are_reported_as_unsplit(
+    db_session: Session, closes: dict[date, Decimal]
+) -> None:
     run_id = uuid4()
     add_rows(db_session, closes, TEST_DAYS, None, correct=True, run_id=run_id)
 
@@ -217,14 +241,16 @@ def test_rows_without_a_slice_are_reported_as_unsplit(db_session, closes):
     assert "unavailable" in text.partition("Unsplit")[0]
 
 
-def test_unknown_run_has_no_report(db_session, seeded_prices):
+def test_unknown_run_has_no_report(
+    db_session: Session, seeded_prices: DailyRows
+) -> None:
     with pytest.raises(ValueError, match="No backtest results for run"):
         build_report(db_session, uuid4())
 
 
 def test_a_day_without_a_previous_close_is_left_out_of_persistence_only(
-    db_session, closes
-):
+    db_session: Session, closes: dict[date, Decimal]
+) -> None:
     run_id = uuid4()
     first = date(2023, 1, 2)  # D-2 (2022-12-31) is before the loaded history
     db_session.add(
@@ -251,7 +277,9 @@ def test_a_day_without_a_previous_close_is_left_out_of_persistence_only(
 # --- Command line ---
 
 
-def test_the_report_command_prints_a_stored_run(db_session, split_run, capsys):
+def test_the_report_command_prints_a_stored_run(
+    db_session: Session, split_run: UUID, capsys: pytest.CaptureFixture[str]
+) -> None:
     from contextlib import nullcontext
 
     code = backtest_report.main(
@@ -262,7 +290,11 @@ def test_the_report_command_prints_a_stored_run(db_session, split_run, capsys):
     assert "Headline: test slice (out-of-sample)" in capsys.readouterr().out
 
 
-def test_the_report_command_fails_for_an_unknown_run(db_session, capsys, caplog):
+def test_the_report_command_fails_for_an_unknown_run(
+    db_session: Session,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from contextlib import nullcontext
 
     code = backtest_report.main(
