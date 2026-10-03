@@ -36,8 +36,8 @@ test-v: ## Run the test suite in Docker, verbose (waits for postgres to be healt
 	docker compose up -d --wait postgres
 	docker compose run --rm api pytest -v
 
-lint: ## Lint shared/api-service/workers with ruff in Docker
-	docker compose run --rm api ruff check shared api workers
+lint: ## Lint shared/api-service/workers/scripts with ruff in Docker
+	docker compose run --rm api ruff check shared api workers scripts
 
 validate: ## Run the full local quality gate: lockfile + lint + format + tests
 	./scripts/validate.sh
@@ -58,4 +58,4 @@ test-local: ## Run tests locally with Poetry
 	poetry run pytest -v
 
 lint-local: ## Lint locally with Poetry
-	poetry run ruff check shared api-service workers
+	poetry run ruff check shared api-service workers scripts

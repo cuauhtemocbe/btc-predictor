@@ -14,6 +14,7 @@ from api.models.predictions import (
     StrategiesResponse,
     StrategyMetrics,
 )
+from api.numeric import required_float
 from api.symbols import DEFAULT_SYMBOL, SymbolQuery
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
@@ -86,12 +87,12 @@ async def get_prediction_history(
             predicted_at=p.predicted_at,
             price_at_prediction=float(p.price_at_prediction),
             predicted_price=float(p.predicted_price),
-            actual_price=float(p.actual_price),
+            actual_price=required_float(p.actual_price, "actual_price"),
             evaluated_at=p.evaluated_at,
-            error_abs=float(p.error_abs),
-            error_pct=float(p.error_pct),
+            error_abs=required_float(p.error_abs, "error_abs"),
+            error_pct=required_float(p.error_pct, "error_pct"),
             direction_correct=p.direction_correct,
-            pnl_simulated=float(p.pnl_simulated),
+            pnl_simulated=required_float(p.pnl_simulated, "pnl_simulated"),
             model_name=p.model.name,
             model_version=p.model.version,
             timeframe=p.timeframe,
@@ -142,7 +143,7 @@ async def get_total_pnl(
             Prediction.timeframe == timeframe,
             Model.symbol == symbol,
         )
-        .first()
+        .one()
     )
 
     # Handle case where no evaluated predictions exist (result[0] will be None)

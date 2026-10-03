@@ -108,7 +108,7 @@ def build_arguments(
     ]
 
 
-def main():
+def main() -> None:
     """
     Execute the production-parity backtest.
 

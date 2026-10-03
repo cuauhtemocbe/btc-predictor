@@ -48,7 +48,11 @@ def snapshot(
         body += block(
             name, statuses.get(name, status), f"{name}-{suffix}", extras[name]
         )
-    body += "Postgres (linked)\n    status:        ● Online\n    image:         postgres:18\n\n"
+    body += (
+        "Postgres (linked)\n"
+        "    status:        ● Online\n"
+        "    image:         postgres:18\n\n"
+    )
     return body
 
 
@@ -75,7 +79,8 @@ def railway_stub(tmp_path):
                     n=$(cat "$state/calls" 2>/dev/null || echo 0)
                     echo $((n + 1)) > "$state/calls"
                     file="$state/snapshot_$n"
-                    [[ -f "$file" ]] || file=$(ls "$state"/snapshot_* | sort -V | tail -1)
+                    [[ -f "$file" ]] ||
+                        file=$(ls "$state"/snapshot_* | sort -V | tail -1)
                     cat "$file"
                     ;;
                 "status "*|"logs "*) ;;

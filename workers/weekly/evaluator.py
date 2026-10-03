@@ -35,7 +35,7 @@ from shared.utils import (
     calculate_pnl_realistic,
     calculate_pnl_threshold,
 )
-from workers.daily.evaluator import fetch_actual_price
+from workers.daily.evaluator import EvaluationMetrics, fetch_actual_price
 
 # Configure logging
 logging.basicConfig(
@@ -133,7 +133,7 @@ def calculate_direction_correct(
 
 def calculate_metrics(
     prediction: Prediction, actual_price: Decimal
-) -> dict[str, Decimal | bool]:
+) -> EvaluationMetrics:
     """
     Calculate all evaluation metrics for a weekly prediction.
 
@@ -222,7 +222,7 @@ def update_prediction(
     session: Session,
     prediction: Prediction,
     actual_price: Decimal,
-    metrics: dict[str, Decimal | bool],
+    metrics: EvaluationMetrics,
 ) -> None:
     """
     Update a prediction record with evaluation results.

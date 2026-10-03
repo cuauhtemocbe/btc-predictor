@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -7,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from api.numeric import required_float
 from api.routers import router
 from api.routers.backtesting import router as backtesting_router
 from api.routers.models import router as models_router
@@ -36,7 +38,7 @@ async def dashboard(
     db: Session = Depends(get_db),
     timeframe: str | None = None,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
-):
+) -> HTMLResponse:
     """
     Render the main dashboard showing prediction history.
 
@@ -66,12 +68,12 @@ async def dashboard(
             "predicted_at": p.predicted_at,
             "price_at_prediction": float(p.price_at_prediction),
             "predicted_price": float(p.predicted_price),
-            "actual_price": float(p.actual_price),
+            "actual_price": required_float(p.actual_price, "actual_price"),
             "evaluated_at": p.evaluated_at,
-            "error_abs": float(p.error_abs),
-            "error_pct": float(p.error_pct),
+            "error_abs": required_float(p.error_abs, "error_abs"),
+            "error_pct": required_float(p.error_pct, "error_pct"),
             "direction_correct": p.direction_correct,
-            "pnl_simulated": float(p.pnl_simulated),
+            "pnl_simulated": required_float(p.pnl_simulated, "pnl_simulated"),
             "model_name": p.model.name,
             "model_version": p.model.version,
         }
@@ -92,8 +94,10 @@ async def dashboard(
     )
 
 
-@app.get("/health")
-async def health(db: Session = Depends(get_db)):
+@app.get("/health", response_model=None)
+async def health(
+    db: Annotated[Session, Depends(get_db)],
+) -> JSONResponse | dict[str, str]:
     """
     Report API and database health.
 

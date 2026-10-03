@@ -231,7 +231,7 @@ def get_recent_series(
         .order_by(latest_per_day.c.day.desc())
     )
 
-    rows = session.execute(stmt).all()
+    rows = list(session.execute(stmt).all())
 
     if len(rows) < days:
         raise ValueError(f"Insufficient data: need {days} days, have {len(rows)}")

@@ -25,8 +25,8 @@ WINDOW = 5
 def test_backtest_stores_one_result_per_day(db_session, seeded_prices, model):
     # Given the model, when I backtest 2024-01-01 to 2024-03-31
     run_id = uuid4()
-    # retraining once (91 days = the whole range) keeps the heavy models fast; the frequency is stored
-    # in every row and printed in the report
+    # retraining once (91 days = the whole range) keeps the heavy models fast;
+    # the frequency is stored in every row and printed in the report
     config = BacktestConfig(
         model_name=model,
         window_days=WINDOW,

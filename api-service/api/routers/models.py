@@ -46,7 +46,7 @@ async def models_dashboard(
     ),
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
-):
+) -> HTMLResponse:
     """
     Render model comparison dashboard with metrics table and cumulative PnL chart.
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🔍 Running mypy --strict on shared/ in Docker..."
+echo "🔍 Running mypy --strict on shared, workers, api and scripts in Docker..."
 
 if ! docker compose ps | grep -q "api.*running"; then
     echo "📦 Starting Docker Compose services..."
@@ -23,10 +23,10 @@ if ! docker compose ps | grep -q "api.*running"; then
     fi
 fi
 
-if ! docker compose exec -T api sh -c "cd /app && python -m mypy shared/shared shared/btc_shared shared/tests"; then
-    echo "❌ mypy found type errors in shared/. Fix them before committing."
+if ! docker compose exec -T api sh -c "cd /app && python -m mypy shared/shared shared/btc_shared shared/tests workers api scripts"; then
+    echo "❌ mypy found type errors. Fix them before committing."
     exit 1
 fi
 
-echo "✅ mypy --strict passed on shared/"
+echo "✅ mypy --strict passed on shared, workers, api and scripts"
 exit 0
