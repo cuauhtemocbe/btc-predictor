@@ -2,6 +2,8 @@
 
 Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usando modelos de Machine Learning. Registra predicciones, calcula errores históricos y simula PnL (ganancia/pérdida) basado en la dirección predicha.
 
+**Es un proyecto de aprendizaje, no asesoría financiera.** Cada resultado se compara contra baselines triviales y, como muestra la sección [Resultados](#-resultados), el modelo actual **no supera de forma significativa** a esos baselines.
+
 ---
 
 ## 🚀 Estado del Proyecto
@@ -21,32 +23,39 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 - **Framework Web:** FastAPI + Jinja2
 - **Base de datos:** PostgreSQL + SQLAlchemy 2.0 + Alembic
 - **Machine Learning:** scikit-learn, pandas, numpy
-- **Fuente de datos:** CoinGecko API (migrado desde Binance)
-- **Deploy:** Railway (4 servicios: postgres, api, fetch-price, daily)
+- **Fuente de datos:** Binance vía [data.binance.vision](https://data.binance.vision) (archivos de historial y diarios) con REST `data-api.binance.vision` como respaldo. Gratis y sin API key.
+- **Activos:** `BTCUSDT` y `PAXGUSDT` (proxy del oro)
+- **Deploy:** Railway (6 servicios: postgres, api, fetch-price, daily, weekly-predictor, monthly-backtest)
 - **Gestión de dependencias:** Poetry (monorepo con paquetes internos)
 
 ---
 
-## 🏗️ Arquitectura Objetivo
+## 🏗️ Arquitectura
 
-El proyecto se despliega como **4 servicios en Railway**:
+El proyecto se despliega como **6 servicios en Railway**:
 
 ```
-┌─────────────┐
-│  postgres   │  Plugin nativo de Railway
-└─────────────┘
-      ↓
-┌─────────────┐
-│     api     │  Servicio web siempre activo (FastAPI + Dashboard)
-└─────────────┘
-      ↓
-┌─────────────┐
-│ fetch-price │  Cron diario (6am): obtiene precios de CoinGecko
-└─────────────┘
-      ↓
-┌─────────────┐
-│    daily    │  Cron diario (7am): evalúa → entrena → predice
-└─────────────┘
+┌──────────────────┐
+│     postgres     │  Plugin nativo de Railway
+└──────────────────┘
+         ↓
+┌──────────────────┐
+│       api        │  Servicio web siempre activo (FastAPI + Dashboard)
+└──────────────────┘
+         ↓
+┌──────────────────┐
+│   fetch-price    │  Cron diario 6am UTC: guarda la vela diaria cerrada de cada símbolo
+└──────────────────┘
+         ↓
+┌──────────────────┐
+│      daily       │  Cron diario 7am UTC: evalúa → entrena → predice (horizonte 1 día)
+└──────────────────┘
+┌──────────────────┐
+│ weekly-predictor │  Cron lunes 7am UTC: evalúa → entrena → predice (horizonte 7 días)
+└──────────────────┘
+┌──────────────────┐
+│ monthly-backtest │  Cron día 1 de cada mes, 00:00 UTC: backtest walk-forward con la configuración de producción
+└──────────────────┘
 ```
 
 **Ver documentación completa:** [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)
@@ -59,7 +68,11 @@ El proyecto se despliega como **4 servicios en Railway**:
 btc-predictor/
 ├── shared/              # Paquete compartido: shared
 │   ├── shared/
-│   │   ├── config.py    # Configuración (DATABASE_URL, etc.)
+│   │   ├── config.py    # Configuración (DATABASE_URL, TRAINING_WINDOW_DAYS)
+│   │   ├── assets.py    # Activos soportados (BTCUSDT, PAXGUSDT)
+│   │   ├── binance_vision.py  # Historial y velas diarias de Binance
+│   │   ├── features.py  # Features basadas en retornos (producción y backtest)
+│   │   ├── baselines.py # always-up, persistence, buy-and-hold y p-value
 │   │   ├── db/          # SQLAlchemy models, engine, CRUD
 │   │   └── utils.py     # Helpers (PnL, cálculo de errores)
 │   └── alembic/         # Migraciones de base de datos
@@ -71,9 +84,11 @@ btc-predictor/
 │       └── templates/   # Dashboard HTML (Jinja2)
 │
 └── workers/
-    ├── fetch_price/     # Cron horario: fetch precios BTC
-    └── daily/           # Cron diario: evaluate → train → predict
-        └── models/      # BaseModel abstract + modelos ML
+    ├── fetch_price/     # Cron diario: vela diaria cerrada de cada símbolo
+    ├── daily/           # Cron diario: evaluate → train → predict
+    │   └── models/      # BaseModel abstract + modelos ML
+    ├── weekly/          # Cron semanal: evaluate → train → predict (7 días)
+    └── backtest/        # Cron mensual: backtest walk-forward
 ```
 
 **Nota:** Estructura final implementada. Todos los workers están funcionando en Railway.
@@ -84,16 +99,70 @@ btc-predictor/
 
 ### Tablas principales
 
-1. **`prices`** — Precios horarios OHLCV desde CoinGecko
-   - Constraint UNIQUE en `timestamp` (idempotencia)
+1. **`prices`** — Una vela diaria OHLCV por símbolo, desde Binance
+   - `symbol` (`BTCUSDT`, `PAXGUSDT`) y `timestamp` (apertura de la vela, 00:00 UTC)
+   - Constraint UNIQUE en `(symbol, timestamp)` (idempotencia)
 
 2. **`models`** — Modelos ML entrenados (serializados con pickle)
    - Columna `artifact` (BYTEA) contiene el modelo
-   - Solo 1 modelo activo por nombre
+   - Solo 1 modelo activo por `(symbol, name, timeframe)`
 
-3. **`predictions`** — Predicciones diarias + evaluación
+3. **`predictions`** — Predicciones + evaluación (horizontes `1d` y `1w`)
    - Fase 1: Insertar predicción (hoy predice mañana)
-   - Fase 2: Evaluar al día siguiente (calcular error, PnL)
+   - Fase 2: Evaluar cuando la vela que la liquida ya está guardada (calcular error, PnL)
+
+4. **`backtest_results`** — Una fila por día de cada corrida walk-forward
+   - `backtest_run_id` (UUID por corrida) y `evaluation_slice` (`validation` o `test`)
+
+---
+
+## 🧭 Enfoque
+
+- **Datos:** una vela diaria cerrada (UTC) por símbolo, de [data.binance.vision](https://data.binance.vision). Es gratis, trae volumen y tiene historial desde 2017-08 (BTC) y 2020-08 (PAXG). La fuente anterior se reemplazó (#102) porque solo daba 30 días de historial y no traía volumen.
+- **Features:** `W` retornos logarítmicos rezagados, su desviación estándar (volatilidad) y `W` cambios logarítmicos de volumen. `W` es `TRAINING_WINDOW_DAYS` (21 por defecto).
+- **Modelo:** regresión lineal que predice el retorno logarítmico del día siguiente; el precio predicho es `último cierre × exp(retorno predicho)`. XGBoost, LSTM y ARIMA existen pero están desactivados hasta la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124).
+- **Evaluación honesta:** cada exactitud o PnL se muestra junto a tres baselines (*always-up*, *persistence* y *buy-and-hold*) sobre los mismos días, con el tamaño de muestra, la ventaja (edge) y un p-value binomial. El backtest usa el mismo código de features y modelos que producción y separa un tramo de validación de un tramo de test que nunca se usa para decidir nada.
+- **Oro vía PAXG:** Binance no tiene un par de oro spot (XAU). El dashboard muestra el oro con `PAXGUSDT`, el token PAX Gold (1 token = 1 onza troy de oro físico), que opera 24/7. Es un **proxy**, no XAU spot: puede cotizar con una prima o descuento sobre el oro y sigue el horario y la liquidez de un exchange de cripto, no el fixing de Londres. Su historial es más corto (desde 2020-08). Los workers `daily` y `weekly` solo entrenan y predicen `BTCUSDT`; PAXG se ingesta y se muestra en el dashboard.
+
+---
+
+## 📉 Resultados
+
+**Conclusión: el modelo lineal no supera de forma significativa a los baselines.** Con todos los datos y el mismo código que producción, la diferencia contra el mejor baseline es de unas décimas de punto porcentual y su p-value está lejos de 0.05. En el último tramo corto de 100 días el modelo incluso quedó por debajo de ambos baselines.
+
+Corridas reales de `scripts/backtest.py` (Linear, ventana 21 días, seed 42, reentrenando cada día; datos de `BTCUSDT` hasta 2026-08-31; PnL *simple* = largo 1 BTC cuando predice subida, en USDT, sin fees). El p-value es binomial unilateral contra el mejor baseline.
+
+**Corrida larga: 2019-01-01 a 2026-08-31, test desde 2024-01-01**
+
+| Tramo | Días | Exactitud modelo | Always-up | Persistence | Edge vs mejor baseline | p-value | PnL modelo | PnL always-up (= buy-and-hold) | PnL persistence |
+|-------|-----:|-----------------:|----------:|------------:|-----------------------:|--------:|-----------:|-------------------------------:|----------------:|
+| **Test (fuera de muestra)** | 974 | 51.23% | 50.72% | 49.08% | +0.51 pp | 0.39 | $38,486 | $36,298 | $23,100 |
+| Validación | 1826 | 48.69% | 51.20% | 45.29% | −2.52 pp | 0.99 | −$8,660 | $38,581 | −$9,999 |
+
+**Corrida con la configuración del cron mensual: 2025-09-01 a 2026-08-31, últimos 100 días como test**
+
+| Tramo | Días | Exactitud modelo | Always-up | Persistence | Edge vs mejor baseline | p-value | PnL modelo | PnL always-up (= buy-and-hold) | PnL persistence |
+|-------|-----:|-----------------:|----------:|------------:|-----------------------:|--------:|-----------:|-------------------------------:|----------------:|
+| **Test (fuera de muestra)** | 100 | 43.00% | 49.00% | 50.00% | −7.00 pp | 0.93 | −$4,603 | $1,829 | $11,451 |
+| Validación | 265 | 51.32% | 49.06% | 53.58% | −2.26 pp | 0.79 | −$19,972 | −$31,494 | −$6,581 |
+
+Cómo leerlo:
+
+- **Ninguna ventaja es significativa.** Un +0.51 pp sobre 974 días es indistinguible de ruido, y con 100 días una diferencia de varios puntos también lo es.
+- **El PnL positivo del test largo no es mérito del modelo.** El mercado subió en ese periodo; always-up (comprar y mantener) gana casi lo mismo ($36,298 contra $38,486), y el modelo pierde dinero en el tramo de validación mientras always-up gana.
+- **Las exactitudes rondan el 50%** porque la dirección diaria de BTC es casi un volado; la referencia histórica de 2017 a 2026 es 51.1% para always-up y 46.5% para persistence.
+- **Limitaciones:** un solo modelo, una sola semilla, un solo activo (`BTCUSDT`), sin fees en el PnL simple ni costos de slippage. No hay resultados de LSTM, XGBoost ni ARIMA (desactivados hasta #124) y la frecuencia horaria se probó y se descartó: la ventaja de dirección es de ~1 pp pero vale ~2 bps por operación contra 20 bps de comisiones ([spike #109](docs/spikes/109-intraday-prediction.md)).
+
+Para reproducirlo:
+
+```bash
+docker compose exec api python scripts/load_binance_history.py   # una vez
+docker compose exec api python scripts/backtest.py \
+  --start-date=2019-01-01 --end-date=2026-08-31 \
+  --test-start-date=2024-01-01 --training-window=21 --seed=42 --retrain-every=1
+```
+
+Ver [docs/BACKTESTING.md](docs/BACKTESTING.md) para el detalle de cómo se calculan los baselines y el p-value.
 
 ---
 
@@ -268,35 +337,48 @@ alembic upgrade head
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET` | `/` | Dashboard HTML con predicciones y PnL |
+| `GET` | `/?symbol=BTCUSDT` | Dashboard HTML con predicciones y PnL (`symbol`: `BTCUSDT` o `PAXGUSDT`) |
+| `GET` | `/models/?symbol=BTCUSDT` | Comparación de modelos contra baselines |
+| `GET` | `/backtesting?symbol=BTCUSDT` | Resultados de backtesting |
 | `GET` | `/health` | Health check del servicio |
-| `GET` | `/api/prices?days=7` | Últimos N días de precios horarios |
-| `GET` | `/api/predictions/history?days=30` | Historial de predicciones evaluadas |
-| `GET` | `/api/predictions/pnl?days=30` | PnL acumulado simulado |
+| `GET` | `/api/prices?limit=24&symbol=BTCUSDT` | Últimas N velas diarias |
+| `GET` | `/api/predictions/history?from=…&to=…&timeframe=1d` | Historial de predicciones |
+| `GET` | `/api/predictions/pnl` | PnL acumulado simulado |
+| `GET` | `/api/predictions/strategies` | PnL por estrategia |
+| `GET` | `/api/backtesting/metrics` | Métricas de backtesting |
 | `GET` | `/docs` | Swagger UI (auto-generado) |
 
 ---
 
 ## 🔄 Flujo de Trabajo
 
-### Cada hora: `fetch-price` (cron)
+### Cada día (6am UTC): `fetch-price` (cron)
 
 ```
-CoinGecko API → fetch-price job → prices table
+data.binance.vision → fetch-price job → prices table
 ```
 
-1. Consulta CoinGecko API: `GET /api/v3/coins/bitcoin/market_chart`
-2. Inserta nuevo precio en `prices` (skip si ya existe, idempotente)
+1. Por cada símbolo (`BTCUSDT`, `PAXGUSDT`) lee el archivo `daily/` de data.binance.vision; si aún no está publicado, usa el REST `data-api.binance.vision`
+2. Inserta las velas diarias cerradas que falten, sin guardar nunca el día en curso (idempotente: omite lo que ya existe)
+3. Termina con código distinto de cero si ambas fuentes fallan
 
-### Cada día (7am): `daily` (cron)
+### Cada día (7am UTC): `daily` (cron)
 
 ```
 Evaluator → Trainer → Predictor
 ```
 
 1. **Evaluator:** Evalúa predicción de ayer (calcula error, PnL)
-2. **Trainer:** Entrena modelo con datos históricos, guarda en `models`
-3. **Predictor:** Predice precio de mañana, guarda en `predictions`
+2. **Trainer:** Entrena el modelo con todas las velas diarias de `BTCUSDT`, guarda en `models`
+3. **Predictor:** Predice el precio de mañana, guarda en `predictions`
+
+### Cada lunes (7am UTC): `weekly-predictor` (cron)
+
+Mismo flujo evaluar → entrenar → predecir para el modelo de horizonte de 7 días.
+
+### Cada mes (día 1, 00:00 UTC): `monthly-backtest` (cron)
+
+Corre `scripts/backtest.py` con la configuración de producción (ventana `TRAINING_WINDOW_DAYS`, últimos 365 días, últimos 100 como test) y guarda el resultado en `backtest_results`.
 
 ---
 
@@ -318,7 +400,7 @@ Cada servicio tiene su carpeta `tests/`:
 ```
 shared/tests/           # Config, models, CRUD, utils
 api-service/tests/              # API endpoints + dashboard
-workers/fetch_price/tests/ # Binance client + job
+workers/fetch_price/tests/ # Job de ingesta diaria
 workers/daily/tests/       # Evaluator, trainer, predictor, models ML
 ```
 
@@ -424,9 +506,7 @@ Para ejemplos detallados, fixtures, y configuración de CI/CD:
 DATABASE_URL=postgresql://user:password@localhost:5432/btcpredictor
 
 # Opcionales (defaults)
-COINGECKO_BASE_URL=https://api.coingecko.com
-MODEL_WINDOW_DAYS=30
-MODEL_NAME=linear_v1
+TRAINING_WINDOW_DAYS=21
 TZ=America/Mexico_City
 PORT=8000
 ENVIRONMENT=development
@@ -444,10 +524,12 @@ ENVIRONMENT=development
 
 1. Crear proyecto en Railway
 2. Agregar plugin PostgreSQL
-3. Crear 4 servicios:
-   - **api:** Web service (start command: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`)
+3. Crear 6 servicios (detalle en [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)):
+   - **api:** Web service (`Dockerfile.api`)
    - **fetch-price:** Cron `0 6 * * *` (6am UTC diario)
-   - **daily:** Cron `0 7 * * *` (7am diario)
+   - **daily:** Cron `0 7 * * *` (7am UTC diario)
+   - **weekly-predictor:** Cron `0 7 * * 1` (lunes 7am UTC)
+   - **monthly-backtest:** Cron `0 0 1 * *` (día 1 de cada mes, 00:00 UTC)
    - **postgres:** Plugin (automático)
 
 4. Conectar servicios al repo de GitHub
@@ -460,6 +542,8 @@ ENVIRONMENT=development
 railway logs --service api
 railway logs --service fetch-price
 railway logs --service daily
+railway logs --service weekly-predictor
+railway logs --service monthly-backtest
 ```
 
 ---
@@ -508,25 +592,26 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 
 ## 📝 Notas
 
-### Modelo ML Inicial
+### Modelo ML
 
-**Linear Regression** con ventana deslizante de 30 días:
-- **Features:** Últimos 30 cierres diarios
-- **Target:** Precio del día siguiente
+**Regresión lineal sobre retornos** con ventana de `TRAINING_WINDOW_DAYS` días (21 por defecto), entrenada con todas las velas diarias de `BTCUSDT`:
+- **Features:** `W` retornos logarítmicos rezagados, su volatilidad y `W` cambios logarítmicos de volumen (`2W + 1` features)
+- **Target:** retorno logarítmico del día siguiente
 - **Librería:** scikit-learn
 
-**Futuros modelos:** ARIMA, LSTM, XGBoost (gracias a `BaseModel` abstract)
+**Futuros modelos:** XGBoost, LSTM y ARIMA (gracias a `BaseModel` abstract) vuelven en la issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124).
 
 ### Estrategia PnL
 
 - Si el modelo predice **subida** → entramos long 1 BTC
 - Si predice **bajada** → nos quedamos en cash (PnL = 0)
 - **Fórmula:** `PnL = actual_price - price_at_prediction` (si entramos long)
+- El backtest calcula además las estrategias long/short, con umbral y realista (fees de 0.1% y stop-loss de 2%); ver [docs/BACKTESTING.md](docs/BACKTESTING.md)
 
 ### Idempotencia
 
 Todos los jobs son **idempotentes** (se pueden ejecutar múltiples veces sin duplicar datos):
-- `fetch-price`: UNIQUE constraint en `timestamp`
+- `fetch-price`: UNIQUE constraint en `(symbol, timestamp)`
 - `predictor`: Check si predicción ya existe antes de insertar
 
 ---

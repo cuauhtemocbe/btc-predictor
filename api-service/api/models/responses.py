@@ -7,20 +7,20 @@ from pydantic import BaseModel, ConfigDict
 
 class BtcPriceResponse(BaseModel):
     """
-    Bitcoin OHLCV price data response.
+    Daily OHLCV price bar response (one Binance daily bar, opened at 00:00 UTC).
 
     Used by GET /api/prices endpoint to return historical price data.
 
     Example JSON:
     ```json
     {
-        "timestamp": "2024-01-15T14:00:00+00:00",
+        "timestamp": "2024-01-15T00:00:00+00:00",
         "open": 42350.50,
         "high": 42580.75,
         "low": 42280.00,
         "close": 42500.25,
         "volume": 1250.75,
-        "source": "coingecko"
+        "source": "binance"
     }
     ```
     """

@@ -2,7 +2,7 @@
 """
 Load years of daily price history from data.binance.vision.
 
-Replaces the CoinGecko backfill (30-day limit, no volume). Downloads the monthly
+Replaces the earlier backfill (30-day limit, no volume). Downloads the monthly
 daily-kline zips for each symbol, verifies their SHA256 checksums, and inserts
 the rows into ``prices``. Idempotent: rows that already exist are skipped.
 

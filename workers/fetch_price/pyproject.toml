@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "fetch-price"
 version = "0.1.0"
-description = "Worker to fetch hourly Bitcoin prices from Binance API"
+description = "Worker to ingest daily Binance bars (BTCUSDT, PAXGUSDT)"
 authors = ["Cuauhtémoc <cuauhtemocbe@gmail.com>"]
 readme = "README.md"
 packages = [{include = "fetch_price", from = "."}]

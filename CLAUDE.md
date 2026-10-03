@@ -13,9 +13,10 @@
 - **Language:** Python 3.13
 - **Framework:** FastAPI + Jinja2 (HTML templates)
 - **Database:** PostgreSQL + SQLAlchemy 2.0 + Alembic (migrations)
-- **ML:** scikit-learn (Linear Regression), pandas, numpy
-- **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback; CoinGecko was removed in #102
-- **Deployment:** Railway (4 services: postgres, api, fetch-price cron, daily cron)
+- **ML:** scikit-learn (Linear Regression on log returns), pandas, numpy. XGBoost, LSTM and ARIMA exist but are disabled until #124.
+- **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback. Free, no API key.
+- **Assets:** `BTCUSDT` and `PAXGUSDT` (proxy for gold, see Design Decision 6)
+- **Deployment:** Railway (6 services: postgres, api, fetch-price, daily, weekly and monthly-backtest crons)
 - **Dependency Management:** Poetry (workspace with 3 packages: shared, api-service, workers)
 
 ---
@@ -32,8 +33,10 @@ btc-predictor/
 ├── shared/              # Common package (config, DB, utils)
 ├── api-service/         # Web service (always on)
 └── workers/
-    ├── fetch_price/     # Hourly cron: fetch BTC prices
-    └── daily/           # Daily cron: evaluate → train → predict
+    ├── fetch_price/     # Daily cron: ingest the closed daily bar of each symbol
+    ├── daily/           # Daily cron: evaluate → train → predict (1d horizon)
+    ├── weekly/          # Weekly cron: evaluate → train → predict (7d horizon)
+    └── backtest/        # Monthly cron: production-parity walk-forward backtest
 ```
 
 **Railway Services:**
@@ -41,7 +44,10 @@ btc-predictor/
 - `api` — Web service (FastAPI + dashboard)
 - `fetch-price` — Cron job daily at 6am UTC (`0 6 * * *`)
 - `daily` — Cron job daily at 7am UTC (`0 7 * * *`)
-- `weekly` — Cron job weekly on Mondays at 7am UTC (`0 7 * * 1`)
+- `weekly-predictor` — Cron job weekly on Mondays at 7am UTC (`0 7 * * 1`)
+- `monthly-backtest` — Cron job on the 1st of each month at 00:00 UTC (`0 0 1 * *`)
+
+The start commands and schedules live in the Railway dashboard, not in `railway.*.toml` (see `RAILWAY_MULTISTAGE_CONFIG.md`).
 
 ---
 
@@ -63,26 +69,27 @@ btc-predictor/
 - **Phase 1:** Predictor inserts prediction with `actual_price=NULL`
 - **Phase 2:** Evaluator updates with actual price + errors + PnL next day
 
-### 5. Binance Vision Over CoinGecko (supersedes the earlier CoinGecko migration)
+### 5. Binance Vision as the Only Data Source
 
-- The daily job stores one closed UTC daily bar per symbol (file first, REST fallback); the sections below describing 4-hour CoinGecko candles are historical.
+- **Why:** the free `data.binance.vision` files give 9 years of daily bars with volume, free and without an API key. The previous data source capped history at 30 days and had no volume, so it was replaced (#102). The Binance REST API is geo-blocked from Railway (HTTP 451), so the REST fallback uses `data-api.binance.vision`.
+- **Stored data:** one closed UTC daily bar per symbol in `prices` (`symbol`, `timestamp` = 00:00 UTC open, OHLCV, `source`), UNIQUE on `(symbol, timestamp)`.
+- **History:** `scripts/load_binance_history.py` loads the monthly files once (`BTCUSDT` from 2017-08, `PAXGUSDT` from 2020-08), verifying each SHA256 checksum.
+- **Daily ingest:** `fetch-price` (6am UTC) reads the `daily/` file of each symbol and falls back to REST if the file is not published yet. It backfills missed days and never stores the still-open day.
+- **No intraday data is stored.** The spike on 1h data (#109, `docs/spikes/109-intraday-prediction.md`) found a ~1 pp direction edge worth ~2 bps per trade against 20 bps of fees, so intraday was dropped.
 
-### 5b. (historical) CoinGecko Over Binance
-- Migrated from Binance API due to HTTP 451 geo-blocking in Railway
-- CoinGecko free API with rate limit handling
+### 6. Daily Bars and Return-Based Features
 
-### 6. Daily Data Frequency with 4-Hour Aggregation
+- **Frequency:** the whole pipeline works on daily bars. There is no intraday aggregation.
+- **Features** (`shared/shared/features.py`): `W` lagged log returns, their standard deviation as volatility, and `W` log volume changes (`2W + 1` features). **Target:** next-day log return. The predicted price is `last close * exp(predicted return)`.
+- **Same code in production and backtest:** the daily trainer, the predictor and the walk-forward backtest all call `shared.features` and `workers.daily.models.factory`.
+- **Evaluator:** the predictor runs at 07:00 UTC on day D, uses the close of the bar opened on D-1 and predicts the bar opened on D, which closes at 00:00 UTC on D+1 (`predicted_for`). The evaluator settles it against that close once `fetch-price` has ingested it, and leaves it pending if the bar is missing (`fetch_actual_price` in `workers/daily/evaluator.py`).
+- **Baselines:** every reported accuracy or PnL sits next to *always-up*, *persistence* and *buy-and-hold*, with the sample size, the edge and a binomial p-value (`shared/shared/baselines.py`).
 
-- **Data Storage:** CoinGecko API returns 4-hour granularity for 1-30 day windows (~6 candles/day)
-- **Fetch Strategy:** Daily worker fetches last 24 hours at 6am UTC, inserts ~6 new candles
-- **Model Training:** Daily worker aggregates 4-hour data to daily using `DATE_TRUNC('day')`
-- **Evaluator:** Uses first candle at/after 7am UTC (typically the 8am candle)
-- **Rationale:**
-  - Provides flexibility to test models with different frequencies (daily, 8h, 4h)
-  - Daily frequency yields 65-66% ML accuracy vs 51-55% for hourly (research-backed)
-  - Lower transaction costs: ~20-30 trades/month vs 180+ for hourly
-  - Target users: part-time investors, not day traders
-- **CoinGecko Limitation:** Beyond 30-day windows, granularity degrades to daily/4-day spacing
+### 6b. PAXG as a Proxy for Gold
+
+- Binance has no XAU spot pair. Gold is shown through `PAXGUSDT`, the PAX Gold token (1 token = 1 troy ounce of London Good Delivery gold), which trades 24/7.
+- It is a proxy, not XAU spot: it can trade at a small premium or discount to gold and follows crypto-exchange liquidity and hours, not the LBMA fixing. Weekend moves have no gold-market counterpart.
+- The dashboard states this next to the data (`shared/shared/assets.py`, `Asset.note`). History starts in 2020-08, so there are fewer days than for BTC. The daily and weekly workers train and predict `BTCUSDT` only (`DEFAULT_SYMBOL`); PAXG is ingested and shown on the dashboard.
 
 ### 7. Fixed Training Window
 

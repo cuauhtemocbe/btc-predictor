@@ -448,8 +448,8 @@ def validate_history(session: Session, symbol: str) -> None:
 def check_reachability(fetch: Fetcher = http_get, today: date | None = None) -> str:
     """Request one small checksum file to confirm the host is reachable.
 
-    Meant to run from the deployment environment (Railway), where the old
-    CoinGecko/Binance API answered HTTP 451. Returns the URL that answered.
+    Meant to run from the deployment environment (Railway), where the Binance
+    REST API (api.binance.com) answered HTTP 451. Returns the URL that answered.
 
     Raises:
         HttpStatusError: e.g. 451 or 403 when the host is blocked.
