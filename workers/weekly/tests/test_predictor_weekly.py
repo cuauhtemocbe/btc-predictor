@@ -10,7 +10,7 @@ Covers Gherkin acceptance criteria scenarios from US-022:
 
 import math
 import runpy
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from shared.features import DailySeries
+from shared.utils import utc_today
 from workers.daily import predictor as daily_predictor
 from workers.weekly import predictor
 from workers.weekly.models import LinearRegressionModel
@@ -133,7 +134,7 @@ class TestCheckExistingPrediction:
         When check_existing_prediction() is called
         Then it should return True
         """
-        next_monday = date.today() + timedelta(days=7)
+        next_monday = utc_today() + timedelta(days=7)
 
         exists = predictor.check_existing_prediction(
             db_session, next_monday, timeframe="1w"
@@ -143,7 +144,7 @@ class TestCheckExistingPrediction:
 
     def test_prediction_does_not_exist(self, db_session: Session) -> None:
         """Should return False when prediction does not exist."""
-        next_monday = date.today() + timedelta(days=7)
+        next_monday = utc_today() + timedelta(days=7)
 
         exists = predictor.check_existing_prediction(
             db_session, next_monday, timeframe="1w"
@@ -161,7 +162,7 @@ class TestCheckExistingPrediction:
         When checking for a weekly prediction for the same date
         Then it should return False (different timeframes)
         """
-        target_date = date.today() + timedelta(days=7)
+        target_date = utc_today() + timedelta(days=7)
 
         # Create a DAILY prediction for the date
         daily_prediction = Prediction(
@@ -198,7 +199,7 @@ class TestSavePrediction:
         And timeframe field is set to '1w'
         And predicted_for is 7 days ahead
         """
-        next_monday = date.today() + timedelta(days=7)
+        next_monday = utc_today() + timedelta(days=7)
         current_price = Decimal("51000.00")
         predicted_price = 51500.00
 
@@ -264,7 +265,7 @@ class TestMainWeeklyPredictor:
 
         # Should be for 7 days ahead
         prediction = predictions[0]
-        expected_date = date.today() + timedelta(days=7)
+        expected_date = utc_today() + timedelta(days=7)
         assert prediction.predicted_for == expected_date
         assert prediction.timeframe == "1w"
         assert prediction.predicted_price is not None
@@ -420,8 +421,8 @@ def _add_active_weekly_model(db_session: Session, name: str, artifact: bytes) ->
         params={"window_days": 30, "horizon_days": 7},
         artifact=artifact,
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         timeframe="1w",
         is_active=True,
     )

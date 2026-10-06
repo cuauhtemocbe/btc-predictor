@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.features import FeatureSet
+from shared.utils import utc_today
 from workers.daily.models import (
     ARIMAModel,
     BaseModel,
@@ -187,7 +188,7 @@ class TestAllModelsIntegration:
         And I can retrieve and deserialize it
         And predictions match
         """
-        from datetime import UTC, date, datetime, timedelta
+        from datetime import UTC, datetime, timedelta
 
         from shared.db.models import Model
         from shared.features import LOG_RETURN_TARGET
@@ -203,8 +204,8 @@ class TestAllModelsIntegration:
             params={"window_days": WINDOW_DAYS, "target": LOG_RETURN_TARGET},
             artifact=model.serialize(),
             trained_at=datetime.now(UTC),
-            train_from=date.today() - timedelta(days=120),
-            train_to=date.today() - timedelta(days=1),
+            train_from=utc_today() - timedelta(days=120),
+            train_to=utc_today() - timedelta(days=1),
             is_active=True,
         )
 

@@ -34,6 +34,7 @@ from shared.utils import (
     calculate_pnl_long_short,
     calculate_pnl_realistic,
     calculate_pnl_threshold,
+    utc_today,
 )
 
 # Configure logging
@@ -397,7 +398,7 @@ def main(today: date | None = None) -> int:
     session = SessionLocal()
 
     try:
-        today = today or date.today()
+        today = today or utc_today()
         logger.info(f"Evaluating pending predictions due up to {today}")
 
         predictions = find_pending_predictions(session, today)

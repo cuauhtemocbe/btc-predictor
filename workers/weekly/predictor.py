@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
 from shared.features import price_from_return, required_history_days
+from shared.utils import utc_today
 from workers.daily.predictor import (
     get_recent_series,
     prepare_features,
@@ -169,7 +170,7 @@ def main() -> int:
 
     try:
         # Calculate date 7 days ahead (next Monday in ISO week)
-        today = date.today()
+        today = utc_today()
         days_ahead = 7
         predicted_date = today + timedelta(days=days_ahead)
         logger.info(f"Predicting for date: {predicted_date} (7 days ahead)")
