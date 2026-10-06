@@ -37,6 +37,7 @@ from shared.features import (
     DailySeries,
     build_training_set,
     feature_count,
+    require_fresh_series,
 )
 from shared.utils import calculate_mape, split_train_validation, utc_today
 from workers.daily.models import BaseModel, LinearRegressionModel
@@ -99,7 +100,7 @@ def fetch_training_data(
 
     # Main query: Join to get the close price for the latest timestamp each day
     stmt = (
-        select(Price.close, Price.volume)
+        select(latest_per_day.c.day, Price.close, Price.volume)
         .join(
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
@@ -123,7 +124,9 @@ def fetch_training_data(
     )
 
     return DailySeries(
-        closes=[row.close for row in rows], volumes=[row.volume for row in rows]
+        dates=[row.day.date() for row in rows],
+        closes=[row.close for row in rows],
+        volumes=[row.volume for row in rows],
     )
 
 
@@ -211,6 +214,7 @@ def main() -> int:
 
         # Fetch training data
         series = fetch_training_data(session, window_days)
+        require_fresh_series(series.dates, utc_today())
 
         # Return features and next-day log return target
         training_set = build_training_set(
@@ -464,6 +468,7 @@ def train_all_models(
 
     # Fetch training data
     series = fetch_training_data(session, window_days)
+    require_fresh_series(series.dates, utc_today())
 
     # Model registry - ARIMA needs 60+ days of data
     MODEL_CLASSES = model_registry(len(series))

@@ -34,7 +34,12 @@ from shared.config import settings
 from shared.db.crud import activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import Model
-from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
+from shared.features import (
+    LOG_RETURN_TARGET,
+    build_training_set,
+    feature_count,
+    require_fresh_series,
+)
 from shared.utils import utc_today
 from workers.daily.trainer import fetch_training_data
 from workers.weekly.models import LinearRegressionModel
@@ -124,6 +129,7 @@ def main() -> int:
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")
 
         series = fetch_training_data(session, window_days, horizon_days=HORIZON_DAYS)
+        require_fresh_series(series.dates, utc_today())
 
         training_set = build_training_set(
             series.closes, series.volumes, window_days, horizon_days=HORIZON_DAYS

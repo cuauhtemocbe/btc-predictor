@@ -22,7 +22,11 @@ from sqlalchemy.orm import Session
 
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
-from shared.features import price_from_return, required_history_days
+from shared.features import (
+    price_from_return,
+    require_fresh_series,
+    required_history_days,
+)
 from shared.utils import utc_today
 from workers.daily.predictor import (
     get_recent_series,
@@ -194,6 +198,9 @@ def main() -> int:
 
         # Fetch daily closes and volumes (not hourly)
         series = get_recent_series(session, required_history_days(window_days))
+
+        # Refuse a stale series or one with gaps: no prediction is saved (#174)
+        require_fresh_series(series.dates, today)
 
         # Prepare features
         X = prepare_features(series, window_days)
