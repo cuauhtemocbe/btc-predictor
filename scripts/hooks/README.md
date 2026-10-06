@@ -6,7 +6,7 @@ This project uses [pre-commit](https://pre-commit.com/) framework to manage git 
 
 ```bash
 # Install pre-commit (only once per machine)
-pip install pre-commit
+pipx install pre-commit
 
 # Install the git hooks (only once per repo clone)
 pre-commit install --install-hooks
@@ -14,6 +14,12 @@ pre-commit install --install-hooks
 # Install pre-push hooks (for tests)
 pre-commit install --hook-type pre-push
 ```
+
+The hooks are installed once per clone. The shims that `pre-commit install` generates in `.git/hooks/`
+pin the path of the Python interpreter of the pre-commit that installed them. Use `pipx install pre-commit`
+as the install method: it keeps pre-commit in its own venv. `pip install pre-commit` also works, but a
+pip install into a venv breaks the same way when that venv's Python changes (see
+[Troubleshooting: `No module named pre_commit`](#troubleshooting-no-module-named-pre_commit)).
 
 ## What Gets Checked?
 
@@ -70,6 +76,33 @@ pre-commit run pytest-docker --hook-stage push
 # Update hook versions
 pre-commit autoupdate
 ```
+
+## Troubleshooting: `No module named pre_commit`
+
+**Symptom:** `git commit` or `git push` fails with `.../bin/python: No module named pre_commit`,
+typically right after a system Python upgrade.
+
+**Cause:** the shims `.git/hooks/pre-commit` and `.git/hooks/pre-push` hard-code `INSTALL_PYTHON=<interpreter
+that ran pre-commit install>` (for a pipx install, `~/.local/share/pipx/venvs/pre-commit/bin/python`). The shim
+falls back to `pre-commit` on `PATH` only when that file is missing. After a system Python upgrade the
+pipx venv's `bin/python` points at the new system Python, which has no `pre_commit` module.
+
+**Fix:**
+
+```bash
+# Rebuild the pre-commit venv (or `pipx reinstall-all` if other pipx tools broke too)
+pipx reinstall pre-commit
+
+# Check it works, then make a test commit
+pre-commit --version
+```
+
+Re-run `pre-commit install --install-hooks` and `pre-commit install --hook-type pre-push` only when the
+shim path itself changed (a different install method or a different machine).
+
+`git worktree` checkouts share the same `.git/hooks`, so one repair fixes all of them.
+
+⚠️ **Do not use `--no-verify` to get around it:** it also skips the gitleaks secret scan on every commit.
 
 ## Bypass Hooks (use sparingly!)
 

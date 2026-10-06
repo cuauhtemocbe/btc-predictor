@@ -8,8 +8,6 @@
 
 ## Tech Stack
 
-Python 3.13, FastAPI + Jinja2, PostgreSQL + SQLAlchemy 2.0 + Alembic, Poetry workspace (shared, api-service, workers). Versions and dependencies are in the `pyproject.toml` files.
-
 - **ML:** the crons train and predict with Linear Regression only. XGBoost, LSTM and ARIMA are enabled in code and tests (#124).
 - **Data:** Binance only, free, no API key (Design Decision 5). Assets: `BTCUSDT` and `PAXGUSDT` (gold proxy, Design Decision 6b).
 
@@ -53,9 +51,7 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 ### 5. Binance Vision as the Only Data Source
 
 - **Why:** the free `data.binance.vision` files give 9 years of daily bars with volume, free and without an API key. The previous data source capped history at 30 days and had no volume, so it was replaced (#102). The Binance REST API is geo-blocked from Railway (HTTP 451), so the REST fallback uses `data-api.binance.vision`.
-- **Stored data:** one closed UTC daily bar per symbol in `prices` (`symbol`, `timestamp` = 00:00 UTC open, OHLCV, `source`), UNIQUE on `(symbol, timestamp)`.
-- **History:** `scripts/load_binance_history.py` loads the monthly files once (`BTCUSDT` from 2017-08, `PAXGUSDT` from 2020-08), verifying each SHA256 checksum.
-- **Daily ingest:** `fetch-price` (6am UTC) reads the `daily/` file of each symbol and falls back to REST if the file is not published yet. It backfills missed days and never stores the still-open day.
+- **Stored data, history load and daily ingest:** see `workers/fetch_price/CLAUDE.md`.
 - **No intraday data is stored.** The spike on 1h data (#109, `docs/spikes/109-intraday-prediction.md`) found a ~1 pp direction edge worth ~2 bps per trade against 20 bps of fees, so intraday was dropped.
 
 ### 6. Daily Bars and Return-Based Features
@@ -74,8 +70,7 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 
 ### 7. Fixed Training Window
 
-- The sliding-window size is `training_window_days` in `shared/shared/config.py` (default 21, override with the `TRAINING_WINDOW_DAYS` environment variable) and is stored in `models.params["window_days"]`.
-- The daily and weekly trainers use every stored `BTCUSDT` daily row and fail with the required and available row counts when there are fewer than `(window + 1) * 5` (plus `horizon - 1` for the weekly model): `required_training_days()` in `workers/daily/trainer.py`.
+- See `workers/daily/CLAUDE.md` (`training_window_days` in `shared/shared/config.py`, default 21).
 
 ### 8. Docker Image Hardening
 
@@ -95,36 +90,13 @@ This is **non-negotiable**:
 
 ### Test Commands (inside container)
 
-**IMPORTANT:** All test commands MUST be executed inside the `api` container.
-
-```bash
-# Start services first (if not running)
-docker compose up -d
-
-# Run all tests
-docker compose exec api pytest
-
-# Run tests with coverage
-docker compose exec api pytest --cov --cov-report=term-missing
-
-# Per-module coverage thresholds (after a run that wrote /tmp/coverage.xml)
-docker compose exec api python scripts/check_coverage_thresholds.py /tmp/coverage.xml
-
-# Run tests for specific package
-docker compose exec api pytest shared/tests/
-docker compose exec api pytest api-service/tests/
-docker compose exec api pytest workers/fetch_price/tests/
-docker compose exec api pytest workers/daily/tests/
-
-# Run specific test
-docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
-```
+**IMPORTANT:** All test commands MUST be executed inside the `api` container (`docker compose exec api pytest ...`).
 
 Per-module coverage minimums live in `[tool.coverage_thresholds]` of `pyproject.toml`; the rules for setting them are in `scripts/CLAUDE.md`.
 
 ### Mutation Testing (Advanced Quality Check)
 
-Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85%. Latest: 100% on `shared/db/crud.py` (274/274 mutants killed, see `mutation_testing_report.md`).
+Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85% (results in `mutation_testing_report.md`).
 
 ---
 
@@ -136,30 +108,11 @@ Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test qual
 
 ## Git Hooks (Pre-commit Framework)
 
-Hooks come from the pre-commit framework (`.pre-commit-config.yaml`): ruff lint and format on commit, pytest with 90% coverage on push. Once per clone: `pre-commit install --install-hooks && pre-commit install --hook-type pre-push`. Full documentation: `scripts/hooks/README.md`.
+Hooks come from the pre-commit framework (`.pre-commit-config.yaml`). Once per clone: `pre-commit install --install-hooks && pre-commit install --hook-type pre-push`. Full documentation: `scripts/hooks/README.md`.
 
 ---
 
 ## Common Commands
-
-### Development (local) — ALL commands run in containers
-
-```bash
-# Start all services (postgres + api with hot-reload)
-docker compose up
-
-# Start services in background
-docker compose up -d
-
-# View logs
-docker compose logs -f api
-
-# Stop services
-docker compose down
-
-# Rebuild containers (after dependency changes)
-docker compose build
-```
 
 ### Testing (inside container)
 
@@ -215,11 +168,6 @@ git push origin main
 
 # IMPORTANT: After pushing to main, ALWAYS run Railway deployment monitoring
 ./scripts/hooks/monitor-railway.sh
-
-# View logs
-railway logs --service api
-railway logs --service fetch-price
-railway logs --service daily
 ```
 
 ### Main Branch Protection
@@ -232,9 +180,7 @@ will be added when the repository adopts hosted CI checks that GitHub can
 require.
 
 **Claude Code Automation:**
-- After successfully pushing to `main` branch, ALWAYS execute `./scripts/hooks/monitor-railway.sh`
-- This monitors Railway deployment status and reports any issues
-- Git does not support post-push hooks natively, so this must be done explicitly
+- Git does not support post-push hooks natively, so the monitor in *Railway Deploy* must be run explicitly after every push to `main`
 
 ---
 
@@ -248,13 +194,6 @@ require.
 ❌ **DON'T** bypass UNIQUE constraints (they're for idempotency)  
 ❌ **DON'T** skip tests ("I'll add them later" never happens)
 
-✅ **DO** execute ALL commands inside Docker containers  
-✅ **DO** write tests for every Gherkin scenario  
-✅ **DO** use Alembic for all schema changes  
-✅ **DO** keep services decoupled (communicate via DB only)  
-✅ **DO** log important events (predictions, errors, model training)  
-✅ **DO** validate inputs (Pydantic models for API, assertions in ML code)
-
 ---
 
 ## Notes for Future Sessions
@@ -266,7 +205,4 @@ require.
 ### Engram Memory
 
 - **Project name:** `btc-predictor`, pinned in `.engram/config.json` (committed) so memory writes always target this project, whatever the cwd.
-- **Setup:** the `engram@engram` Claude Code plugin plus the `engram` binary (v2.2.0), with the MCP server registered globally as `engram mcp --tools=agent`. Nothing repo-specific to install.
-- **Recovery:** after a context reset or compaction, call `mem_context` before continuing.
-- **Save proactively** with `mem_save` after decisions, bug fixes, discoveries and established patterns; call `mem_session_summary` before closing a session.
 - **Diagnostics:** `engram doctor` (read-only) if memory behaves oddly.
