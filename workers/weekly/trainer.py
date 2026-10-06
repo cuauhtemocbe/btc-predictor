@@ -35,6 +35,7 @@ from shared.db.crud import activate_model
 from shared.db.database import SessionLocal
 from shared.db.models import Model
 from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
+from shared.utils import utc_today
 from workers.daily.trainer import fetch_training_data
 from workers.weekly.models import LinearRegressionModel
 
@@ -135,7 +136,7 @@ def main() -> int:
         )
         model.train(training_set.X, training_set.y)
 
-        train_to = date.today()
+        train_to = utc_today()
         train_from = train_to - timedelta(days=len(series))
 
         save_weekly_model(

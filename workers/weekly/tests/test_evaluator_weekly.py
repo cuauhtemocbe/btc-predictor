@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily.evaluator import EvaluationMetrics
 from workers.weekly import evaluator
 
@@ -41,7 +42,7 @@ class TestFindUnevaluatedWeeklyPrediction:
         When find_unevaluated_weekly_prediction() is called
         Then it should return the prediction record
         """
-        today = date.today()
+        today = utc_today()
 
         prediction = evaluator.find_unevaluated_weekly_prediction(db_session, today)
 
@@ -58,7 +59,7 @@ class TestFindUnevaluatedWeeklyPrediction:
         When find_unevaluated_weekly_prediction() is called
         Then it should return None
         """
-        today = date.today()
+        today = utc_today()
 
         prediction = evaluator.find_unevaluated_weekly_prediction(db_session, today)
 
@@ -74,7 +75,7 @@ class TestFindUnevaluatedWeeklyPrediction:
         When find_unevaluated_weekly_prediction() is called
         Then it should return None (not the evaluated one)
         """
-        today = date.today()
+        today = utc_today()
 
         # Create an EVALUATED weekly prediction
         evaluated_prediction = Prediction(
@@ -109,7 +110,7 @@ class TestFindUnevaluatedWeeklyPrediction:
         When find_unevaluated_weekly_prediction() is called
         Then it should return None (only looks for weekly)
         """
-        today = date.today()
+        today = utc_today()
 
         # Create a DAILY prediction (timeframe='1d')
         daily_prediction = Prediction(
@@ -141,13 +142,13 @@ class TestFetchActualPrice:
         When fetch_actual_price() is called for today
         Then it returns that bar's close
         """
-        price = fetch_actual_price(db_session, date.today())
+        price = fetch_actual_price(db_session, utc_today())
 
         assert price == Decimal("67500.00")  # Close price from fixture
 
     def test_returns_none_when_bar_missing(self, db_session: Session) -> None:
         """Given no bar is stored, fetch_actual_price() returns None."""
-        assert fetch_actual_price(db_session, date.today()) is None
+        assert fetch_actual_price(db_session, utc_today()) is None
 
     def test_ignores_bar_opened_on_the_prediction_date(
         self, db_session: Session
@@ -343,7 +344,7 @@ class TestCalculateMetrics:
         # Create daily prediction
         daily_pred = Prediction(
             model_id=sample_trained_model.id,
-            predicted_for=date.today(),
+            predicted_for=utc_today(),
             timeframe="1d",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66000.00"),
@@ -353,7 +354,7 @@ class TestCalculateMetrics:
         # Create weekly prediction (same values, different timeframe)
         weekly_pred = Prediction(
             model_id=sample_trained_model.id,
-            predicted_for=date.today(),
+            predicted_for=utc_today(),
             timeframe="1w",
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66000.00"),
@@ -523,7 +524,7 @@ class TestMainWeeklyEvaluator:
         monkeypatch.setattr(eval_module, "SessionLocal", lambda: db_session)
 
         # Verify the settling bar does NOT exist
-        today = date.today()
+        today = utc_today()
         price = fetch_actual_price(db_session, today)
         assert price is None
 

@@ -8,7 +8,7 @@ got 42") and used the gold price as the "current BTC price".
 """
 
 from argparse import Namespace
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from scripts.backtest_engine import InsufficientHistoryError, load_daily_history
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.backtest.main import plan_range
 from workers.daily import evaluator, predictor
 from workers.daily.trainer import fetch_training_data
@@ -51,7 +52,7 @@ def _add_daily_series(
     Both symbols use identical timestamps on purpose: a join on timestamp
     alone would match both rows.
     """
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     for i in range(days):
         day = first_day + timedelta(days=i)
         _add_bar(
@@ -125,7 +126,7 @@ class TestPredictorSymbolIsolation:
 class TestEvaluatorSymbolIsolation:
     def test_fetch_actual_price_ignores_other_symbol(self, db_session: Session) -> None:
         """Both symbols have a bar that settles today; each gets its own close."""
-        today = date.today()
+        today = utc_today()
         bar_open = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
         _add_bar(db_session, PAXG, bar_open, PAXG_CLOSE)
         _add_bar(db_session, BTC, bar_open, BTC_CLOSE)

@@ -251,3 +251,24 @@ def test_the_cron_backtests_the_linear_model(cron: CronRunner) -> None:
     # Then it is the linear model that production trains (#124)
     assert "--model" not in " ".join(argv)
     assert worker_script.parse_arguments(argv[1:]).model == "linear"
+
+
+# --- Scenario (#173): an empty history ends the range on the UTC day ---
+
+
+@pytest.mark.usefixtures("mexico_city_at_0300_utc")
+def test_without_history_the_range_ends_on_the_utc_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With TZ=America/Mexico_City at 2026-10-04 03:00 UTC the end date is the 4th."""
+    ends: list[date] = []
+    monkeypatch.setattr(
+        worker,
+        "check_enough_history",
+        lambda daily_history, config: ends.append(config.end_date),
+    )
+
+    _, end, _ = worker.plan_range(DailyHistory(dates=[], closes=[], volumes=[]), 21)
+
+    assert end == date(2026, 10, 4)
+    assert ends == [date(2026, 10, 4)]

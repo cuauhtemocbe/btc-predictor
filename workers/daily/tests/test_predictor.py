@@ -8,7 +8,7 @@ Covers all 4 Gherkin acceptance criteria scenarios:
 4. Prediction already exists (idempotency)
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from shared.features import DailySeries, build_training_set
+from shared.utils import utc_today
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -138,7 +139,7 @@ class TestCheckExistingPrediction:
         self, db_session: Session, sample_prediction_for_tomorrow: Prediction
     ) -> None:
         """Should return True when prediction exists."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         exists = predictor.check_existing_prediction(db_session, tomorrow)
 
@@ -146,7 +147,7 @@ class TestCheckExistingPrediction:
 
     def test_prediction_does_not_exist(self, db_session: Session) -> None:
         """Should return False when prediction does not exist."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         exists = predictor.check_existing_prediction(db_session, tomorrow)
 
@@ -160,7 +161,7 @@ class TestSavePrediction:
         self, db_session: Session, sample_trained_model: Model
     ) -> None:
         """Should create a new prediction record with correct fields."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         current_price = Decimal("51000.00")
         predicted_price = 51500.00
 
@@ -196,7 +197,7 @@ class TestSavePrediction:
         prediction = predictor.save_prediction(
             session=db_session,
             model_id=sample_trained_model.id,
-            predicted_for=date.today() + timedelta(days=1),
+            predicted_for=utc_today() + timedelta(days=1),
             current_price=Decimal("51000.00"),
             predicted_price=51500.00,
         )
@@ -238,7 +239,7 @@ class TestPredictorGherkinScenarios:
         And actual_price is NULL (not evaluated yet)
         """
         # Setup: Active model exists, 30+ prices exist (from fixtures)
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         model_id = sample_trained_model.id  # Store ID before main() commits
 
         # Verify no prediction exists yet

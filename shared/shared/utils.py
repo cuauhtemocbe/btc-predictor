@@ -2,6 +2,7 @@
 Utility functions for BTC Predictor.
 
 Functions:
+- utc_today: Current calendar date in UTC, the day boundary of the whole pipeline
 - calculate_pnl: Calculate simulated profit/loss from prediction strategy
 - calculate_pnl_long_short: Calculate PnL with long/short symmetric strategy
 - calculate_pnl_threshold: Calculate PnL with threshold filter
@@ -21,7 +22,7 @@ Model Metrics Functions (for dashboard):
 - get_all_models_metrics: Get metrics for all models in one call
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -37,6 +38,17 @@ from shared.db.models import PredictionSource
 # param -- see issue #67.
 SUPPORTED_TIMEFRAMES = ("1h", "1d", "1w")
 DEFAULT_TIMEFRAME = "1d"
+
+
+def utc_today() -> date:
+    """Return today's calendar date in UTC, whatever the process time zone is.
+
+    Daily bars open at 00:00 UTC, so every job defines "today" in UTC.
+    The container's local date follows its ``TZ`` (America/Mexico_City, UTC-6) and
+    is a day behind UTC for part of the day (#173).
+    """
+    return datetime.now(UTC).date()
+
 
 # Reference capital (in USDT) that risk-adjusted metrics (Sharpe ratio,
 # percentage drawdown) are normalized against. The stored pnl_* columns

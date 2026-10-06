@@ -5,7 +5,7 @@ The trainers no longer pick a window from a phase table: the window comes from
 ``settings.training_window_days`` and every stored BTCUSDT daily row is used.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from shared.config import Settings, settings
 from shared.db.models import Model, Price
+from shared.utils import utc_today
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 
@@ -25,7 +26,7 @@ PAXG = "PAXGUSDT"
 def _add_daily_rows(
     session: Session, symbol: str, days: int, close: Decimal = Decimal("60000")
 ) -> None:
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     session.add_all(
         Price(
             symbol=symbol,

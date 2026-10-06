@@ -2,7 +2,7 @@
 Shared test fixtures for workers.weekly tests.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from shared.features import LOG_RETURN_TARGET, build_training_set, feature_count
+from shared.utils import utc_today
 from workers.weekly.models import LinearRegressionModel
 
 # One cached bar: (timestamp, open, high, low, close, volume).
@@ -51,8 +52,8 @@ def sample_trained_model(db_session: Session) -> Model:
         },
         artifact=lr_model.serialize(),
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         timeframe="1w",
         is_active=True,
     )
@@ -188,7 +189,7 @@ def sample_weekly_prediction_for_next_monday(
     Returns:
         Prediction record with timeframe='1w', predicted_for=7 days ahead
     """
-    next_monday = date.today() + timedelta(days=7)
+    next_monday = utc_today() + timedelta(days=7)
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -225,7 +226,7 @@ def sample_unevaluated_weekly_prediction_for_today(
     Returns:
         Prediction record with timeframe='1w', predicted_for=today, actual_price=NULL
     """
-    today = date.today()
+    today = utc_today()
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -263,9 +264,7 @@ def sample_actual_price_for_today(db_session: Session) -> Price:
     Returns:
         Price record with timestamp=yesterday 00:00 UTC, close=67500.00
     """
-    bar_open = datetime.combine(
-        date.today() - timedelta(days=1), time(0, 0), tzinfo=UTC
-    )
+    bar_open = datetime.combine(utc_today() - timedelta(days=1), time(0, 0), tzinfo=UTC)
 
     price_record = Price(
         timestamp=bar_open,

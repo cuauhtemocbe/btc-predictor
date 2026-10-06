@@ -2,7 +2,7 @@
 Shared test fixtures for workers.daily tests.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -16,6 +16,7 @@ from shared.features import (
     build_training_set,
     feature_count,
 )
+from shared.utils import utc_today
 from workers.daily.models import LinearRegressionModel
 
 # One cached bar: (timestamp, open, high, low, close, volume).
@@ -252,8 +253,8 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
         params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
         artifact=cached_linear_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=True,
     )
 
@@ -288,8 +289,8 @@ def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) ->
         },
         artifact=cached_xgboost_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=False,  # Inactive by default (tests will activate as needed)
     )
 
@@ -444,7 +445,7 @@ def sample_prediction_for_tomorrow(
     Returns:
         Prediction record with predicted_for=tomorrow
     """
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = utc_today() + timedelta(days=1)
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -482,7 +483,7 @@ def sample_unevaluated_prediction_for_today(
     Returns:
         Prediction record with predicted_for=today, actual_price=NULL
     """
-    today = date.today()
+    today = utc_today()
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -516,7 +517,7 @@ def sample_actual_price_for_today(db_session: Session) -> Price:
     Returns:
         Price record with timestamp=yesterday 00:00 UTC
     """
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = utc_today() - timedelta(days=1)
     timestamp = datetime.combine(yesterday, datetime.min.time(), tzinfo=UTC)
 
     price_record = Price(
@@ -546,7 +547,7 @@ def sample_evaluated_prediction_for_today(
     Returns:
         Prediction record with actual_price != NULL (already evaluated)
     """
-    today = date.today()
+    today = utc_today()
 
     prediction = Prediction(
         model_id=sample_trained_model.id,

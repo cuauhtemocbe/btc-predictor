@@ -6,6 +6,10 @@ to eliminate race conditions and reduce DDL overhead.
 """
 
 import os
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime, tzinfo
+from typing import Self
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -150,3 +154,37 @@ def db_session(db_engine_session):
 def session(db_session):
     """Alias for db_session to support tests that use 'session' parameter."""
     return db_session
+
+
+# The instant of the #173 scenario: 03:00 UTC on 2026-10-04 is still 2026-10-03
+# (21:00) in America/Mexico_City.
+FROZEN_UTC_NOW = datetime(2026, 10, 4, 3, 0, tzinfo=UTC)
+
+
+class _FrozenDatetime(datetime):
+    """``datetime`` whose ``now()`` returns ``FROZEN_UTC_NOW``."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(FROZEN_UTC_NOW.timestamp(), tz)
+
+
+@pytest.fixture
+def mexico_city_at_0300_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[datetime]:
+    """Set ``TZ=America/Mexico_City`` and the clock to 2026-10-04 03:00 UTC.
+
+    Freezes the clock behind ``shared.utils.utc_today`` only, so a job that still
+    calls ``date.today()`` sees the real date and the test fails.
+    """
+    previous_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "America/Mexico_City"
+    time.tzset()
+    monkeypatch.setattr("shared.utils.datetime", _FrozenDatetime)
+    try:
+        yield FROZEN_UTC_NOW
+    finally:
+        if previous_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous_tz
+        time.tzset()
