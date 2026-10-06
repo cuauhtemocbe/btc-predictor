@@ -1,7 +1,7 @@
 """Tests for the single-model and multi-model paths of the predictor job."""
 
 import logging
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
@@ -22,6 +22,7 @@ from workers.daily.predictor import (
 
 TOMORROW = date(2026, 1, 2)
 PRICE = Decimal("50000")
+NOW = datetime(2026, 1, 2, 0, 10, tzinfo=UTC)
 # The fakes below never touch the session, so a missing one stands in for it.
 NO_SESSION = cast(Session, None)
 
@@ -43,6 +44,7 @@ def fake_predict_one(monkeypatch: pytest.MonkeyPatch) -> None:
         tomorrow: date,
         current_price: Decimal,
         outcome: PredictionOutcome,
+        now: datetime,
     ) -> None:
         name = model_record.name
         if name.startswith("bad"):
@@ -60,7 +62,7 @@ class TestPredictSingleModel:
         outcome = PredictionOutcome()
 
         _predict_single_model(
-            NO_SESSION, _models("linear_v1"), TOMORROW, PRICE, outcome
+            NO_SESSION, _models("linear_v1"), TOMORROW, PRICE, outcome, NOW
         )
 
         assert outcome.generated == [("linear_v1", 51000.0)]
@@ -76,7 +78,7 @@ class TestPredictSingleModel:
             caplog.at_level(logging.ERROR),
             pytest.raises(ValueError, match="exploded"),
         ):
-            _predict_single_model(NO_SESSION, models, TOMORROW, PRICE, outcome)
+            _predict_single_model(NO_SESSION, models, TOMORROW, PRICE, outcome, NOW)
 
         assert outcome.failed == [("bad_v1", "bad_v1 exploded")]
         assert "Failed to generate prediction for bad_v1" in caplog.text
@@ -90,7 +92,7 @@ class TestPredictMultiModel:
         models = _models("linear_v1", "bad_v1", "skip_v1", "xgboost_v1")
 
         with caplog.at_level(logging.ERROR):
-            _predict_multi_model(NO_SESSION, models, TOMORROW, PRICE, outcome)
+            _predict_multi_model(NO_SESSION, models, TOMORROW, PRICE, outcome, NOW)
 
         assert outcome.generated == [("linear_v1", 51000.0), ("xgboost_v1", 51000.0)]
         assert outcome.skipped == ["skip_v1"]

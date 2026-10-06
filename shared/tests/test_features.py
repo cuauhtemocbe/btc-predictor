@@ -8,7 +8,7 @@ workers/daily/tests/test_return_prediction.py.
 """
 
 import math
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -21,6 +21,7 @@ from shared.features import (
     feature_count,
     price_from_return,
     require_fresh_series,
+    require_recent_close,
     required_history_days,
 )
 
@@ -321,3 +322,28 @@ class TestRequireFreshSeries:
     def test_an_empty_series_is_refused(self) -> None:
         with pytest.raises(ValueError, match="No stored bars"):
             require_fresh_series([], self.TODAY)
+
+
+class TestRequireRecentClose:
+    """The last bar must have closed at most ``max_age`` before the run (#175)."""
+
+    BAR = date(2026, 10, 3)  # closed at 2026-10-04 00:00 UTC
+    MAX_AGE = timedelta(hours=2)
+
+    def test_ten_minutes_after_the_close_passes(self) -> None:
+        now = datetime(2026, 10, 4, 0, 10, tzinfo=UTC)
+        require_recent_close(self.BAR, now, self.MAX_AGE)
+
+    def test_exactly_the_maximum_age_passes(self) -> None:
+        now = datetime(2026, 10, 4, 2, 0, tzinfo=UTC)
+        require_recent_close(self.BAR, now, self.MAX_AGE)
+
+    def test_one_second_over_the_maximum_age_raises(self) -> None:
+        now = datetime(2026, 10, 4, 2, 0, 1, tzinfo=UTC)
+        with pytest.raises(ValueError, match="maximum age is 2:00:00"):
+            require_recent_close(self.BAR, now, self.MAX_AGE)
+
+    def test_seven_hours_after_the_close_raises_naming_the_bar(self) -> None:
+        now = datetime(2026, 10, 4, 7, 0, tzinfo=UTC)
+        with pytest.raises(ValueError, match=r"2026-10-03.*2026-10-04 00:00 UTC"):
+            require_recent_close(self.BAR, now, self.MAX_AGE)

@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The predictor now runs right after the daily close (#175): `fetch-price` at 00:05 UTC
+  (`5 0 * * *`) and `daily` at 00:10 UTC (`10 0 * * *`) instead of 06:00 and 07:00. The
+  prediction used to be saved 7 hours after the close it is anchored to, so the recorded
+  PnL assumed a price nobody could trade at. The predictor exits 1 and saves nothing when
+  the last closed bar is older than `max_bar_age_hours` (new setting, default 2).
+  **Deploy note:** change both cron schedules in the Railway dashboard before merging,
+  because a 07:00 run now exits 1.
 - The backtest no longer builds price-level windows by hand: `scripts/backtest_utils.py`
   was removed, `--training-window` defaults to `settings.training_window_days`
   (21, was 30) and results are stored in one transaction (#106).

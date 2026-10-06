@@ -2,7 +2,7 @@
 Tests for the UTC date of the daily jobs (#173).
 
 The containers run with ``TZ=America/Mexico_City``, six hours behind UTC, while a
-daily bar is a UTC day. At 03:00 UTC on 2026-10-04 the local date is still
+daily bar is a UTC day. At 00:10 UTC on 2026-10-04 the local date is still
 2026-10-03, so a job built on ``date.today()`` is a day behind the pipeline.
 """
 
@@ -40,9 +40,9 @@ def _add_daily_prices(db_session: Session, days: int) -> None:
     db_session.commit()
 
 
-@pytest.mark.usefixtures("mexico_city_at_0300_utc")
+@pytest.mark.usefixtures("mexico_city_at_0010_utc")
 class TestDailyJobsUseTheUtcDate:
-    """Gherkin: TZ=America/Mexico_City and the clock at 2026-10-04 03:00 UTC."""
+    """Gherkin: TZ=America/Mexico_City and the clock at 2026-10-04 00:10 UTC."""
 
     def test_the_predictor_predicts_the_next_utc_day(
         self,

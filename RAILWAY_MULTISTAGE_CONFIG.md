@@ -79,7 +79,7 @@ Restart Policy: NEVER
 
 **Cron Settings:**
 ```
-Cron Schedule: 0 6 * * *
+Cron Schedule: 5 0 * * *
 ```
 
 ---
@@ -100,7 +100,7 @@ Restart Policy: NEVER
 
 **Cron Settings:**
 ```
-Cron Schedule: 0 7 * * *
+Cron Schedule: 10 0 * * *
 ```
 
 > `workers/daily/` solo expone `__main__.py` (no `main.py`) y usa imports

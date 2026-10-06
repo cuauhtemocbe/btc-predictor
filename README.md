@@ -44,11 +44,11 @@ El proyecto se despliega como **6 servicios en Railway**:
 └──────────────────┘
          ↓
 ┌──────────────────┐
-│   fetch-price    │  Cron diario 6am UTC: guarda la vela diaria cerrada de cada símbolo
+│   fetch-price    │  Cron diario 00:05 UTC: guarda la vela diaria cerrada de cada símbolo
 └──────────────────┘
          ↓
 ┌──────────────────┐
-│      daily       │  Cron diario 7am UTC: evalúa → entrena → predice (horizonte 1 día)
+│      daily       │  Cron diario 00:10 UTC: evalúa → entrena → predice (horizonte 1 día)
 └──────────────────┘
 ┌──────────────────┐
 │ monthly-backtest │  Cron día 1 de cada mes, 00:00 UTC: backtest walk-forward con la configuración de producción
@@ -351,7 +351,7 @@ alembic upgrade head
 
 ## 🔄 Flujo de Trabajo
 
-### Cada día (6am UTC): `fetch-price` (cron)
+### Cada día (00:05 UTC): `fetch-price` (cron)
 
 ```
 data.binance.vision → fetch-price job → prices table
@@ -361,7 +361,7 @@ data.binance.vision → fetch-price job → prices table
 2. Inserta las velas diarias cerradas que falten, sin guardar nunca el día en curso (idempotente: omite lo que ya existe)
 3. Termina con código distinto de cero si ambas fuentes fallan
 
-### Cada día (7am UTC): `daily` (cron)
+### Cada día (00:10 UTC): `daily` (cron)
 
 ```
 Evaluator → Trainer → Predictor
@@ -522,8 +522,8 @@ ENVIRONMENT=development
 2. Agregar plugin PostgreSQL
 3. Crear 5 servicios (detalle en [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)):
    - **api:** Web service (`Dockerfile.api`)
-   - **fetch-price:** Cron `0 6 * * *` (6am UTC diario)
-   - **daily:** Cron `0 7 * * *` (7am UTC diario)
+   - **fetch-price:** Cron `5 0 * * *` (00:05 UTC diario)
+   - **daily:** Cron `10 0 * * *` (00:10 UTC diario, termina con código 1 si la última vela cerró hace más de 2 horas)
    - **monthly-backtest:** Cron `0 0 1 * *` (día 1 de cada mes, 00:00 UTC)
    - **postgres:** Plugin (automático)
 

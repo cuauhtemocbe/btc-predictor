@@ -2,13 +2,14 @@
 Shared test fixtures for workers.daily tests.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
+import shared.utils
 from shared.db.models import Model, Prediction, Price
 from shared.features import (
     FeatureSet,
@@ -17,7 +18,26 @@ from shared.features import (
     feature_count,
 )
 from shared.utils import utc_today
+from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
+
+
+@pytest.fixture(autouse=True)
+def predictor_runs_right_after_the_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the predictor at 00:10 UTC of the current UTC day, as the cron does (#175).
+
+    The freshness guard refuses a last bar older than ``max_bar_age_hours``. Tests
+    seed the bar of yesterday and run at whatever time the suite starts, so the
+    predictor clock is pinned to the day boundary. The date comes from
+    ``shared.utils.utc_today`` at call time, so a test that freezes it (or passes
+    ``now=`` itself) still gets a consistent clock.
+    """
+    monkeypatch.setattr(
+        predictor,
+        "utc_now",
+        lambda: datetime.combine(shared.utils.utc_today(), time(0, 10), tzinfo=UTC),
+    )
+
 
 # One cached bar: (timestamp, open, high, low, close, volume).
 type BarRow = tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]

@@ -129,9 +129,9 @@ def fetch_actual_price(
     Fetch the close that settles a prediction made for ``target_date``.
 
     Daily bars are stored at their 00:00 UTC open. The predictor, running at
-    07:00 UTC on day D, uses the close of the bar opened on D-1 and predicts
+    00:10 UTC on day D, uses the close of the bar opened on D-1 and predicts
     the next bar, the one opened on D, which closes at 00:00 UTC on D+1 (the
-    prediction's ``predicted_for``). That bar is ingested by the 06:00 UTC
+    prediction's ``predicted_for``). That bar is ingested by the 00:05 UTC
     fetch-price job on D+1, before this evaluator runs.
 
     Args:

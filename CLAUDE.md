@@ -21,8 +21,8 @@
 **Railway Services:**
 - `postgres` — Shared database
 - `api` — Web service (FastAPI + dashboard)
-- `fetch-price` — Cron job daily at 6am UTC (`0 6 * * *`)
-- `daily` — Cron job daily at 7am UTC (`0 7 * * *`)
+- `fetch-price` — Cron job daily at 00:05 UTC (`5 0 * * *`)
+- `daily` — Cron job daily at 00:10 UTC (`10 0 * * *`)
 - `monthly-backtest` — Cron job on the 1st of each month at 00:00 UTC (`0 0 1 * *`)
 
 The start commands and schedules live in the Railway dashboard, not in `railway.*.toml` (see `RAILWAY_MULTISTAGE_CONFIG.md`).
@@ -58,8 +58,9 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 - **Frequency:** the whole pipeline works on daily bars. There is no intraday aggregation.
 - **Features** (`shared/shared/features.py`): `W` lagged log returns, their standard deviation as volatility, and `W` log volume changes (`2W + 1` features). **Target:** next-day log return. The predicted price is `last close * exp(predicted return)`.
 - **Same code in production and backtest:** the daily trainer, the predictor and the walk-forward backtest all call `shared.features` and `workers.daily.models.factory`.
-- **Evaluator:** the predictor runs at 07:00 UTC on day D, uses the close of the bar opened on D-1 and predicts the bar opened on D, which closes at 00:00 UTC on D+1 (`predicted_for`). The evaluator settles it against that close once `fetch-price` has ingested it, and leaves it pending if the bar is missing (`fetch_actual_price` in `workers/daily/evaluator.py`).
+- **Evaluator:** the predictor runs at 00:10 UTC on day D, ten minutes after the close of the bar opened on D-1, uses that close and predicts the bar opened on D, which closes at 00:00 UTC on D+1 (`predicted_for`). The evaluator settles it against that close once `fetch-price` has ingested it, and leaves it pending if the bar is missing (`fetch_actual_price` in `workers/daily/evaluator.py`).
 - **Stale or gapped data:** the predictors and trainers refuse a series whose last bar is not dated yesterday (UTC) or that skips a day, exit 1 and save nothing (`require_fresh_series`, #174).
+- **Price anchor is fresh:** the predictor exits 1 and saves nothing if the last closed bar is older than `max_bar_age_hours` (2, `shared/shared/config.py`), so a late run cannot record a price nobody could trade at (`require_recent_close`, #175). The evaluator and the trainer have no such guard.
 - **Days are UTC:** every job takes today from `shared.utils.utc_today()`, never from `date.today()`. `docker-compose.yml` sets `TZ=America/Mexico_City`, so the local date is a day behind UTC from 00:00 to 06:00 UTC (#173). Details and the test fixture: `workers/daily/CLAUDE.md`.
 - **Live and replay predictions:** `scripts/simulate_history.py` marks the models it trains with `params["simulated"] = true`. The API and the dashboard separate them with `source=live|replay|all` (`source_filter` in `shared/shared/db/crud.py`; default `all`), and the combined total is always labeled "live + replay" (#176).
 - **Baselines:** every reported accuracy or PnL sits next to *always-up*, *persistence* and *buy-and-hold*, with the sample size, the edge and a binomial p-value (`shared/shared/baselines.py`).
