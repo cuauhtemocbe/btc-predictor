@@ -48,7 +48,7 @@ def get_evaluated_predictions(
         session: SQLAlchemy database session
         from_date: Optional start date filter (inclusive)
         to_date: Optional end date filter (inclusive)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w')
+        timeframe: Optional timeframe filter ('1d')
         symbol: Optional asset filter, matched on the predicting model's symbol
         source: ``live``, ``replay`` or ``all`` (default), by the predicting model
 
@@ -100,7 +100,7 @@ async def get_evaluated_predictions_async(
         session: SQLAlchemy async database session
         from_date: Optional start date filter (inclusive)
         to_date: Optional end date filter (inclusive)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w')
+        timeframe: Optional timeframe filter ('1d')
 
     Returns:
         List of Prediction objects with model relationship loaded,
@@ -140,7 +140,7 @@ def get_active_model(session: Session, timeframe: str = "1d") -> Model | None:
 
     Args:
         session: SQLAlchemy database session
-        timeframe: Prediction horizon to look up ('1h', '1d', '1w').
+        timeframe: Prediction horizon to look up ('1d').
             Defaults to '1d' for backward compatibility with callers
             that only ever dealt with daily models.
 
@@ -188,7 +188,7 @@ def deactivate_all_models(session: Session, timeframe: str | None = None) -> int
     Args:
         session: SQLAlchemy database session
         timeframe: If given, only deactivate models for this timeframe
-            ('1h', '1d', '1w'). If None, deactivate every active model
+            ('1d'). If None, deactivate every active model
             across all timeframes.
 
     Returns:
@@ -220,7 +220,7 @@ def activate_model(session: Session, model_id: int) -> Model:
     the trainers name each version "<family>_v<N>", so activating "linear_v2"
     deactivates the active "linear_v1" of the same symbol and timeframe, but
     never touches an active "xgboost_v1", a "linear_v1" of another symbol or
-    a "linear_v1"/"1w" model. The target is activated in the same
+    a "linear_v1" of another timeframe. The target is activated in the same
     transaction. This scoping is what lets multi-model prediction mode
     (US-025) keep different model families active at once within the same
     timeframe.

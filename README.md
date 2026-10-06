@@ -25,7 +25,7 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 - **Machine Learning:** scikit-learn, pandas, numpy
 - **Fuente de datos:** Binance vía [data.binance.vision](https://data.binance.vision) (archivos de historial y diarios) con REST `data-api.binance.vision` como respaldo. Gratis y sin API key.
 - **Activos:** `BTCUSDT` y `PAXGUSDT` (proxy del oro)
-- **Deploy:** Railway (6 servicios: postgres, api, fetch-price, daily, weekly-predictor, monthly-backtest)
+- **Deploy:** Railway (5 servicios: postgres, api, fetch-price, daily, monthly-backtest)
 - **Gestión de dependencias:** Poetry (monorepo con paquetes internos)
 
 ---
@@ -49,9 +49,6 @@ El proyecto se despliega como **6 servicios en Railway**:
          ↓
 ┌──────────────────┐
 │      daily       │  Cron diario 7am UTC: evalúa → entrena → predice (horizonte 1 día)
-└──────────────────┘
-┌──────────────────┐
-│ weekly-predictor │  Cron lunes 7am UTC: evalúa → entrena → predice (horizonte 7 días)
 └──────────────────┘
 ┌──────────────────┐
 │ monthly-backtest │  Cron día 1 de cada mes, 00:00 UTC: backtest walk-forward con la configuración de producción
@@ -87,7 +84,6 @@ btc-predictor/
     ├── fetch_price/     # Cron diario: vela diaria cerrada de cada símbolo
     ├── daily/           # Cron diario: evaluate → train → predict
     │   └── models/      # BaseModel abstract + modelos ML
-    ├── weekly/          # Cron semanal: evaluate → train → predict (7 días)
     └── backtest/        # Cron mensual: backtest walk-forward
 ```
 
@@ -107,7 +103,7 @@ btc-predictor/
    - Columna `artifact` (BYTEA) contiene el modelo
    - Solo 1 modelo activo por `(symbol, familia, timeframe)` (familia = nombre sin el sufijo `_v<N>`)
 
-3. **`predictions`** — Predicciones + evaluación (horizontes `1d` y `1w`)
+3. **`predictions`** — Predicciones + evaluación (horizonte `1d`, el único permitido)
    - Fase 1: Insertar predicción (hoy predice mañana)
    - Fase 2: Evaluar cuando la vela que la liquida ya está guardada (calcular error, PnL)
 
@@ -122,7 +118,7 @@ btc-predictor/
 - **Features:** `W` retornos logarítmicos rezagados, su desviación estándar (volatilidad) y `W` cambios logarítmicos de volumen. `W` es `TRAINING_WINDOW_DAYS` (21 por defecto).
 - **Modelo:** regresión lineal que predice el retorno logarítmico del día siguiente; el precio predicho es `último cierre × exp(retorno predicho)`. XGBoost, LSTM y ARIMA están readaptados a los mismos features y target (issue [#124](https://github.com/cuauhtemocbe/btc-predictor/issues/124)), pero los crons siguen entrenando y prediciendo solo con regresión lineal.
 - **Evaluación honesta:** cada exactitud o PnL se muestra junto a tres baselines (*always-up*, *persistence* y *buy-and-hold*) sobre los mismos días, con el tamaño de muestra, la ventaja (edge) y un p-value binomial. El backtest usa el mismo código de features y modelos que producción y separa un tramo de validación de un tramo de test que nunca se usa para decidir nada.
-- **Oro vía PAXG:** Binance no tiene un par de oro spot (XAU). El dashboard muestra el oro con `PAXGUSDT`, el token PAX Gold (1 token = 1 onza troy de oro físico), que opera 24/7. Es un **proxy**, no XAU spot: puede cotizar con una prima o descuento sobre el oro y sigue el horario y la liquidez de un exchange de cripto, no el fixing de Londres. Su historial es más corto (desde 2020-08). Los workers `daily` y `weekly` solo entrenan y predicen `BTCUSDT`; PAXG se ingesta y se muestra en el dashboard.
+- **Oro vía PAXG:** Binance no tiene un par de oro spot (XAU). El dashboard muestra el oro con `PAXGUSDT`, el token PAX Gold (1 token = 1 onza troy de oro físico), que opera 24/7. Es un **proxy**, no XAU spot: puede cotizar con una prima o descuento sobre el oro y sigue el horario y la liquidez de un exchange de cripto, no el fixing de Londres. Su historial es más corto (desde 2020-08). El worker `daily` solo entrenan y predicen `BTCUSDT`; PAXG se ingesta y se muestra en el dashboard.
 
 ---
 
@@ -375,10 +371,6 @@ Evaluator → Trainer → Predictor
 2. **Trainer:** Entrena el modelo con todas las velas diarias de `BTCUSDT`, guarda en `models`
 3. **Predictor:** Predice el precio de mañana, guarda en `predictions`
 
-### Cada lunes (7am UTC): `weekly-predictor` (cron)
-
-Mismo flujo evaluar → entrenar → predecir para el modelo de horizonte de 7 días.
-
 ### Cada mes (día 1, 00:00 UTC): `monthly-backtest` (cron)
 
 Corre `scripts/backtest.py` con la configuración de producción (ventana `TRAINING_WINDOW_DAYS`, últimos 365 días, últimos 100 como test) y guarda el resultado en `backtest_results`.
@@ -528,11 +520,10 @@ ENVIRONMENT=development
 
 1. Crear proyecto en Railway
 2. Agregar plugin PostgreSQL
-3. Crear 6 servicios (detalle en [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)):
+3. Crear 5 servicios (detalle en [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)):
    - **api:** Web service (`Dockerfile.api`)
    - **fetch-price:** Cron `0 6 * * *` (6am UTC diario)
    - **daily:** Cron `0 7 * * *` (7am UTC diario)
-   - **weekly-predictor:** Cron `0 7 * * 1` (lunes 7am UTC)
    - **monthly-backtest:** Cron `0 0 1 * *` (día 1 de cada mes, 00:00 UTC)
    - **postgres:** Plugin (automático)
 
@@ -546,7 +537,6 @@ ENVIRONMENT=development
 railway logs --service api
 railway logs --service fetch-price
 railway logs --service daily
-railway logs --service weekly-predictor
 railway logs --service monthly-backtest
 ```
 

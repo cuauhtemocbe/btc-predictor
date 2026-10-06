@@ -26,8 +26,8 @@ router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 
 # One definition of the timeframe filter (description and pattern) for every endpoint.
 _TIMEFRAME_QUERY = Query(
-    description="Timeframe filter: '1h', '1d', or '1w'",
-    pattern="^(1h|1d|1w)$",
+    description="Timeframe filter: '1d' (the only supported value)",
+    pattern="^1d$",
 )
 TimeframeQuery = Annotated[str, _TIMEFRAME_QUERY]
 OptionalTimeframeQuery = Annotated[str | None, _TIMEFRAME_QUERY]
@@ -59,7 +59,7 @@ async def get_prediction_history(
     Args:
         from_date: Optional start date filter (query param: ?from=2026-05-01)
         to_date: Optional end date filter (query param: ?to=2026-05-15)
-        timeframe: Optional timeframe filter (query param: ?timeframe=1w)
+        timeframe: Optional timeframe filter (query param: ?timeframe=1d)
         symbol: Asset to show (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         source: Predictions to include (query param: ?source=live|replay|all,
             default all). Each row carries ``is_replay`` either way.
@@ -72,7 +72,6 @@ async def get_prediction_history(
         - GET /api/predictions/history
         - GET /api/predictions/history?from=2026-05-01
         - GET /api/predictions/history?from=2026-05-01&to=2026-05-15
-        - GET /api/predictions/history?timeframe=1w
         - GET /api/predictions/history?timeframe=1d&from=2026-05-01
         - GET /api/predictions/history?source=live
     """
@@ -119,11 +118,11 @@ async def get_total_pnl(
 
     This endpoint aggregates the simulated PnL from all predictions that have
     been evaluated (actual_price IS NOT NULL). Useful for assessing overall
-    model profitability. Defaults to DEFAULT_TIMEFRAME so daily and weekly
-    PnL are never silently summed into one misleading figure.
+    model profitability. Defaults to DEFAULT_TIMEFRAME so PnL of different
+    timeframes is never silently summed into one misleading figure.
 
     Args:
-        timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
+        timeframe: Timeframe to aggregate (query param: ?timeframe=1d)
         symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         db: Database session (injected)
 
@@ -135,7 +134,6 @@ async def get_total_pnl(
     Examples:
         - GET /api/predictions/pnl
           Response: {"total_pnl": 12345.67, "evaluated_predictions": 30}
-        - GET /api/predictions/pnl?timeframe=1w
     """
     # Query for SUM(pnl_simulated) and COUNT(*) where pnl_simulated IS NOT NULL
     result = (
@@ -173,11 +171,11 @@ async def get_strategies_comparison(
 
     Returns aggregate metrics (Total PnL, Win Rate, Sharpe Ratio, etc.) and
     cumulative PnL time series for all 4 strategies: Simple, Long/Short,
-    Threshold, and Realistic. Defaults to DEFAULT_TIMEFRAME so daily and
-    weekly results are never silently combined.
+    Threshold, and Realistic. Defaults to DEFAULT_TIMEFRAME so results of
+    different timeframes are never silently combined.
 
     Args:
-        timeframe: Timeframe to aggregate (query param: ?timeframe=1w)
+        timeframe: Timeframe to aggregate (query param: ?timeframe=1d)
         symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
         db: Database session (injected)
 

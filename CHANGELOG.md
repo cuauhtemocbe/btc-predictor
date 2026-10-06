@@ -89,6 +89,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coverage gate, secret scanning, LICENSE, CHANGELOG, and accessibility
   glyphs for PnL indicators.
 
+### Removed
+
+- The weekly worker (`workers/weekly/`, `railway.weekly.toml`), the `weekly-predictor`
+  Railway service, the Weekly dashboard tab and the `1w` timeframe (#183). At 52
+  predictions a year a 55% hit rate cannot be told from 50% for about 12 years, and
+  production had 0 evaluated weekly predictions. `timeframe` accepts only `1d` in the
+  API (`1w` and `1h` answer 422) and in the database: migration `e2b8f4a6c1d7` deletes
+  the `1w` models and predictions (and any `1h` rows) and narrows the CHECK constraints
+  `valid_timeframe_values` and `valid_model_timeframe_values` to `('1d')`; its
+  downgrade restores the constraints, not the rows. `required_training_days` and
+  `fetch_training_data` lost their `horizon_days` argument. `weekly-predictor` must be
+  deleted or paused in Railway before this migration is deployed. Older entries keep
+  describing the weekly worker as it was.
+
 ## [0.1.0] - 2026-07-18
 
 ### Added

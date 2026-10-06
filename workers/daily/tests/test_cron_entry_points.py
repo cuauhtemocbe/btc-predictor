@@ -16,10 +16,6 @@ CRON_ENTRY_POINTS = [
     "workers.daily.evaluator",
     "workers.daily.trainer",
     "workers.daily.predictor",
-    "workers.weekly.__main__",
-    "workers.weekly.evaluator",
-    "workers.weekly.trainer",
-    "workers.weekly.predictor",
     "workers.backtest.main",
 ]
 

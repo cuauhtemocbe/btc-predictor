@@ -388,14 +388,13 @@ def test_one_active_version_per_name_timeframe_constraint(
     assert "ix_models_one_active_version_per_name_timeframe" in str(exc_info.value)
 
 
-def test_active_version_constraint_allows_different_name_or_timeframe(
+def test_active_version_constraint_allows_different_name(
     db_session: Session, sample_model_artifact: bytes
 ) -> None:
     """
     The partial unique index only blocks duplicates of the SAME
-    (name, timeframe). A different name (multi-model mode) or a different
-    timeframe (e.g. a '1w' model alongside a '1d' model) must both be
-    allowed active at the same time.
+    (name, timeframe). A different name (multi-model mode) must be allowed
+    active at the same time.
     """
     linear_1d = Model(
         name="linear_v1",
@@ -419,24 +418,11 @@ def test_active_version_constraint_allows_different_name_or_timeframe(
         timeframe="1d",
         is_active=True,
     )
-    linear_1w = Model(
-        name="linear_v1",
-        version="1.0.0-weekly",
-        params={},
-        artifact=sample_model_artifact,
-        trained_at=datetime.now(UTC),
-        train_from=date(2024, 1, 1),
-        train_to=date(2024, 5, 1),
-        timeframe="1w",
-        is_active=True,
-    )
-
-    db_session.add_all([linear_1d, xgboost_1d, linear_1w])
+    db_session.add_all([linear_1d, xgboost_1d])
     db_session.commit()  # Must not raise
 
     assert linear_1d.is_active is True
     assert xgboost_1d.is_active is True
-    assert linear_1w.is_active is True
 
 
 def test_trained_at_not_null_constraint(

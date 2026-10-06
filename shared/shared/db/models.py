@@ -157,9 +157,7 @@ class Model(Base):
     __table_args__ = (
         UniqueConstraint("symbol", "name", "version", name="unique_model_version"),
         CheckConstraint("train_to >= train_from", name="valid_training_period"),
-        CheckConstraint(
-            "timeframe IN ('1h', '1d', '1w')", name="valid_model_timeframe_values"
-        ),
+        CheckConstraint("timeframe IN ('1d')", name="valid_model_timeframe_values"),
         Index(
             "ix_models_one_active_version_per_name_timeframe",
             "symbol",
@@ -216,8 +214,8 @@ class Model(Base):
         nullable=False,
         default="1d",
         comment=(
-            "Prediction horizon this model was trained for: '1h' (hourly), "
-            "'1d' (daily), '1w' (weekly). At most one active version per "
+            "Prediction horizon this model was trained for: '1d' (daily), "
+            "the only value allowed. At most one active version per "
             "(symbol, family, timeframe) is allowed at a time (enforced by "
             "ix_models_one_active_version_per_name_timeframe); different "
             "families can be active concurrently (multi-model mode)."
@@ -250,7 +248,8 @@ class Prediction(Base):
 
     Tracks model accuracy, error rates, and simulated trading profitability.
 
-    Supports multiple timeframes: 1d (daily), 1w (weekly).
+    Only the daily timeframe (1d) is allowed; the column is kept so the unique
+    constraint and the queries do not change.
     """
 
     __tablename__ = "predictions"
@@ -261,9 +260,7 @@ class Prediction(Base):
             "model_id",
             name="unique_prediction_per_model_timeframe",
         ),
-        CheckConstraint(
-            "timeframe IN ('1h', '1d', '1w')", name="valid_timeframe_values"
-        ),
+        CheckConstraint("timeframe IN ('1d')", name="valid_timeframe_values"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -277,13 +274,13 @@ class Prediction(Base):
         Date,
         nullable=False,
         index=True,
-        comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",
+        comment="Date being predicted (the day after the last closed bar)",
     )
     timeframe: Mapped[str] = mapped_column(
         String(2),
         nullable=False,
         default="1d",
-        comment="Prediction timeframe: '1h' (hourly), '1d' (daily), '1w' (weekly)",
+        comment="Prediction timeframe: '1d' (daily, the only value allowed)",
     )
     predicted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

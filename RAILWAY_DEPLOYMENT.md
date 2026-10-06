@@ -16,7 +16,6 @@ The project has **6 services**:
 | **api** | Web, always on | — | FastAPI + dashboard |
 | **fetch-price** | Cron | `0 6 * * *` (daily 6am) | Ingests the closed daily Binance bar of each symbol |
 | **daily** | Cron | `0 7 * * *` (daily 7am) | evaluator → trainer → predictor (1-day horizon) |
-| **weekly-predictor** | Cron | `0 7 * * 1` (Mondays 7am) | evaluator → trainer → predictor (7-day horizon) |
 | **monthly-backtest** | Cron | `0 0 1 * *` (1st of the month, 00:00) | Walk-forward backtest with the production configuration |
 
 ---
@@ -119,13 +118,12 @@ The loader verifies the SHA256 checksum of every monthly zip, is idempotent, and
 - **Trainer**: trains the Linear model on every stored `BTCUSDT` daily row (log-return features, window `TRAINING_WINDOW_DAYS`) and fails with the required and available row counts if there is too little history
 - **Predictor**: predicts the next day with the active model
 
-### Step 7: Configure Weekly and Monthly Cron Jobs
+### Step 7: Configure the Monthly Cron Job
 
 Same image and variables as `daily`, different start command and schedule:
 
 | Service | Dockerfile | Start Command | Cron Schedule |
 |---------|-----------|---------------|---------------|
-| `weekly-predictor` | `Dockerfile.ml` | `python -m workers.weekly` | `0 7 * * 1` |
 | `monthly-backtest` | `Dockerfile.backtest` | `python -m workers.backtest.main` | `0 0 1 * *` |
 
 `monthly-backtest` runs the walk-forward backtest with the production window, the last 365 days and the last 100 days as the out-of-sample test slice, and stores the rows in `backtest_results`. It exits 1 when there is too little history instead of shrinking the window. See [`docs/BACKTESTING.md`](docs/BACKTESTING.md).
@@ -194,7 +192,6 @@ Expected response:
 railway logs --service api
 railway logs --service fetch-price
 railway logs --service daily
-railway logs --service weekly-predictor
 railway logs --service monthly-backtest
 ```
 

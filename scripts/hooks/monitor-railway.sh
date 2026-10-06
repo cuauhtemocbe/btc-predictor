@@ -3,7 +3,7 @@
 # Monitor Railway deployment after git push
 #
 # This script monitors Railway services until they complete deployment.
-# It checks the status of btc-predictor, weekly-predictor, daily, and fetch-price services.
+# It checks the status of btc-predictor, daily, and fetch-price services.
 #
 # Usage:
 #   ./scripts/hooks/monitor-railway.sh [--silent]
@@ -21,7 +21,7 @@ set -e
 # Configuration (env overrides exist so the script can be tested with a stub)
 TIMEOUT_SECONDS=${MONITOR_TIMEOUT_SECONDS:-420}  # 7 minutes max
 CHECK_INTERVAL=${MONITOR_CHECK_INTERVAL:-5}      # Check every 5 seconds
-SERVICES=("btc-predictor" "weekly-predictor" "daily" "fetch-price")
+SERVICES=("btc-predictor" "daily" "fetch-price")
 
 # Colors
 RED='\033[0;31m'

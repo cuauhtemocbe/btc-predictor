@@ -376,7 +376,7 @@ A year of Linear predictions (retrain every day) takes about 10 s. If a run take
 
 - [ ] Web dashboard for backtest visualization (US-021)
 - [ ] Multi-model comparison (US-023-026)
-- [ ] Multi-timeframe predictions (weekly, monthly)
+- [ ] Multi-timeframe predictions (monthly)
 - [ ] Parameter optimization (grid search, Bayesian optimization)
 - [ ] Walk-forward optimization (optimize hyperparameters during backtest)
 
