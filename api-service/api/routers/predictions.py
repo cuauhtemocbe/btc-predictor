@@ -15,11 +15,11 @@ from api.models.predictions import (
     StrategyMetrics,
 )
 from api.numeric import required_float
-from api.symbols import DEFAULT_SYMBOL, SymbolQuery
+from api.symbols import DEFAULT_SYMBOL, SourceQuery, SymbolQuery
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
-from shared.db.models import Model, Prediction
+from shared.db.models import Model, Prediction, PredictionSource
 from shared.utils import DEFAULT_TIMEFRAME
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
@@ -47,6 +47,7 @@ async def get_prediction_history(
     ),
     timeframe: OptionalTimeframeQuery = None,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
+    source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> list[PredictionHistoryResponse]:
     """
@@ -60,6 +61,8 @@ async def get_prediction_history(
         to_date: Optional end date filter (query param: ?to=2026-05-15)
         timeframe: Optional timeframe filter (query param: ?timeframe=1w)
         symbol: Asset to show (query param: ?symbol=PAXGUSDT, default BTCUSDT)
+        source: Predictions to include (query param: ?source=live|replay|all,
+            default all). Each row carries ``is_replay`` either way.
         db: Database session (injected)
 
     Returns:
@@ -71,6 +74,7 @@ async def get_prediction_history(
         - GET /api/predictions/history?from=2026-05-01&to=2026-05-15
         - GET /api/predictions/history?timeframe=1w
         - GET /api/predictions/history?timeframe=1d&from=2026-05-01
+        - GET /api/predictions/history?source=live
     """
     predictions = get_evaluated_predictions(
         session=db,
@@ -78,6 +82,7 @@ async def get_prediction_history(
         to_date=to_date,
         timeframe=timeframe,
         symbol=symbol,
+        source=source,
     )
 
     # Convert to response models with model info
@@ -96,6 +101,7 @@ async def get_prediction_history(
             model_name=p.model.name,
             model_version=p.model.version,
             timeframe=p.timeframe,
+            is_replay=p.model.is_replay,
         )
         for p in predictions
     ]

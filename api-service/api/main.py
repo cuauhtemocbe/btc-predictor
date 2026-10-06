@@ -14,10 +14,18 @@ from api.routers.backtesting import router as backtesting_router
 from api.routers.models import router as models_router
 from api.routers.predictions import router as predictions_router
 from api.routers.prices import router as prices_router
-from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
+from api.summaries import source_summaries
+from api.symbols import (
+    DEFAULT_SYMBOL,
+    SourceQuery,
+    SymbolQuery,
+    asset_context,
+    source_context,
+)
 from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
+from shared.db.models import PredictionSource
 from shared.utils import DEFAULT_TIMEFRAME
 
 app = FastAPI(title="BTC Predictor", version="0.1.0")
@@ -38,6 +46,7 @@ async def dashboard(
     db: Session = Depends(get_db),
     timeframe: str | None = None,
     symbol: SymbolQuery = DEFAULT_SYMBOL,
+    source: SourceQuery = PredictionSource.ALL,
 ) -> HTMLResponse:
     """
     Render the main dashboard showing prediction history.
@@ -50,6 +59,8 @@ async def dashboard(
         db: Database session
         timeframe: Optional filter for timeframe ('1d', '1w'). Defaults to '1d' if None.
         symbol: Asset to show (default BTCUSDT); every table and chart is scoped to it.
+        source: ``live``, ``replay`` or ``all`` (default). Live and replay get
+            separate headline blocks; the combined one appears only under ``all``.
     """
     # Default timeframe if none specified -- shared across every metrics
     # endpoint so daily and weekly results are never silently combined.
@@ -58,7 +69,7 @@ async def dashboard(
 
     # Fetch evaluated predictions filtered by timeframe
     predictions_data = get_evaluated_predictions(
-        session=db, timeframe=timeframe, symbol=symbol
+        session=db, timeframe=timeframe, symbol=symbol, source=source
     )
 
     # Convert to template-friendly format
@@ -76,12 +87,15 @@ async def dashboard(
             "pnl_simulated": required_float(p.pnl_simulated, "pnl_simulated"),
             "model_name": p.model.name,
             "model_version": p.model.version,
+            "is_replay": p.model.is_replay,
         }
         for p in predictions_data
     ]
 
     # Fetch strategy metrics for the same timeframe as the predictions above
-    strategies = get_all_strategies_metrics(db, timeframe=timeframe, symbol=symbol)
+    strategies = get_all_strategies_metrics(
+        db, timeframe=timeframe, symbol=symbol, source=source
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -89,6 +103,10 @@ async def dashboard(
         context={
             "predictions": predictions,
             "strategies": strategies,
+            "summaries": source_summaries(
+                db, symbol, timeframe, source, predictions_data
+            ),
+            **source_context(request, source),
             **asset_context(request, symbol),
         },
     )

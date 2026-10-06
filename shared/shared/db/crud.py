@@ -6,16 +6,31 @@ Functions for querying and manipulating database records using SQLAlchemy ORM.
 
 from datetime import date
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, false, func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from shared.db.models import (
+    REPLAY_PARAM,
     VERSION_SUFFIX_PATTERN,
     Model,
     Prediction,
+    PredictionSource,
     model_family,
 )
+
+
+def source_filter(source: PredictionSource) -> ColumnElement[bool]:
+    """
+    SQL condition selecting the models of one source; needs ``models`` in the query.
+
+    A replay model has ``params["simulated"]`` true (``is_replay_params`` is the
+    Python twin of this check). A model without the key, or with it false, is live.
+    """
+    if source is PredictionSource.ALL:
+        return true()
+    is_replay = func.coalesce(Model.params[REPLAY_PARAM].as_boolean(), false())
+    return is_replay if source is PredictionSource.REPLAY else ~is_replay
 
 
 def get_evaluated_predictions(
@@ -24,6 +39,7 @@ def get_evaluated_predictions(
     to_date: date | None = None,
     timeframe: str | None = None,
     symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
 ) -> list[Prediction]:
     """
     Query all evaluated predictions (actual_price IS NOT NULL) with model info.
@@ -34,6 +50,7 @@ def get_evaluated_predictions(
         to_date: Optional end date filter (inclusive)
         timeframe: Optional timeframe filter ('1h', '1d', '1w')
         symbol: Optional asset filter, matched on the predicting model's symbol
+        source: ``live``, ``replay`` or ``all`` (default), by the predicting model
 
     Returns:
         List of Prediction objects with model relationship loaded,
@@ -59,6 +76,7 @@ def get_evaluated_predictions(
         query = query.where(Prediction.timeframe == timeframe)
     if symbol:
         query = query.where(Model.symbol == symbol)
+    query = query.where(source_filter(source))
 
     # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())

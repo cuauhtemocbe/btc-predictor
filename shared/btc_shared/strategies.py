@@ -5,7 +5,8 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
-from shared.db.models import Model, Prediction
+from shared.db.crud import source_filter
+from shared.db.models import Model, Prediction, PredictionSource
 
 
 def calculate_strategy_metrics(
@@ -120,7 +121,10 @@ def calculate_cumulative_pnl(
 
 
 def get_all_strategies_metrics(
-    db: Session, timeframe: str | None = None, symbol: str | None = None
+    db: Session,
+    timeframe: str | None = None,
+    symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
     """
     Calculate metrics for all 4 PnL strategies.
@@ -130,6 +134,7 @@ def get_all_strategies_metrics(
         timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
             every timeframe is mixed together in one series.
         symbol: Optional asset filter, matched on the predicting model's symbol.
+        source: ``live``, ``replay`` or ``all`` (default), by the predicting model.
 
     Returns:
         List of dicts, one per strategy with name and metrics
@@ -142,11 +147,10 @@ def get_all_strategies_metrics(
     ]
 
     # Fetch all predictions (will reuse for all strategies)
-    query = db.query(Prediction)
+    query = db.query(Prediction).join(Model, Prediction.model_id == Model.id)
     if symbol:
-        query = query.join(Model, Prediction.model_id == Model.id).filter(
-            Model.symbol == symbol
-        )
+        query = query.filter(Model.symbol == symbol)
+    query = query.filter(source_filter(source))
     if timeframe:
         query = query.filter(Prediction.timeframe == timeframe)
     predictions = query.order_by(Prediction.predicted_for).all()

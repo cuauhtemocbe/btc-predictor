@@ -11,6 +11,7 @@ Models:
 import re
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -41,6 +42,24 @@ VERSION_SUFFIX_PATTERN = r"_v[0-9]+$"
 
 # The same rule as model_family(), as a SQL expression on the ``name`` column.
 MODEL_FAMILY_SQL = f"regexp_replace(name, '{VERSION_SUFFIX_PATTERN}', '')"
+
+
+# Key of ``Model.params`` that ``scripts/simulate_history.py`` sets on every model
+# it trains to replay the days before go-live (#176). Live trainers never set it.
+REPLAY_PARAM = "simulated"
+
+
+class PredictionSource(StrEnum):
+    """Which predictions a query or page covers: live ones, replayed ones or both."""
+
+    LIVE = "live"
+    REPLAY = "replay"
+    ALL = "all"
+
+
+def is_replay_params(params: dict[str, Any] | None) -> bool:
+    """Whether a model's ``params`` mark it as trained by the history replay."""
+    return params is not None and params.get(REPLAY_PARAM) is True
 
 
 def model_family(name: str) -> str:
@@ -204,6 +223,11 @@ class Model(Base):
             "families can be active concurrently (multi-model mode)."
         ),
     )
+
+    @property
+    def is_replay(self) -> bool:
+        """True when the model was trained by the history replay (simulated)."""
+        return is_replay_params(self.params)
 
     def __repr__(self) -> str:
         return (
