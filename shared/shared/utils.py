@@ -30,6 +30,8 @@ import numpy as np
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from shared.db.models import PredictionSource
+
 # Prediction.timeframe values, and the one used when a caller doesn't name
 # one explicitly. Applied consistently across every metric function below
 # and every API endpoint that doesn't require an explicit timeframe query
@@ -978,6 +980,7 @@ def get_all_models_metrics(
     timeframe: str | None = None,
     capital: float = DEFAULT_CAPITAL,
     symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
     """
     Get performance metrics for all models in one call.
@@ -994,6 +997,8 @@ def get_all_models_metrics(
         capital: Reference capital that sharpe_ratio and max_drawdown_pct
             are normalized against (default: DEFAULT_CAPITAL)
         symbol: Optional asset filter; only models trained for it are returned.
+        source: ``live``, ``replay`` or ``all`` (default); only models of that
+            source are returned (replay = trained by ``simulate_history``).
 
     Returns:
         List of dictionaries with structure:
@@ -1012,6 +1017,7 @@ def get_all_models_metrics(
             "max_drawdown": float | None,
             "max_drawdown_pct": float | None,
             "symbol": str,
+            "is_replay": bool,  # simulated model (history replay), not live
             "baseline": dict | None,  # see get_model_baseline (daily only)
         }
 
@@ -1029,6 +1035,7 @@ def get_all_models_metrics(
             ...
         ]
     """
+    from shared.db.crud import source_filter
     from shared.db.models import Model
     from shared.model_baselines import get_model_baseline
 
@@ -1036,7 +1043,7 @@ def get_all_models_metrics(
     model_query = db.query(Model)
     if symbol:
         model_query = model_query.filter(Model.symbol == symbol)
-    models = model_query.all()
+    models = model_query.filter(source_filter(source)).all()
 
     results = []
     for model in models:
@@ -1064,6 +1071,7 @@ def get_all_models_metrics(
                 "predictions_count": predictions_count,
                 **_round_model_metrics(metrics),
                 "symbol": model.symbol,
+                "is_replay": model.is_replay,
                 "baseline": get_model_baseline(
                     db, model.id, model.symbol, start_date, end_date, timeframe
                 ),

@@ -11,6 +11,7 @@ about a weekly horizon, so other timeframes get no baseline (None), never a
 misleading number.
 """
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -114,6 +115,20 @@ def get_model_baseline(
     if not predictions:
         return None
 
+    return baseline_for_predictions(db, symbol, predictions)
+
+
+def baseline_for_predictions(
+    db: Session, symbol: str, predictions: Sequence[Prediction]
+) -> dict[str, Any] | None:
+    """
+    Baselines and edge over ``predictions``, which must all be evaluated dailies.
+
+    Same dict as ``get_model_baseline``; None when ``predictions`` is empty. The
+    dashboard uses it to score a whole source (live or replay) on its own days.
+    """
+    if not predictions:
+        return None
     first_day = min(p.predicted_for for p in predictions) - timedelta(days=2)
     closes = daily_closes(db, symbol, first_day)
     days = [

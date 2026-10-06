@@ -1,4 +1,4 @@
-"""Asset selection shared by every dashboard page and JSON endpoint (#107)."""
+"""Asset and prediction-source selection shared by every page and JSON endpoint."""
 
 from typing import Annotated, Any
 from urllib.parse import urlencode
@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from fastapi import Query, Request
 
 from shared.assets import ASSETS, SUPPORTED_SYMBOLS
-from shared.db.models import DEFAULT_SYMBOL
+from shared.db.models import DEFAULT_SYMBOL, PredictionSource
 
 # Unknown symbols fail validation (HTTP 422) instead of silently showing no data.
 SymbolQuery = Annotated[
@@ -16,6 +16,47 @@ SymbolQuery = Annotated[
         description=f"Asset symbol: {', '.join(SUPPORTED_SYMBOLS)}",
     ),
 ]
+
+
+# Invalid values fail validation (HTTP 422) instead of silently showing everything.
+SourceQuery = Annotated[
+    PredictionSource,
+    Query(
+        description=(
+            "Predictions to include: 'live' (made by the running system), "
+            "'replay' (simulated by the history replay) or 'all' (default)"
+        ),
+    ),
+]
+
+
+_SOURCE_LABELS = {
+    PredictionSource.ALL: "All",
+    PredictionSource.LIVE: "Live",
+    PredictionSource.REPLAY: "Replay",
+}
+
+
+def source_context(request: Request, source: PredictionSource) -> dict[str, Any]:
+    """
+    Template context for the source selector (live / replay / all).
+
+    Same idea as ``asset_context``: each option links to the same page with only
+    ``source`` replaced, so symbol, dates and timeframe survive a switch.
+    """
+    kept = [(k, v) for k, v in request.query_params.multi_items() if k != "source"]
+    return {
+        "source": source.value,
+        "source_options": [
+            {
+                "value": option.value,
+                "label": label,
+                "href": f"?{urlencode([*kept, ('source', option.value)])}",
+                "selected": option is source,
+            }
+            for option, label in _SOURCE_LABELS.items()
+        ],
+    }
 
 
 def asset_context(request: Request, symbol: str) -> dict[str, Any]:
@@ -46,4 +87,10 @@ def asset_context(request: Request, symbol: str) -> dict[str, Any]:
     return {"asset": ASSETS[symbol], "asset_options": options}
 
 
-__all__ = ["DEFAULT_SYMBOL", "SymbolQuery", "asset_context"]
+__all__ = [
+    "DEFAULT_SYMBOL",
+    "SourceQuery",
+    "SymbolQuery",
+    "asset_context",
+    "source_context",
+]

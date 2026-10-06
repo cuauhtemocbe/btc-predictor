@@ -315,6 +315,7 @@
 
         <div class="content">
             {% include "_asset_selector.html" %}
+            {% include "_source_selector.html" %}
 
             <!-- Date Range Filter -->
             <form method="get" class="filter-form">
@@ -376,6 +377,9 @@
                     <tr class="{% if model.id == best_model_id %}best-model{% endif %}">
                         <td>
                             <span class="model-name">{{ model.name }}</span>
+                            {% if model.is_replay %}
+                            <span class="replay-badge" title="Trained by the history replay, not a live model">Replay</span>
+                            {% endif %}
                             {% if model.is_active %}
                             <span class="badge active-badge">ACTIVE</span>
                             {% endif %}

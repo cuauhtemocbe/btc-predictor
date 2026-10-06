@@ -6,7 +6,9 @@ specifically targeting mutation testing scenarios.
 """
 
 import pickle
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from typing import Any
 
 import numpy as np
 import pytest
@@ -21,7 +23,13 @@ from shared.db.crud import (
     get_evaluated_predictions,
     get_evaluated_predictions_async,
 )
-from shared.db.models import Model, Prediction, model_family
+from shared.db.models import (
+    Model,
+    Prediction,
+    PredictionSource,
+    is_replay_params,
+    model_family,
+)
 
 
 @pytest.fixture
@@ -935,3 +943,76 @@ def test_model_family_strips_only_a_trailing_version_suffix(
     name: str, family: str
 ) -> None:
     assert model_family(name) == family
+
+
+# --- Replay vs live source (#176) ---
+
+
+def _source_model(db_session: Session, version: str, params: dict[str, Any]) -> Model:
+    model = Model(
+        name="linear_v1",
+        version=version,
+        params=params,
+        artifact=b"x",
+        trained_at=datetime(2026, 9, 1, tzinfo=UTC),
+        train_from=date(2026, 8, 1),
+        train_to=date(2026, 8, 31),
+        is_active=False,
+    )
+    db_session.add(model)
+    db_session.flush()
+    return model
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"simulated": True}, True),
+        ({"simulated": False}, False),
+        ({"window_days": 21}, False),
+        ({"simulated": "yes"}, False),
+        ({}, False),
+        (None, False),
+    ],
+)
+def test_is_replay_params(params: dict[str, Any] | None, expected: bool) -> None:
+    """Only a boolean true under ``simulated`` marks a replay model."""
+    assert is_replay_params(params) is expected
+
+
+def test_source_filter_splits_predictions_by_model_params(
+    db_session: Session,
+) -> None:
+    """live, replay and all select by ``params.simulated`` in SQL."""
+    models = {
+        "replay": _source_model(db_session, "sim-1", {"simulated": True}),
+        "false": _source_model(db_session, "v-false", {"simulated": False}),
+        "absent": _source_model(db_session, "v-absent", {"window_days": 21}),
+    }
+    for i, model in enumerate(models.values()):
+        db_session.add(
+            Prediction(
+                model_id=model.id,
+                predicted_for=date(2026, 9, 1) + timedelta(days=i),
+                timeframe="1d",
+                predicted_at=datetime(2026, 9, 1, tzinfo=UTC),
+                price_at_prediction=Decimal("100"),
+                predicted_price=Decimal("101"),
+                actual_price=Decimal("102"),
+            )
+        )
+    db_session.flush()
+
+    def versions(source: PredictionSource) -> set[str]:
+        return {
+            p.model.version
+            for p in get_evaluated_predictions(db_session, source=source)
+        }
+
+    assert versions(PredictionSource.REPLAY) == {"sim-1"}
+    assert versions(PredictionSource.LIVE) == {"v-false", "v-absent"}
+    assert versions(PredictionSource.ALL) == {"sim-1", "v-false", "v-absent"}
+    assert {p.model.version for p in get_evaluated_predictions(db_session)} == versions(
+        PredictionSource.ALL
+    )
+    assert models["replay"].is_replay and not models["false"].is_replay

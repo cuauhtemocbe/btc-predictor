@@ -23,8 +23,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
+from api.symbols import (
+    DEFAULT_SYMBOL,
+    SourceQuery,
+    SymbolQuery,
+    asset_context,
+    source_context,
+)
 from shared.db.database import get_db
+from shared.db.models import PredictionSource
 from shared.utils import DEFAULT_TIMEFRAME, get_all_models_metrics, get_cumulative_pnl
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -45,6 +52,7 @@ async def models_dashboard(
         pattern="^(1h|1d|1w)$",
     ),
     symbol: SymbolQuery = DEFAULT_SYMBOL,
+    source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """
@@ -57,6 +65,8 @@ async def models_dashboard(
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
             daily and weekly metrics are never silently combined
         symbol: Asset to show (default BTCUSDT); only its models are compared
+        source: ``live``, ``replay`` or ``all`` (default); simulated models are
+            marked either way
         db: Database session
 
     Returns:
@@ -64,7 +74,7 @@ async def models_dashboard(
     """
     # Get metrics for all models
     models_metrics = get_all_models_metrics(
-        db, start_date, end_date, timeframe=timeframe, symbol=symbol
+        db, start_date, end_date, timeframe=timeframe, symbol=symbol, source=source
     )
 
     # Identify best performing model (highest Total PnL)
@@ -95,6 +105,7 @@ async def models_dashboard(
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
             "timeframe": timeframe,
+            **source_context(request, source),
             **asset_context(request, symbol),
         },
     )
@@ -115,6 +126,7 @@ async def models_metrics_api(
         pattern="^(1h|1d|1w)$",
     ),
     symbol: SymbolQuery = DEFAULT_SYMBOL,
+    source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -130,6 +142,8 @@ async def models_metrics_api(
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
             daily and weekly metrics are never silently combined
         symbol: Asset to show (default BTCUSDT); only its models are returned
+        source: ``live``, ``replay`` or ``all`` (default); each model carries
+            ``is_replay`` either way
         db: Database session
 
     Returns:
@@ -149,7 +163,8 @@ async def models_metrics_api(
                     "win_rate": 0.60,
                     "sharpe_ratio": 1.25,
                     "max_drawdown": -450.00,
-                    "max_drawdown_pct": -4.50
+                    "max_drawdown_pct": -4.50,
+                    "is_replay": false
                 },
                 ...
             ],
@@ -164,7 +179,13 @@ async def models_metrics_api(
     """
     # Get metrics for all models
     models_metrics = get_all_models_metrics(
-        db, start_date, end_date, pnl_column, timeframe, symbol=symbol
+        db,
+        start_date,
+        end_date,
+        pnl_column,
+        timeframe,
+        symbol=symbol,
+        source=source,
     )
 
     # Get daily cumulative PnL for all models
@@ -191,5 +212,6 @@ async def models_metrics_api(
             "pnl_column": pnl_column,
             "timeframe": timeframe,
             "symbol": symbol,
+            "source": source.value,
         },
     }

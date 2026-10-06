@@ -16,6 +16,7 @@ from shared.model_baselines import (
     BEATS,
     INCONCLUSIVE,
     NOT_BEATING,
+    baseline_for_predictions,
     daily_closes,
     get_model_baseline,
     verdict,
@@ -266,3 +267,8 @@ def test_symbol_filter_scopes_every_shared_query(db_session: Session) -> None:
     gold_strategies = get_all_strategies_metrics(db_session, symbol="PAXGUSDT")
     assert gold_strategies[0]["trade_count"] == 3
     assert get_all_strategies_metrics(db_session)[0]["trade_count"] == 7
+
+
+def test_baseline_for_no_predictions_is_none(db_session: Session) -> None:
+    """A source with no evaluated days has no baseline to report."""
+    assert baseline_for_predictions(db_session, "BTCUSDT", []) is None

@@ -27,7 +27,8 @@ class PredictionHistoryResponse(BaseModel):
         "pnl_simulated": 800.0,
         "model_name": "linear_v1",
         "model_version": "1.0.0",
-        "timeframe": "1d"
+        "timeframe": "1d",
+        "is_replay": false
     }
     ```
     """
@@ -49,6 +50,12 @@ class PredictionHistoryResponse(BaseModel):
     model_name: str = Field(description="Name of the model used")
     model_version: str = Field(description="Version of the model used")
     timeframe: str = Field(description="Prediction timeframe ('1h', '1d', '1w')")
+    is_replay: bool = Field(
+        description=(
+            "True when the model was trained by the history replay (simulated), "
+            "false when the running system made the prediction"
+        )
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
