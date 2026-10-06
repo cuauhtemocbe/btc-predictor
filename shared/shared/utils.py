@@ -2,6 +2,7 @@
 Utility functions for BTC Predictor.
 
 Functions:
+- utc_now: Current instant in UTC, the clock of the freshness guard
 - utc_today: Current calendar date in UTC, the day boundary of the whole pipeline
 - calculate_pnl: Calculate simulated profit/loss from prediction strategy
 - calculate_pnl_long_short: Calculate PnL with long/short symmetric strategy
@@ -40,6 +41,15 @@ SUPPORTED_TIMEFRAMES = ("1d",)
 DEFAULT_TIMEFRAME = "1d"
 
 
+def utc_now() -> datetime:
+    """Return the current instant as a timezone-aware UTC datetime.
+
+    The clock the freshness guard of the predictor reads (#175); tests freeze it
+    by patching ``datetime`` in this module.
+    """
+    return datetime.now(UTC)
+
+
 def utc_today() -> date:
     """Return today's calendar date in UTC, whatever the process time zone is.
 
@@ -47,7 +57,7 @@ def utc_today() -> date:
     The container's local date follows its ``TZ`` (America/Mexico_City, UTC-6) and
     is a day behind UTC for part of the day (#173).
     """
-    return datetime.now(UTC).date()
+    return utc_now().date()
 
 
 # Reference capital (in USDT) that risk-adjusted metrics (Sharpe ratio,

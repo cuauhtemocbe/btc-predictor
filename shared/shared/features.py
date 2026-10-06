@@ -20,7 +20,7 @@ rows ``t - W .. t``, so they carry no future data.
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -63,11 +63,37 @@ class DailySeries:
         return len(self.closes)
 
 
+def require_recent_close(last_bar: date, now: datetime, max_age: timedelta) -> None:
+    """
+    Refuse to predict from a bar that closed too long ago (#175).
+
+    The bar dated ``last_bar`` closes at 00:00 UTC of the next day, and the
+    prediction is anchored to that close. The pnl columns assume a position
+    opened at that price, so the job has to run right after it.
+
+    Args:
+        last_bar: Date (UTC day) of the last stored bar
+        now: The instant the job runs at, timezone-aware
+        max_age: Oldest acceptable time since the bar's close
+
+    Raises:
+        ValueError: If the bar closed more than ``max_age`` before ``now``.
+    """
+    closed_at = datetime.combine(last_bar + timedelta(days=1), time.min, tzinfo=UTC)
+    age = now - closed_at
+    if age > max_age:
+        raise ValueError(
+            f"Last bar ({last_bar}) closed at {closed_at:%Y-%m-%d %H:%M} UTC, "
+            f"{age} ago; the maximum age is {max_age}, so the price the "
+            "prediction is anchored to is stale"
+        )
+
+
 def require_fresh_series(dates: Sequence[date], today: date) -> None:
     """
     Refuse a series that is stale or has gaps, before features are built from it.
 
-    A prediction made at 07:00 UTC on ``today`` needs the bar of ``today - 1`` as
+    A prediction made at 00:10 UTC on ``today`` needs the bar of ``today - 1`` as
     its last bar, and one bar per day before it. Otherwise a return silently
     spans several days and is scored as a one-day move (#174).
 

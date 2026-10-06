@@ -27,6 +27,7 @@ import numpy.typing as npt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from shared.config import settings
 from shared.db.database import SessionLocal
 from shared.db.models import DEFAULT_SYMBOL, Model, Prediction, Price
 from shared.features import (
@@ -35,9 +36,10 @@ from shared.features import (
     build_prediction_features,
     price_from_return,
     require_fresh_series,
+    require_recent_close,
     required_history_days,
 )
-from shared.utils import utc_today
+from shared.utils import utc_now, utc_today
 from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -373,6 +375,7 @@ def _predict_one(
     tomorrow: date,
     current_price: Decimal,
     outcome: PredictionOutcome,
+    now: datetime,
 ) -> None:
     """
     Generate and save the prediction of one model, unless it already exists.
@@ -401,6 +404,11 @@ def _predict_one(
 
     # Refuse a stale series or one with gaps: no prediction is saved (#174)
     require_fresh_series(series.dates, today=tomorrow - timedelta(days=1))
+
+    # Refuse a bar that closed too long ago: the price anchor must be tradable (#175)
+    require_recent_close(
+        series.dates[-1], now, timedelta(hours=settings.max_bar_age_hours)
+    )
 
     # Prepare features
     X = prepare_features(series, window_days)
@@ -431,6 +439,7 @@ def _predict_single_model(
     tomorrow: date,
     current_price: Decimal,
     outcome: PredictionOutcome,
+    now: datetime,
 ) -> None:
     """
     Single-model mode: predict with the primary model and fail immediately.
@@ -441,7 +450,13 @@ def _predict_single_model(
     for model_record, model_instance in models:
         try:
             _predict_one(
-                session, model_record, model_instance, tomorrow, current_price, outcome
+                session,
+                model_record,
+                model_instance,
+                tomorrow,
+                current_price,
+                outcome,
+                now,
             )
         except Exception as e:
             logger.exception(
@@ -457,6 +472,7 @@ def _predict_multi_model(
     tomorrow: date,
     current_price: Decimal,
     outcome: PredictionOutcome,
+    now: datetime,
 ) -> None:
     """
     Multi-model mode: predict with every active model, continuing after errors.
@@ -466,7 +482,13 @@ def _predict_multi_model(
     for model_record, model_instance in models:
         try:
             _predict_one(
-                session, model_record, model_instance, tomorrow, current_price, outcome
+                session,
+                model_record,
+                model_instance,
+                tomorrow,
+                current_price,
+                outcome,
+                now,
             )
         except Exception as e:
             logger.exception(
@@ -514,7 +536,7 @@ def _exit_code(outcome: PredictionOutcome) -> int:
     return 1
 
 
-def main(session: Session | None = None) -> int:
+def main(session: Session | None = None, now: datetime | None = None) -> int:
     """
     Main entry point for the predictor job.
 
@@ -524,6 +546,8 @@ def main(session: Session | None = None) -> int:
 
     Args:
         session: Optional database session (for testing). If None, creates new session.
+        now: Optional clock (for testing). If None, the current UTC instant. The
+            last closed bar must be at most ``max_bar_age_hours`` old (#175).
 
     Returns:
         Exit code (0 = success, 1 = failure)
@@ -541,6 +565,7 @@ def main(session: Session | None = None) -> int:
 
     try:
         # Calculate tomorrow's date
+        run_at = now if now is not None else utc_now()
         tomorrow = utc_today() + timedelta(days=1)
         logger.info(f"Predicting for date: {tomorrow}")
 
@@ -561,9 +586,13 @@ def main(session: Session | None = None) -> int:
 
         # Generate prediction for each active model
         if args.multi_model:
-            _predict_multi_model(session, models, tomorrow, current_price, outcome)
+            _predict_multi_model(
+                session, models, tomorrow, current_price, outcome, run_at
+            )
         else:
-            _predict_single_model(session, models, tomorrow, current_price, outcome)
+            _predict_single_model(
+                session, models, tomorrow, current_price, outcome, run_at
+            )
 
         _log_prediction_summary(tomorrow, outcome)
 

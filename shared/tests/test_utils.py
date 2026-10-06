@@ -6,7 +6,7 @@ Covers all Gherkin scenarios from US-013:
 """
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -30,6 +30,7 @@ from shared.utils import (
     get_all_models_metrics,
     get_cumulative_pnl,
     split_train_validation,
+    utc_now,
     utc_today,
 )
 
@@ -1396,14 +1397,26 @@ class TestCapitalNormalizedMetrics:
         )
 
 
+class TestUtcNow:
+    """utc_now() is the timezone-aware UTC clock behind utc_today (#175)."""
+
+    def test_is_timezone_aware_utc(self) -> None:
+        now = utc_now()
+
+        assert now.utcoffset() == timedelta(0)
+
+    def test_follows_the_frozen_clock(self, mexico_city_at_0010_utc: datetime) -> None:
+        assert utc_now() == mexico_city_at_0010_utc
+
+
 class TestUtcToday:
     """utc_today() follows the UTC clock, not the process time zone (#173)."""
 
     def test_returns_the_utc_date_while_the_local_date_is_a_day_behind(
-        self, mexico_city_at_0300_utc: datetime
+        self, mexico_city_at_0010_utc: datetime
     ) -> None:
         # Guard: the local date is the 3rd here, so a local-date call would be wrong
-        assert mexico_city_at_0300_utc.astimezone().date() == date(2026, 10, 3)
+        assert mexico_city_at_0010_utc.astimezone().date() == date(2026, 10, 3)
 
         assert utc_today() == date(2026, 10, 4)
 

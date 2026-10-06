@@ -15,10 +15,13 @@ class Settings(BaseSettings):
     Attributes:
         database_url: PostgreSQL connection string (required)
         training_window_days: Sliding-window size (days) the trainers use (default 21)
+        max_bar_age_hours: Oldest last closed bar (hours since its close) the
+            predictor accepts; a later run exits 1 and saves nothing (default 2, #175)
     """
 
     database_url: str
     training_window_days: int = Field(default=21, ge=1)
+    max_bar_age_hours: int = Field(default=2, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=".env",

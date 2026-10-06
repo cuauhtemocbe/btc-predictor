@@ -14,8 +14,8 @@ The project has **6 services**:
 |---------|------|----------------|--------------|
 | **postgres** | Plugin | — | PostgreSQL database |
 | **api** | Web, always on | — | FastAPI + dashboard |
-| **fetch-price** | Cron | `0 6 * * *` (daily 6am) | Ingests the closed daily Binance bar of each symbol |
-| **daily** | Cron | `0 7 * * *` (daily 7am) | evaluator → trainer → predictor (1-day horizon) |
+| **fetch-price** | Cron | `5 0 * * *` (daily 00:05 UTC) | Ingests the closed daily Binance bar of each symbol |
+| **daily** | Cron | `10 0 * * *` (daily 00:10 UTC) | evaluator → trainer → predictor (1-day horizon) |
 | **monthly-backtest** | Cron | `0 0 1 * *` (1st of the month, 00:00) | Walk-forward backtest with the production configuration |
 
 ---
@@ -84,7 +84,7 @@ The loader verifies the SHA256 checksum of every monthly zip, is idempotent, and
    - **Start Command:** `python -m fetch_price.main`
    - **Restart Policy:** Never
 5. **Settings** → **Cron Schedule**:
-   - **Schedule:** `0 6 * * *` (daily at 6am UTC)
+   - **Schedule:** `5 0 * * *` (daily at 00:05 UTC)
    - **Region:** Use same as your database
 
 ✅ **Ready to deploy!** This service will:
@@ -93,7 +93,7 @@ The loader verifies the SHA256 checksum of every monthly zip, is idempotent, and
 - Backfill days missed by earlier runs, never store the still-open day
 - Be idempotent (existing `(symbol, timestamp)` rows are skipped) and exit non-zero if both sources fail
 
-**Note:** the `daily/` file is published ~01:40 UTC, so the 6am UTC cron finds it; the REST fallback covers late publications. Binance's main REST API (`api.binance.com`) is geo-blocked from Railway (HTTP 451), which is why only `data.binance.vision` and `data-api.binance.vision` are used.
+**Note:** the `daily/` file is published ~01:40 UTC, so the 00:05 UTC cron does not find it yet and uses the REST fallback (it logs a warning on each run). Binance's main REST API (`api.binance.com`) is geo-blocked from Railway (HTTP 451), which is why only `data.binance.vision` and `data-api.binance.vision` are used.
 
 ### Step 6: Configure Daily Cron Job
 
@@ -110,7 +110,7 @@ The loader verifies the SHA256 checksum of every monthly zip, is idempotent, and
    - **Start Command:** `python -m workers.daily`
    - **Restart Policy:** Never
 5. **Settings** → **Cron Schedule**:
-   - **Schedule:** `0 7 * * *` (daily at 7am UTC, after `fetch-price`)
+   - **Schedule:** `10 0 * * *` (daily at 00:10 UTC, after `fetch-price`; the predictor exits 1 if the last bar closed more than 2 hours ago, #175)
    - **Region:** Use same as your database
 
 ✅ **Ready to deploy!** This service runs, in order, stopping at the first failure:
@@ -208,7 +208,7 @@ with SessionLocal() as db:
 "
 ```
 
-Expected: one row per symbol, with `MAX(timestamp)` equal to yesterday 00:00 UTC after the 6am UTC `fetch-price` run.
+Expected: one row per symbol, with `MAX(timestamp)` equal to yesterday 00:00 UTC after the 00:05 UTC `fetch-price` run.
 
 ---
 

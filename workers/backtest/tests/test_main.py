@@ -256,11 +256,11 @@ def test_the_cron_backtests_the_linear_model(cron: CronRunner) -> None:
 # --- Scenario (#173): an empty history ends the range on the UTC day ---
 
 
-@pytest.mark.usefixtures("mexico_city_at_0300_utc")
+@pytest.mark.usefixtures("mexico_city_at_0010_utc")
 def test_without_history_the_range_ends_on_the_utc_day(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With TZ=America/Mexico_City at 2026-10-04 03:00 UTC the end date is the 4th."""
+    """With TZ=America/Mexico_City at 2026-10-04 00:10 UTC the end date is the 4th."""
     ends: list[date] = []
     monkeypatch.setattr(
         worker,

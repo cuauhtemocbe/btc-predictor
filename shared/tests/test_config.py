@@ -140,3 +140,28 @@ class TestConfigurationSecurity:
 
         # Document security concern: don't log Settings directly
         # In production, use structured logging and never log connection strings
+
+
+class TestMaxBarAge:
+    """The oldest accepted last close is a setting, 2 hours by default (#175)."""
+
+    def test_defaults_to_two_hours(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost/db")
+        monkeypatch.delenv("MAX_BAR_AGE_HOURS", raising=False)
+
+        assert Settings().max_bar_age_hours == 2
+
+    def test_is_read_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost/db")
+        monkeypatch.setenv("MAX_BAR_AGE_HOURS", "5")
+
+        assert Settings().max_bar_age_hours == 5
+
+    def test_rejects_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost/db")
+        monkeypatch.setenv("MAX_BAR_AGE_HOURS", "0")
+
+        with pytest.raises(ValidationError):
+            Settings()

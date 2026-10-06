@@ -156,9 +156,10 @@ def session(db_session):
     return db_session
 
 
-# The instant of the #173 scenario: 03:00 UTC on 2026-10-04 is still 2026-10-03
-# (21:00) in America/Mexico_City.
-FROZEN_UTC_NOW = datetime(2026, 10, 4, 3, 0, tzinfo=UTC)
+# The instant the daily cron runs (#175): 00:10 UTC on 2026-10-04 is still 2026-10-03
+# (18:10) in America/Mexico_City, the #173 scenario, and the bar of 2026-10-03 closed
+# ten minutes earlier.
+FROZEN_UTC_NOW = datetime(2026, 10, 4, 0, 10, tzinfo=UTC)
 
 
 class _FrozenDatetime(datetime):
@@ -170,8 +171,8 @@ class _FrozenDatetime(datetime):
 
 
 @pytest.fixture
-def mexico_city_at_0300_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[datetime]:
-    """Set ``TZ=America/Mexico_City`` and the clock to 2026-10-04 03:00 UTC.
+def mexico_city_at_0010_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[datetime]:
+    """Set ``TZ=America/Mexico_City`` and the clock to 2026-10-04 00:10 UTC.
 
     Freezes the clock behind ``shared.utils.utc_today`` only, so a job that still
     calls ``date.today()`` sees the real date and the test fails.
