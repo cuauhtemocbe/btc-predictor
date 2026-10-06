@@ -61,6 +61,8 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 - **Same code in production and backtest:** the daily trainer, the predictor and the walk-forward backtest all call `shared.features` and `workers.daily.models.factory`.
 - **Evaluator:** the predictor runs at 07:00 UTC on day D, uses the close of the bar opened on D-1 and predicts the bar opened on D, which closes at 00:00 UTC on D+1 (`predicted_for`). The evaluator settles it against that close once `fetch-price` has ingested it, and leaves it pending if the bar is missing (`fetch_actual_price` in `workers/daily/evaluator.py`).
 - **Stale or gapped data:** the predictors and trainers refuse a series whose last bar is not dated yesterday (UTC) or that skips a day, exit 1 and save nothing (`require_fresh_series`, #174).
+- **Days are UTC:** every job takes today from `shared.utils.utc_today()`, never from `date.today()`. `docker-compose.yml` sets `TZ=America/Mexico_City`, so the local date is a day behind UTC from 00:00 to 06:00 UTC (#173). Details and the test fixture: `workers/daily/CLAUDE.md`.
+- **Live and replay predictions:** `scripts/simulate_history.py` marks the models it trains with `params["simulated"] = true`. The API and the dashboard separate them with `source=live|replay|all` (`source_filter` in `shared/shared/db/crud.py`; default `all`), and the combined total is always labeled "live + replay" (#176).
 - **Baselines:** every reported accuracy or PnL sits next to *always-up*, *persistence* and *buy-and-hold*, with the sample size, the edge and a binomial p-value (`shared/shared/baselines.py`).
 
 ### 6b. PAXG as a Proxy for Gold
@@ -173,12 +175,17 @@ git push origin main
 
 ### Main Branch Protection
 
-The `main` branch is protected in GitHub with force-pushes and branch deletion
-disabled. `enforce_admins` is intentionally `false`, allowing the repository
-owner to push directly when necessary; this is an explicit solo-maintainer
-exception, not an omission. Pull-request and required status-check enforcement
-will be added when the repository adopts hosted CI checks that GitHub can
-require.
+The `main` branch is protected in GitHub: force-pushes and branch deletion are
+disabled, and a merge needs five status checks (`Docker quality gate`,
+`trivy-image`, `trivy-config`, `Socket Security: Project Report`, `Socket
+Security: Pull Request Alerts`) on a branch that is up to date with `main`
+(`strict`). No review is required. `enforce_admins` is intentionally `false`,
+allowing the repository owner to push directly when necessary; this is an
+explicit solo-maintainer exception, not an omission.
+
+- The checks start a few minutes after a PR opens and `Docker quality gate` takes about 5 minutes. Until they pass, `gh pr merge` fails with "the base branch policy prohibits the merge".
+- A PR that is behind `main` cannot merge. Update it with `gh api -X PUT repos/cuauhtemocbe/btc-predictor/pulls/<n>/update-branch` (this `gh` has no `pr update-branch`); that restarts the checks.
+- `gh pr edit` fails on the deprecated Projects (classic) GraphQL error. Edit a PR body with `gh api -X PATCH repos/cuauhtemocbe/btc-predictor/pulls/<n> -f body=...`.
 
 **Claude Code Automation:**
 - Git does not support post-push hooks natively, so the monitor in *Railway Deploy* must be run explicitly after every push to `main`
@@ -193,6 +200,7 @@ require.
 ❌ **DON'T** hardcode configuration (use `pydantic-settings` in `shared/shared/config.py`)  
 ❌ **DON'T** commit `.env` file (use `.env.example` as template)  
 ❌ **DON'T** bypass UNIQUE constraints (they're for idempotency)  
+❌ **DON'T** call `date.today()` in production code (use `shared.utils.utc_today()`)  
 ❌ **DON'T** skip tests ("I'll add them later" never happens)
 
 ---
