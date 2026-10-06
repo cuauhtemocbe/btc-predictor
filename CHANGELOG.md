@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows `validation` or `test` (new `backtest_results.evaluation_slice` column) and
   headlines only the test slice. A start date without enough history fails before
   storing anything and names the earliest allowed one (#106).
+- A `source` query parameter (`live`, `replay` or `all`, default `all`) on the
+  dashboard, `/models/`, `/models/metrics` and `/api/predictions/history` separates
+  the predictions of replayed models (`params["simulated"]`, written by
+  `scripts/simulate_history.py`) from live ones. Each history row carries
+  `is_replay`; the dashboard shows a "Replay" badge and one headline block per
+  source, each with its sample size and baselines, and the "Live + replay" total
+  only under `source=all`. A value other than the three is a 422 (#176).
 
 ### Changed
 
@@ -66,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   predicted (the bar opened the day before `predicted_for`) and pick up every
   pending prediction of their timeframe due up to today, so a late bar no
   longer leaves one unevaluated for good (#143).
+- The daily and weekly predictors, evaluators and trainers and the backtest cron
+  took "today" from the container's time zone (`America/Mexico_City`, UTC-6) while
+  bars are dated in UTC, so a run between 00:00 and 06:00 UTC stored its prediction
+  one day early. Every job now uses `shared.utils.utc_today()` (#173).
+- The daily and weekly predictors and trainers now refuse a series whose last bar
+  is not dated yesterday (UTC) or that skips a day: they exit 1, name the missing
+  dates and save no prediction and no model. Before, a missed `fetch-price` run
+  produced a 2-day move scored as a 1-day prediction (#174).
 
 ### Added
 

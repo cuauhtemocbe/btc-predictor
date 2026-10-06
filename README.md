@@ -338,16 +338,18 @@ alembic upgrade head
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET` | `/?symbol=BTCUSDT` | Dashboard HTML con predicciones y PnL (`symbol`: `BTCUSDT` o `PAXGUSDT`) |
-| `GET` | `/models/?symbol=BTCUSDT` | Comparación de modelos contra baselines |
+| `GET` | `/?symbol=BTCUSDT&source=all` | Dashboard HTML con predicciones y PnL (`symbol`: `BTCUSDT` o `PAXGUSDT`; `source`: `live`, `replay` o `all`) |
+| `GET` | `/models/?symbol=BTCUSDT&source=all` | Comparación de modelos contra baselines |
 | `GET` | `/backtesting?symbol=BTCUSDT` | Resultados de backtesting |
 | `GET` | `/health` | Health check del servicio |
 | `GET` | `/api/prices?limit=24&symbol=BTCUSDT` | Últimas N velas diarias |
-| `GET` | `/api/predictions/history?from=…&to=…&timeframe=1d` | Historial de predicciones |
+| `GET` | `/api/predictions/history?from=…&to=…&timeframe=1d&source=all` | Historial de predicciones; cada fila trae `is_replay` |
 | `GET` | `/api/predictions/pnl` | PnL acumulado simulado |
 | `GET` | `/api/predictions/strategies` | PnL por estrategia |
 | `GET` | `/api/backtesting/metrics` | Métricas de backtesting |
 | `GET` | `/docs` | Swagger UI (auto-generado) |
+
+`source` separa las predicciones que hizo el sistema en producción (`live`) de las que `scripts/simulate_history.py` repitió sobre días anteriores al lanzamiento (`replay`); sin el parámetro devuelve ambas (`all`). Un valor distinto de los tres da 422. `/api/predictions/pnl` y `/api/predictions/strategies` todavía no tienen `source`.
 
 ---
 

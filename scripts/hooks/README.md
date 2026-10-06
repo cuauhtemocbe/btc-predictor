@@ -104,6 +104,19 @@ shim path itself changed (a different install method or a different machine).
 
 ⚠️ **Do not use `--no-verify` to get around it:** it also skips the gitleaks secret scan on every commit.
 
+## Troubleshooting: the push fails after the hooks ran
+
+**Symptom:** `git push` fails with `Connection to github.com closed by remote host` after the pre-push hooks
+(Trivy, the full test suite, the coverage thresholds) ran for several minutes. The hooks themselves passed.
+
+**Fix:** push again with SSH keep-alive packets, so GitHub does not close the connection while the hooks run:
+
+```bash
+GIT_SSH_COMMAND="ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=60" git push
+```
+
+The hooks run again in full. Do not use `--no-verify`.
+
 ## Bypass Hooks (use sparingly!)
 
 ```bash
