@@ -7,7 +7,7 @@ daily bar is a UTC day. At 03:00 UTC on 2026-10-04 the local date is still
 """
 
 from argparse import Namespace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -22,9 +22,12 @@ UTC_DAY = date(2026, 10, 4)
 
 
 def _add_daily_prices(db_session: Session, days: int) -> None:
+    """Store ``days`` consecutive bars ending on the day before ``UTC_DAY``."""
     db_session.add_all(
         Price(
-            timestamp=datetime.now(UTC) - timedelta(days=days - i),
+            timestamp=datetime.combine(
+                UTC_DAY - timedelta(days=days - i), time.min, tzinfo=UTC
+            ),
             open=Decimal(50000 + i * 100),
             high=Decimal(50500 + i * 100),
             low=Decimal(49500 + i * 100),
@@ -45,10 +48,10 @@ class TestDailyJobsUseTheUtcDate:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_btc_prices_31_days: list[Price],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Then it stores predicted_for = 2026-10-05, not the local date plus one."""
+        _add_daily_prices(db_session, 31)
         monkeypatch.setattr(
             predictor, "parse_args", lambda: Namespace(multi_model=False)
         )

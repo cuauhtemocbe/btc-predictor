@@ -8,6 +8,7 @@ workers/daily/tests/test_return_prediction.py.
 """
 
 import math
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +20,7 @@ from shared.features import (
     build_training_set,
     feature_count,
     price_from_return,
+    require_fresh_series,
     required_history_days,
 )
 
@@ -275,3 +277,47 @@ class TestPriceFromReturn:
     def test_missing_last_close_fails(self) -> None:
         with pytest.raises(ValueError, match="last_close"):
             price_from_return(None, 0.01)
+
+
+class TestRequireFreshSeries:
+    """Scenarios of #174: a stale series or one with gaps is refused."""
+
+    TODAY = date(2026, 10, 6)
+
+    @staticmethod
+    def _days(first: date, count: int) -> list[date]:
+        return [first + timedelta(days=i) for i in range(count)]
+
+    def test_complete_series_ending_yesterday_passes(self) -> None:
+        require_fresh_series(self._days(date(2026, 9, 6), 30), self.TODAY)
+
+    def test_a_series_ending_two_days_ago_names_the_missing_day(self) -> None:
+        dates = self._days(date(2026, 9, 5), 30)  # last bar: 2026-10-04
+
+        with pytest.raises(
+            ValueError, match=r"latest bar is dated 2026-10-04.*2026-10-05"
+        ):
+            require_fresh_series(dates, self.TODAY)
+
+    def test_a_series_ending_today_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="expected 2026-10-05"):
+            require_fresh_series(self._days(date(2026, 9, 7), 30), self.TODAY)
+
+    def test_a_gap_inside_the_window_names_the_missing_date(self) -> None:
+        dates = self._days(date(2026, 9, 6), 30)
+        dates.remove(date(2026, 9, 20))
+
+        with pytest.raises(ValueError, match="2026-09-20") as error:
+            require_fresh_series(dates, self.TODAY)
+
+        assert "2026-09-21" not in str(error.value)
+
+    def test_several_missing_dates_are_all_named(self) -> None:
+        dates = [d for d in self._days(date(2026, 9, 6), 30) if d.day not in (10, 11)]
+
+        with pytest.raises(ValueError, match="2026-09-10, 2026-09-11"):
+            require_fresh_series(dates, self.TODAY)
+
+    def test_an_empty_series_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="No stored bars"):
+            require_fresh_series([], self.TODAY)

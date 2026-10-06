@@ -10,7 +10,7 @@ Covers Gherkin acceptance criteria scenarios from US-022:
 
 import math
 import runpy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -110,6 +110,7 @@ class TestPrepareFeatures:
 
     def test_30_day_window_gives_61_return_features(self) -> None:
         series = DailySeries(
+            dates=[date(2026, 9, 1) + timedelta(days=i) for i in range(31)],
             closes=[Decimal(50000 + i * 10) for i in range(31)],
             volumes=[Decimal(1000 + i) for i in range(31)],
         )

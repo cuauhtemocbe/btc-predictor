@@ -8,7 +8,7 @@ Covers all 4 Gherkin acceptance criteria scenarios:
 4. Prediction already exists (idempotency)
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -93,6 +93,7 @@ class TestPrepareFeatures:
     def test_builds_return_features_of_the_last_day(self) -> None:
         """Should return one row of 2 * window + 1 float features."""
         series = DailySeries(
+            dates=[date(2026, 9, 1) + timedelta(days=i) for i in range(31)],
             closes=[Decimal(50000 + i * 10) for i in range(31)],
             volumes=[Decimal(1000 + i) for i in range(31)],
         )
@@ -108,7 +109,14 @@ class TestPrepareFeatures:
         closes = [Decimal(50000 + (i * 37) % 900) for i in range(40)]
         volumes = [Decimal(1000 + (i * 13) % 50) for i in range(40)]
 
-        X = predictor.prepare_features(DailySeries(closes, volumes), window_days=10)
+        X = predictor.prepare_features(
+            DailySeries(
+                [date(2026, 9, 1) + timedelta(days=i) for i in range(40)],
+                closes,
+                volumes,
+            ),
+            window_days=10,
+        )
         # horizon 1 drops the last day; compare with a series ending one day earlier
         training = build_training_set(
             closes + [closes[-1]], volumes + [volumes[-1]], 10

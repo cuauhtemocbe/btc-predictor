@@ -20,6 +20,7 @@ rows ``t - W .. t``, so they carry no future data.
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -52,13 +53,54 @@ class FeatureSet:
 
 @dataclass(frozen=True)
 class DailySeries:
-    """Daily closes and volumes of one symbol, oldest to newest, same length."""
+    """Bar dates, closes and volumes of one symbol, oldest to newest, same length."""
 
+    dates: list[date]
     closes: list[Decimal]
     volumes: list[Decimal]
 
     def __len__(self) -> int:
         return len(self.closes)
+
+
+def require_fresh_series(dates: Sequence[date], today: date) -> None:
+    """
+    Refuse a series that is stale or has gaps, before features are built from it.
+
+    A prediction made at 07:00 UTC on ``today`` needs the bar of ``today - 1`` as
+    its last bar, and one bar per day before it. Otherwise a return silently
+    spans several days and is scored as a one-day move (#174).
+
+    Production entry points call this (predictors and trainers); the backtest
+    builds its windows from history with its own clock and does not.
+
+    Args:
+        dates: Bar dates (UTC days), oldest to newest
+        today: The UTC day the job runs on
+
+    Raises:
+        ValueError: If the series is empty, its last bar is not dated
+            ``today - 1``, or a day is missing between its first and last bar;
+            the message names the missing dates.
+    """
+    expected_last = today - timedelta(days=1)
+    if not dates:
+        raise ValueError(f"No stored bars: expected one dated {expected_last}")
+
+    present = set(dates)
+    first, last = dates[0], max(dates)
+    span_end = max(last, expected_last)
+    missing = [
+        first + timedelta(days=offset)
+        for offset in range((span_end - first).days + 1)
+        if first + timedelta(days=offset) not in present
+    ]
+    if last != expected_last or missing:
+        listed = ", ".join(d.isoformat() for d in missing) or "none"
+        raise ValueError(
+            f"Stale or incomplete series: latest bar is dated {last}, expected "
+            f"{expected_last}; missing bar date(s): {listed}"
+        )
 
 
 def feature_count(window_days: int) -> int:

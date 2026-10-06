@@ -6,7 +6,7 @@ The containers run with ``TZ=America/Mexico_City``, six hours behind UTC. At
 ``date.today()`` is a day behind the pipeline.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -19,6 +19,25 @@ from workers.weekly import evaluator, predictor, trainer
 UTC_DAY = date(2026, 10, 4)
 
 
+def _add_daily_prices(db_session: Session, days: int) -> None:
+    """Store ``days`` consecutive bars ending on the day before ``UTC_DAY``."""
+    db_session.add_all(
+        Price(
+            timestamp=datetime.combine(
+                UTC_DAY - timedelta(days=days - i), time.min, tzinfo=UTC
+            ),
+            open=Decimal(50000 + i * 100),
+            high=Decimal(50500 + i * 100),
+            low=Decimal(49500 + i * 100),
+            close=Decimal(50000 + i * 100),
+            volume=Decimal("1000.5"),
+            source="test",
+        )
+        for i in range(days)
+    )
+    db_session.commit()
+
+
 @pytest.mark.usefixtures("mexico_city_at_0300_utc")
 class TestWeeklyJobsUseTheUtcDate:
     """Gherkin: TZ=America/Mexico_City and the clock at 2026-10-04 03:00 UTC."""
@@ -27,9 +46,9 @@ class TestWeeklyJobsUseTheUtcDate:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_daily_close_prices_31_days: list[Price],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        _add_daily_prices(db_session, 31)
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
 
         assert predictor.main() == 0
@@ -57,19 +76,7 @@ class TestWeeklyJobsUseTheUtcDate:
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(trainer, "SessionLocal", lambda: db_session)
-        db_session.add_all(
-            Price(
-                timestamp=datetime.now(UTC) - timedelta(days=200 - i),
-                open=Decimal(50000 + i * 100),
-                high=Decimal(50500 + i * 100),
-                low=Decimal(49500 + i * 100),
-                close=Decimal(50000 + i * 100),
-                volume=Decimal("1000.5"),
-                source="test",
-            )
-            for i in range(200)
-        )
-        db_session.commit()
+        _add_daily_prices(db_session, 200)
 
         assert trainer.main() == 0
 

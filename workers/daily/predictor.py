@@ -34,6 +34,7 @@ from shared.features import (
     DailySeries,
     build_prediction_features,
     price_from_return,
+    require_fresh_series,
     required_history_days,
 )
 from shared.utils import utc_today
@@ -203,7 +204,8 @@ def get_recent_series(
         symbol: Asset whose prices are read (default BTCUSDT)
 
     Returns:
-        Daily closes and volumes (oldest to newest)
+        Bar dates, closes and volumes (oldest to newest). Freshness and gaps are
+        checked by the caller with ``require_fresh_series``.
 
     Raises:
         ValueError: If insufficient historical data available
@@ -223,7 +225,7 @@ def get_recent_series(
 
     # Main query: Join to get the close and volume for the latest timestamp each day
     stmt = (
-        select(Price.close, Price.volume)
+        select(latest_per_day.c.day, Price.close, Price.volume)
         .join(
             latest_per_day,
             Price.timestamp == latest_per_day.c.latest_timestamp,
@@ -246,7 +248,9 @@ def get_recent_series(
     )
 
     return DailySeries(
-        closes=[row.close for row in rows], volumes=[row.volume for row in rows]
+        dates=[row.day.date() for row in rows],
+        closes=[row.close for row in rows],
+        volumes=[row.volume for row in rows],
     )
 
 
@@ -396,6 +400,9 @@ def _predict_one(
 
     # Fetch recent prices (window_days returns need window_days + 1 closes)
     series = get_recent_series(session, required_history_days(window_days))
+
+    # Refuse a stale series or one with gaps: no prediction is saved (#174)
+    require_fresh_series(series.dates, today=tomorrow - timedelta(days=1))
 
     # Prepare features
     X = prepare_features(series, window_days)
