@@ -48,8 +48,8 @@ async def models_dashboard(
     end_date: date | None = Query(None, description="End date filter (YYYY-MM-DD)"),
     timeframe: str = Query(
         default=DEFAULT_TIMEFRAME,
-        description="Timeframe filter: '1h', '1d', or '1w'",
-        pattern="^(1h|1d|1w)$",
+        description="Timeframe filter: '1d' (the only supported value)",
+        pattern="^1d$",
     ),
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     source: SourceQuery = PredictionSource.ALL,
@@ -63,7 +63,7 @@ async def models_dashboard(
         start_date: Optional start date for filtering metrics
         end_date: Optional end date for filtering metrics
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
-            daily and weekly metrics are never silently combined
+            metrics of different timeframes are never silently combined
         symbol: Asset to show (default BTCUSDT); only its models are compared
         source: ``live``, ``replay`` or ``all`` (default); simulated models are
             marked either way
@@ -122,8 +122,8 @@ async def models_metrics_api(
     ),
     timeframe: str = Query(
         default=DEFAULT_TIMEFRAME,
-        description="Timeframe filter: '1h', '1d', or '1w'",
-        pattern="^(1h|1d|1w)$",
+        description="Timeframe filter: '1d' (the only supported value)",
+        pattern="^1d$",
     ),
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     source: SourceQuery = PredictionSource.ALL,
@@ -140,7 +140,7 @@ async def models_metrics_api(
         end_date: Optional end date for filtering metrics
         pnl_column: Which PnL column to use (default: pnl_simulated)
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
-            daily and weekly metrics are never silently combined
+            metrics of different timeframes are never silently combined
         symbol: Asset to show (default BTCUSDT); only its models are returned
         source: ``live``, ``replay`` or ``all`` (default); each model carries
             ``is_replay`` either way

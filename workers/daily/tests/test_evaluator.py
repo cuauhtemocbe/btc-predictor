@@ -663,24 +663,6 @@ class TestPendingPredictions:
         assert prediction.actual_price == Decimal("1.00")
         assert prediction.evaluated_at == evaluated_at
 
-    def test_weekly_predictions_are_left_to_the_weekly_evaluator(
-        self,
-        db_session: Session,
-        sample_trained_model: Model,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _add_daily_bar(db_session, date(2026, 10, 2), "85100.00")
-        weekly = _add_prediction(
-            db_session, sample_trained_model, date(2026, 10, 3), timeframe="1w"
-        )
-        _patch_session(db_session, monkeypatch)
-        run_date = date(2026, 10, 4)
-
-        assert evaluator.main(today=run_date) == 0
-
-        db_session.refresh(weekly)
-        assert weekly.actual_price is None
-
     def test_future_predictions_are_not_touched(
         self,
         db_session: Session,

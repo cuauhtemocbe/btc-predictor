@@ -49,7 +49,7 @@ class PredictionHistoryResponse(BaseModel):
     pnl_simulated: float = Field(description="Simulated profit/loss")
     model_name: str = Field(description="Name of the model used")
     model_version: str = Field(description="Version of the model used")
-    timeframe: str = Field(description="Prediction timeframe ('1h', '1d', '1w')")
+    timeframe: str = Field(description="Prediction timeframe ('1d')")
     is_replay: bool = Field(
         description=(
             "True when the model was trained by the history replay (simulated), "

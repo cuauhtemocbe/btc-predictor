@@ -1,8 +1,8 @@
 """
-Return-based features and targets for next-day (or next-week) prediction.
+Return-based features and targets for next-day prediction.
 
-The single builder used by the daily and weekly trainers, the daily and weekly
-predictors, and the backtest (#106). Models are trained on log returns, not on
+The single builder used by the daily trainer, the daily predictor
+and the backtest (#106). Models are trained on log returns, not on
 price levels, and the predicted price is ``last close * exp(predicted return)``.
 
 For the day at index ``t`` of a daily series, with window ``W``, the features are
@@ -193,9 +193,8 @@ def build_training_set(
         closes: Daily close prices, oldest to newest
         volumes: Daily volumes, same length as ``closes``
         window_days: Days of returns and volume changes per sample
-        horizon_days: Days ahead of the target: 1 for the daily worker, 7 for the
-            weekly worker. The target is the sum of the next ``horizon_days``
-            daily log returns.
+        horizon_days: Days ahead of the target: 1 for the daily worker.
+            The target is the sum of the next ``horizon_days`` daily log returns.
 
     Returns:
         FeatureSet with ``len(closes) - window_days - horizon_days`` samples

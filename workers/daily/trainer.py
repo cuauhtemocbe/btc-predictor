@@ -51,22 +51,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def required_training_days(window_days: int, horizon_days: int = 1) -> int:
+def required_training_days(window_days: int) -> int:
     """
     Minimum number of daily rows needed to train.
 
     The 70/20/10 split gives the validation set 20% of the rows, and it needs
     at least window_days + 1 of them to build one sample: rows >= (window + 1) * 5.
-    A horizon longer than one day needs horizon_days - 1 extra rows so the last
-    sample still has a target.
     """
-    return (window_days + 1) * 5 + horizon_days - 1
+    return (window_days + 1) * 5
 
 
 def fetch_training_data(
     session: Session,
     window_days: int,
-    horizon_days: int = 1,
     symbol: str = DEFAULT_SYMBOL,
 ) -> DailySeries:
     """
@@ -78,7 +75,6 @@ def fetch_training_data(
     Args:
         session: Database session
         window_days: Size of sliding window for features
-        horizon_days: Days past the window the target sits (1 daily, 7 weekly)
         symbol: Asset whose prices are read (default BTCUSDT)
 
     Returns:
@@ -111,11 +107,11 @@ def fetch_training_data(
 
     rows = session.execute(stmt).all()
 
-    required = required_training_days(window_days, horizon_days)
+    required = required_training_days(window_days)
     if len(rows) < required:
         raise ValueError(
             f"Insufficient training data for {symbol}: need {required} daily rows "
-            f"(window={window_days}d, horizon={horizon_days}d), have {len(rows)}"
+            f"(window={window_days}d), have {len(rows)}"
         )
 
     logger.info(
@@ -344,7 +340,7 @@ def model_registry(days_available: int) -> dict[str, type[BaseModel]]:
 
     Only ``train_all_models`` uses this registry, and only
     ``scripts/train_all_models.py`` (a manual run) calls that. The crons do not:
-    ``main()`` here and the weekly trainer train the linear model alone, so
+    ``main()`` here trains the linear model alone, so
     production does not train or predict with the other models (#124).
     """
     from workers.daily.models import ARIMAModel, LSTMModel, XGBoostModel

@@ -10,7 +10,6 @@ multi-stage con targets, como en versiones anteriores de este documento):
 | `api` | `Dockerfile.api` | `api` (FastAPI, Uvicorn, Jinja2) |
 | `fetch-price` | `Dockerfile.fetch` | `fetch` (httpx, urllib3, yarl) |
 | `daily` | `Dockerfile.ml` | `ml` (scikit-learn, TensorFlow, XGBoost, statsmodels) |
-| `weekly-predictor` | `Dockerfile.ml` | `ml` (mismo Dockerfile que `daily`, distinto Start Command) |
 | `monthly-backtest` | `Dockerfile.backtest` | `ml` |
 
 Todos comparten el mismo `shared/` (base) instalado via
@@ -21,7 +20,7 @@ Todos comparten el mismo `shared/` (base) instalado via
 ## ⚠️ Los Start Commands viven en Railway, no en `railway.*.toml`
 
 Este repo tiene archivos `railway.api.toml`, `railway.fetch.toml`,
-`railway.daily.toml` y `railway.weekly.toml` en la raíz. **No están conectados
+y `railway.daily.toml` en la raíz. **No están conectados
 como config-as-code a los servicios** — cada servicio en Railway tiene su
 `Build`/`Deploy` configurado directamente en el dashboard (o via
 `mcp__railway__update_service` / `railway environment edit
@@ -111,31 +110,6 @@ Cron Schedule: 0 7 * * *
 
 ---
 
-### Servicio: `weekly-predictor`
-
-**Settings → Build:**
-```
-Build Method: Dockerfile
-Dockerfile Path: Dockerfile.ml
-```
-
-**Settings → Deploy:**
-```
-Start Command: python -m workers.weekly
-Restart Policy: NEVER
-```
-
-**Cron Settings:**
-```
-Cron Schedule: 0 7 * * 1
-```
-
-Mismo Dockerfile que `daily` (ambos workers ML se copian en la misma
-imagen), pero con `Start Command` distinto. Aplica la misma regla que
-`daily`: `python -m workers.weekly`, no `python -m weekly.main`.
-
----
-
 ### Servicio: `monthly-backtest`
 
 **Settings → Build:**
@@ -181,7 +155,7 @@ poetry install --with api --without dev --no-root
 # fetch-price (Dockerfile.fetch)
 poetry install --with fetch --without dev --no-root
 
-# daily / weekly-predictor / monthly-backtest (Dockerfile.ml / Dockerfile.backtest)
+# daily / monthly-backtest (Dockerfile.ml / Dockerfile.backtest)
 poetry install --with ml --without dev --no-root
 ```
 
@@ -201,9 +175,8 @@ docker build -f Dockerfile.backtest -t btc-predictor-backtest:latest .
 ### Probar cada servicio (contra `docker compose`, no imágenes standalone):
 
 ```bash
-# Manejo diario/semanal — usar el compose de desarrollo, no las imágenes de prod
+# Manejo diario — usar el compose de desarrollo, no las imágenes de prod
 docker compose exec api python -m workers.daily
-docker compose exec api python -m workers.weekly
 docker compose exec api python -m workers.fetch_price.main
 ```
 
@@ -220,4 +193,4 @@ variables requeridas.
   Target` a la primera versión de este documento.
 - **2026-08-09:** migración de targets a Dockerfiles dedicados por servicio
   (`4c74069`); se detectó y corrigió el bug de Start Command incorrecto en
-  `daily`/`weekly-predictor` descrito arriba (`c2e986c`).
+  `daily` descrito arriba (`c2e986c`).

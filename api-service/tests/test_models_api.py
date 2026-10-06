@@ -553,8 +553,8 @@ async def test_models_api_handles_empty_state(
 
 
 @pytest.fixture
-def sample_model_with_daily_and_weekly_predictions(db_session: Session) -> Model:
-    """One model with 2 daily ($100 each) and 1 weekly ($1000) prediction."""
+def sample_model_with_daily_predictions(db_session: Session) -> Model:
+    """One model with 2 daily predictions ($100 each)."""
     model = Model(
         name="linear_v1",
         version="1.0.0",
@@ -587,58 +587,30 @@ def sample_model_with_daily_and_weekly_predictions(db_session: Session) -> Model
             )
         )
 
-    db_session.add(
-        Prediction(
-            model_id=model.id,
-            predicted_for=date.today() + timedelta(days=7),
-            timeframe="1w",
-            predicted_at=datetime.now(UTC) - timedelta(days=1),
-            price_at_prediction=Decimal("65000"),
-            predicted_price=Decimal("66000"),
-            actual_price=Decimal("66500"),
-            evaluated_at=datetime.now(UTC),
-            error_abs=Decimal("500"),
-            error_pct=Decimal("0.75"),
-            direction_correct=True,
-            pnl_simulated=Decimal("1000.00"),
-        )
-    )
-
     db_session.commit()
     return model
 
 
 @pytest.mark.asyncio
-async def test_models_metrics_does_not_mix_timeframes(
+async def test_models_metrics_for_the_daily_timeframe(
     client: AsyncClient,
     db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+    sample_model_with_daily_predictions: Model,
 ) -> None:
-    """
-    Scenario: Cumulative PnL does not mix timeframes
+    """The daily timeframe aggregates the model's daily predictions."""
+    response = await client.get("/models/metrics?timeframe=1d")
 
-    Given a model has daily and weekly PnL records
-    When cumulative PnL is requested for one timeframe
-    Then the returned series contains only records from that timeframe
-    """
-    response_daily = await client.get("/models/metrics?timeframe=1d")
-    assert response_daily.status_code == 200
-    daily_data = response_daily.json()
-    assert daily_data["models"][0]["predictions_count"] == 2
-    assert daily_data["models"][0]["total_pnl"] == 200.0
-
-    response_weekly = await client.get("/models/metrics?timeframe=1w")
-    assert response_weekly.status_code == 200
-    weekly_data = response_weekly.json()
-    assert weekly_data["models"][0]["predictions_count"] == 1
-    assert weekly_data["models"][0]["total_pnl"] == 1000.0
+    assert response.status_code == 200
+    model = response.json()["models"][0]
+    assert model["predictions_count"] == 2
+    assert model["total_pnl"] == 200.0
 
 
 @pytest.mark.asyncio
 async def test_models_metrics_missing_timeframe_applies_default(
     client: AsyncClient,
     db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+    sample_model_with_daily_predictions: Model,
 ) -> None:
     """
     Scenario: Missing timeframe applies the documented default
@@ -646,7 +618,6 @@ async def test_models_metrics_missing_timeframe_applies_default(
     Given a metrics request does not specify a timeframe
     When the request is processed
     Then the API applies DEFAULT_TIMEFRAME ("1d")
-    And it does not silently combine daily and weekly predictions
     """
     response = await client.get("/models/metrics")
 
@@ -668,23 +639,29 @@ async def test_models_metrics_invalid_timeframe_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_dashboard_displays_separate_timeframe_results(
-    client: AsyncClient,
-    db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+@pytest.mark.parametrize("path", ["/models/metrics", "/models/"])
+async def test_models_weekly_timeframe_is_rejected(
+    client: AsyncClient, path: str
 ) -> None:
     """
-    Scenario: Dashboard displays separate timeframe results
+    Scenario: The 1w timeframe no longer exists (#183)
 
-    Given evaluated predictions exist for daily and weekly horizons
-    When the model dashboard is opened with a selected timeframe
-    Then all displayed metrics correspond only to that timeframe
+    Given a request with timeframe=1w
+    When /models/ or /models/metrics is called
+    Then the API answers 422
     """
-    response_daily = await client.get("/models/?timeframe=1d")
-    assert response_daily.status_code == 200
+    response = await client.get(path, params={"timeframe": "1w"})
 
-    response_weekly = await client.get("/models/?timeframe=1w")
-    assert response_weekly.status_code == 200
+    assert response.status_code == 422
 
-    # Different timeframes must render different cumulative-PnL chart data
-    assert response_daily.text != response_weekly.text
+
+@pytest.mark.asyncio
+async def test_dashboard_renders_the_daily_timeframe(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model_with_daily_predictions: Model,
+) -> None:
+    """The model dashboard renders for the daily timeframe."""
+    response = await client.get("/models/?timeframe=1d")
+
+    assert response.status_code == 200

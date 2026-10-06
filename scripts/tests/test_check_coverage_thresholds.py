@@ -230,11 +230,8 @@ def test_every_configured_module_exists_in_the_repo() -> None:
 
 REQUIRED_CRITICAL_MODULES = [
     "workers/daily/trainer.py",
-    "workers/weekly/trainer.py",
     "workers/daily/predictor.py",
-    "workers/weekly/predictor.py",
     "workers/daily/evaluator.py",
-    "workers/weekly/evaluator.py",
     "workers/daily/models/arima_model.py",
     "workers/daily/models/linear.py",
     "workers/daily/models/lstm_model.py",

@@ -804,16 +804,14 @@ def _persisted_model(
 
 
 def test_deactivate_all_models_scoped_to_a_timeframe(db_session: Session) -> None:
-    """Only the models of the given timeframe are deactivated (#68)."""
+    """The timeframe filter deactivates the models of that timeframe (#68)."""
     daily = _persisted_model(db_session, "daily_model", "1d", is_active=True)
-    weekly = _persisted_model(db_session, "weekly_model", "1w", is_active=True)
 
-    count = deactivate_all_models(db_session, timeframe="1w")
+    count = deactivate_all_models(db_session, timeframe="1d")
     db_session.commit()
 
     assert count == 1
-    assert daily.is_active is True
-    assert weekly.is_active is False
+    assert daily.is_active is False
 
 
 async def test_get_evaluated_predictions_async_filters_and_orders(
@@ -850,7 +848,6 @@ async def test_get_evaluated_predictions_async_filters_and_orders(
             prediction(10, "1d", 50500.00),
             prediction(12, "1d", 50600.00),
             prediction(14, "1d", None),  # pending, never returned
-            prediction(15, "1w", 50700.00),
         ]
     )
     await async_db_session.flush()
@@ -863,7 +860,7 @@ async def test_get_evaluated_predictions_async_filters_and_orders(
         timeframe="1d",
     )
 
-    assert [p.predicted_for.day for p in everything] == [15, 12, 10]
+    assert [p.predicted_for.day for p in everything] == [12, 10]
     assert [p.predicted_for.day for p in daily_in_range] == [12]
 
 
@@ -911,22 +908,18 @@ def test_activate_model_replaces_previous_version_in_the_name(
     assert active == {"linear_v2", "xgboost_v1"}
 
 
-def test_activate_model_does_not_touch_other_symbols_or_timeframes(
+def test_activate_model_does_not_touch_other_symbols(
     db_session: Session,
 ) -> None:
-    """The family scope stays within one (symbol, timeframe)."""
+    """The family scope stays within one symbol."""
     paxg = _versioned_model(db_session, "linear_v1", "v1", symbol="PAXGUSDT")
-    weekly = _versioned_model(db_session, "linear_v1", "v1", timeframe="1w")
     new = _versioned_model(db_session, "linear_v2", "v2")
     activate_model(db_session, paxg.id)
-    activate_model(db_session, weekly.id)
 
     activate_model(db_session, new.id)
 
     db_session.refresh(paxg)
-    db_session.refresh(weekly)
     assert paxg.is_active is True
-    assert weekly.is_active is True
 
 
 @pytest.mark.parametrize(

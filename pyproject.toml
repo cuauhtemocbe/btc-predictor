@@ -67,7 +67,6 @@ testpaths = [
     "workers/backtest/tests",
     "workers/daily/tests",
     "workers/fetch_price/tests",
-    "workers/weekly/tests",
     "scripts/tests"
 ]
 addopts = "--cov-fail-under=90"
@@ -137,10 +136,6 @@ markers = [
 "workers/daily/predictor.py" = 90
 "workers/daily/trainer.py" = 90
 "workers/fetch_price/main.py" = 90
-"workers/weekly/__main__.py" = 90
-"workers/weekly/evaluator.py" = 85
-"workers/weekly/predictor.py" = 95
-"workers/weekly/trainer.py" = 90
 
 [tool.mypy]
 python_version = "3.13"

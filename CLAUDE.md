@@ -23,7 +23,6 @@
 - `api` — Web service (FastAPI + dashboard)
 - `fetch-price` — Cron job daily at 6am UTC (`0 6 * * *`)
 - `daily` — Cron job daily at 7am UTC (`0 7 * * *`)
-- `weekly-predictor` — Cron job weekly on Mondays at 7am UTC (`0 7 * * 1`)
 - `monthly-backtest` — Cron job on the 1st of each month at 00:00 UTC (`0 0 1 * *`)
 
 The start commands and schedules live in the Railway dashboard, not in `railway.*.toml` (see `RAILWAY_MULTISTAGE_CONFIG.md`).
@@ -69,7 +68,7 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 
 - Binance has no XAU spot pair. Gold is shown through `PAXGUSDT`, the PAX Gold token (1 token = 1 troy ounce of London Good Delivery gold), which trades 24/7.
 - It is a proxy, not XAU spot: it can trade at a small premium or discount to gold and follows crypto-exchange liquidity and hours, not the LBMA fixing. Weekend moves have no gold-market counterpart.
-- The dashboard states this next to the data (`shared/shared/assets.py`, `Asset.note`). History starts in 2020-08, so there are fewer days than for BTC. The daily and weekly workers train and predict `BTCUSDT` only (`DEFAULT_SYMBOL`); PAXG is ingested and shown on the dashboard.
+- The dashboard states this next to the data (`shared/shared/assets.py`, `Asset.note`). History starts in 2020-08, so there are fewer days than for BTC. The daily worker trains and predicts `BTCUSDT` only (`DEFAULT_SYMBOL`); PAXG is ingested and shown on the dashboard.
 
 ### 7. Fixed Training Window
 

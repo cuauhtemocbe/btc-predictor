@@ -5,7 +5,6 @@ The replay trains models that carry ``params["simulated"] = True``; the history,
 the dashboard and the models page must tell them apart from the live models.
 """
 
-from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -281,24 +280,6 @@ async def test_source_selector_keeps_the_other_filters(
     assert options["replay"]["href"] == "?timeframe=1d&source=replay"
     assert options["live"].get("aria-current") == "page"
     assert options["all"].get("aria-current") is None
-
-
-@pytest.mark.asyncio
-async def test_dashboard_weekly_blocks_have_no_baselines(
-    client: AsyncClient,
-    db_session: Session,
-    sample_predictions_factory: Callable[..., list[Prediction]],
-) -> None:
-    """Baselines are daily-only: other timeframes say so instead of a number."""
-    predictions = sample_predictions_factory(count=2, evaluated=True)
-    for p in predictions:
-        p.timeframe = "1w"
-    db_session.commit()
-
-    soup = BeautifulSoup((await client.get("/?timeframe=1w")).text, "html.parser")
-
-    live = _block(soup, "live")
-    assert "daily timeframe only" in live.get_text()
 
 
 # Gherkin 4: the models page and its JSON mark simulated models

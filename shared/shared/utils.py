@@ -36,7 +36,7 @@ from shared.db.models import PredictionSource
 # one explicitly. Applied consistently across every metric function below
 # and every API endpoint that doesn't require an explicit timeframe query
 # param -- see issue #67.
-SUPPORTED_TIMEFRAMES = ("1h", "1d", "1w")
+SUPPORTED_TIMEFRAMES = ("1d",)
 DEFAULT_TIMEFRAME = "1d"
 
 
@@ -348,9 +348,9 @@ def calculate_accuracy(
         model_id: Model ID to calculate accuracy for
         start_date: Optional start date filter
         end_date: Optional end date filter
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             predictions across every timeframe are mixed together --
-            callers that want daily/weekly separated must pass this
+            callers that want timeframes separated must pass this
             explicitly (see DEFAULT_TIMEFRAME for the API-level default).
 
     Returns:
@@ -403,7 +403,7 @@ def calculate_model_mape(
         model_id: Model ID to calculate MAPE for
         start_date: Optional start date filter
         end_date: Optional end date filter
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together.
 
     Returns:
@@ -466,7 +466,7 @@ def calculate_total_pnl(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to sum (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together.
 
     Returns:
@@ -518,7 +518,7 @@ def calculate_win_rate(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together.
 
     Returns:
@@ -585,9 +585,9 @@ def calculate_sharpe_ratio(
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
         risk_free_rate: Annual risk-free rate (default: 0.0)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together -- combining daily and
-            weekly returns would distort both the mean and the stdev.
+        timeframe: Optional timeframe filter ('1d'). If None,
+            every timeframe is mixed together -- combining returns of
+            different horizons would distort both the mean and the stdev.
         capital: Reference capital each pnl value is normalized against
             (default: DEFAULT_CAPITAL). Must be positive.
 
@@ -666,7 +666,7 @@ def calculate_max_drawdown(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together in one cumulative series.
 
     Returns:
@@ -745,7 +745,7 @@ def calculate_max_drawdown_pct(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together in one equity curve.
         capital: Starting capital the equity curve is built from
             (default: DEFAULT_CAPITAL). Must be positive.
@@ -822,8 +822,8 @@ def get_cumulative_pnl(
         start_date: Optional start date filter
         end_date: Optional end date filter
         pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            daily and weekly records are combined into one series.
+        timeframe: Optional timeframe filter ('1d'). If None,
+            daily and other-timeframe records are combined into one series.
 
     Returns:
         List of {"date": "YYYY-MM-DD", "cumulative_pnl": float} dictionaries
@@ -992,7 +992,7 @@ def get_all_models_metrics(
         start_date: Optional start date filter for metrics calculation
         end_date: Optional end date filter for metrics calculation
         pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together for every metric below.
         capital: Reference capital that sharpe_ratio and max_drawdown_pct
             are normalized against (default: DEFAULT_CAPITAL)

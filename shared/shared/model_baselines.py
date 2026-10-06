@@ -7,7 +7,7 @@ persistence baseline, and turns the report into plain values the API and templat
 can serialize.
 
 Baselines are daily-only: persistence compares D-1 with D-2, which says nothing
-about a weekly horizon, so other timeframes get no baseline (None), never a
+about other horizons, so any other timeframe gets no baseline (None), never a
 misleading number.
 """
 

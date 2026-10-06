@@ -314,3 +314,22 @@ async def test_pnl_glyphs_are_redundant_non_color_signal(
     assert any("▼" in cell.get_text() for cell in negative_cells), (
         "negative-pnl cells should be prefixed with a ▼ glyph"
     )
+
+
+@pytest.mark.asyncio
+async def test_dashboard_has_no_weekly_tab(
+    client: AsyncClient, db_session: Session
+) -> None:
+    """
+    Gherkin: The dashboard renders without a Weekly tab (#183).
+
+    When I navigate to GET /
+    Then the page has the Daily tab and no tab for the 1w timeframe
+    """
+    response = await client.get("/")
+
+    assert response.status_code == 200
+    soup = BeautifulSoup(response.text, "html.parser")
+    tabs = {tab.get("data-timeframe") for tab in soup.select("button.tab")}
+    assert tabs == {"1d"}
+    assert "Weekly" not in soup.get_text()

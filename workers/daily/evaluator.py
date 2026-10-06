@@ -103,7 +103,7 @@ def find_pending_predictions(session: Session, up_to: date) -> list[Prediction]:
     Find every daily prediction due on or before ``up_to`` that is not evaluated.
 
     Includes predictions an earlier run could not score because their bar was
-    not stored yet. Weekly predictions belong to the weekly evaluator.
+    not stored yet.
 
     Args:
         session: Database session

@@ -4,6 +4,9 @@ Tests for migration d5a1c7e93b20: one active version per model family (#169).
 The index on (symbol, name, timeframe) became one on (symbol, family,
 timeframe). Rows saved before it can hold several active versions of a family;
 the upgrade keeps the newest and deactivates the rest.
+
+Migration e2b8f4a6c1d7 narrows both timeframe CHECK constraints to ('1d') and
+deletes the ``1w`` rows (#183).
 """
 
 import os
@@ -25,6 +28,7 @@ from testdb import ensure_database
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REVISION_BEFORE = "c4d8e1f2a9b3"
 INDEX_NAME = "ix_models_one_active_version_per_name_timeframe"
+REVISION_DAILY_ONLY = "e2b8f4a6c1d7"
 
 INSERT_MODEL = text(
     "INSERT INTO models (symbol, name, version, params, artifact, trained_at,"
@@ -113,7 +117,6 @@ class TestMigration:
         _insert(engine, "linear_v2", day=2)
         _insert(engine, "xgboost_v1", day=1)
         _insert(engine, "linear_v1", day=1, symbol="PAXGUSDT")
-        _insert(engine, "linear_v1", day=1, timeframe="1w")
         _insert(engine, "linear_v0", day=4, is_active=False)
 
         _alembic(url, "upgrade", "head")
@@ -122,7 +125,6 @@ class TestMigration:
             ("BTCUSDT", "linear_v3", "1d"),
             ("BTCUSDT", "xgboost_v1", "1d"),
             ("PAXGUSDT", "linear_v1", "1d"),
-            ("BTCUSDT", "linear_v1", "1w"),
         }
 
     def test_upgrade_breaks_a_trained_at_tie_with_the_highest_id(
@@ -163,3 +165,81 @@ class TestMigration:
         _alembic(url, "upgrade", "head")
         assert "regexp_replace" in _index_definition(engine)
         assert _active(engine) == {("BTCUSDT", "linear_v2", "1d")}
+
+
+INSERT_PREDICTION = text(
+    "INSERT INTO predictions (model_id, predicted_for, timeframe, predicted_at,"
+    " price_at_prediction, predicted_price)"
+    " VALUES (:model_id, '2024-06-10', :timeframe, '2024-06-09', 50000, 51000)"
+)
+
+
+def _model_id(engine: Engine, timeframe: str) -> int:
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text("SELECT id FROM models WHERE timeframe = :timeframe"),
+                {"timeframe": timeframe},
+            ).scalar_one()
+        )
+
+
+def _count(engine: Engine, table: str, timeframe: str) -> int:
+    with engine.connect() as connection:
+        return int(
+            connection.execute(
+                text(f"SELECT count(*) FROM {table} WHERE timeframe = :timeframe"),  # noqa: S608
+                {"timeframe": timeframe},
+            ).scalar_one()
+        )
+
+
+@pytest.mark.slow
+class TestDailyOnlyMigration:
+    def test_upgrade_deletes_weekly_rows_and_rejects_new_ones(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
+        url, engine = migration_db
+        _alembic(url, "upgrade", "d5a1c7e93b20")
+        _insert(engine, "linear_v1", day=1, timeframe="1d")
+        _insert(engine, "linear_weekly_v1", day=2, timeframe="1w")
+        for timeframe in ("1d", "1w"):
+            with engine.begin() as connection:
+                connection.execute(
+                    INSERT_PREDICTION,
+                    {"model_id": _model_id(engine, timeframe), "timeframe": timeframe},
+                )
+
+        _alembic(url, "upgrade", REVISION_DAILY_ONLY)
+
+        assert _count(engine, "models", "1w") == 0
+        assert _count(engine, "predictions", "1w") == 0
+        assert _count(engine, "models", "1d") == 1
+        assert _count(engine, "predictions", "1d") == 1
+        with pytest.raises(IntegrityError, match="valid_model_timeframe_values"):
+            _insert(engine, "linear_weekly_v2", day=3, timeframe="1w")
+        with pytest.raises(IntegrityError, match="valid_timeframe_values"):
+            with engine.begin() as connection:
+                connection.execute(
+                    INSERT_PREDICTION,
+                    {"model_id": _model_id(engine, "1d"), "timeframe": "1w"},
+                )
+
+    def test_downgrade_accepts_weekly_again_without_restoring_rows(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
+        url, engine = migration_db
+        _alembic(url, "upgrade", "d5a1c7e93b20")
+        _insert(engine, "linear_weekly_v1", day=2, timeframe="1w")
+        _alembic(url, "upgrade", REVISION_DAILY_ONLY)
+
+        _alembic(url, "downgrade", "d5a1c7e93b20")
+
+        assert _count(engine, "models", "1w") == 0
+        _insert(engine, "linear_weekly_v1", day=2, timeframe="1w")
+        with engine.begin() as connection:
+            connection.execute(
+                INSERT_PREDICTION,
+                {"model_id": _model_id(engine, "1w"), "timeframe": "1w"},
+            )
+        assert _count(engine, "predictions", "1w") == 1

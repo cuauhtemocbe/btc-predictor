@@ -112,9 +112,7 @@ def get_active_models(
     """
     Load active daily (timeframe='1d') model(s) from the database.
 
-    Scoped to timeframe='1d' so this never picks up the active weekly
-    model -- a '1d' and a '1w' model can be active at the same time (see
-    ix_models_one_active_per_timeframe).
+    Scoped to timeframe='1d', the only timeframe the models table accepts.
 
     Args:
         session: Database session

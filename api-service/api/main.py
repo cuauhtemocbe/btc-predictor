@@ -57,13 +57,13 @@ async def dashboard(
     Args:
         request: FastAPI request object
         db: Database session
-        timeframe: Optional filter for timeframe ('1d', '1w'). Defaults to '1d' if None.
+        timeframe: Optional filter for timeframe ('1d'). Defaults to '1d' if None.
         symbol: Asset to show (default BTCUSDT); every table and chart is scoped to it.
         source: ``live``, ``replay`` or ``all`` (default). Live and replay get
             separate headline blocks; the combined one appears only under ``all``.
     """
     # Default timeframe if none specified -- shared across every metrics
-    # endpoint so daily and weekly results are never silently combined.
+    # endpoint so results of different timeframes are never silently combined.
     if timeframe is None:
         timeframe = DEFAULT_TIMEFRAME
 

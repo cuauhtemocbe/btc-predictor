@@ -131,7 +131,7 @@ def get_all_strategies_metrics(
 
     Args:
         db: Database session
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
+        timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together in one series.
         symbol: Optional asset filter, matched on the predicting model's symbol.
         source: ``live``, ``replay`` or ``all`` (default), by the predicting model.

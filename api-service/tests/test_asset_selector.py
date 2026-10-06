@@ -385,22 +385,6 @@ async def test_small_edge_is_marked_not_significant(
     assert "Not significant" in cell.get_text()
 
 
-@pytest.mark.asyncio
-async def test_weekly_timeframe_has_no_baseline(
-    client: AsyncClient, db_session: Session
-) -> None:
-    """Persistence needs a daily horizon, so weekly shows N/A, never a number."""
-    closes = alternating(100, 110, 12)
-    model = add_model(db_session, BTC)
-    add_prices(db_session, BTC, closes)
-    add_evaluated_predictions(db_session, model, closes)
-    db_session.commit()
-
-    body = (await client.get("/models/metrics", params={"timeframe": "1w"})).json()
-
-    assert body["models"][0]["baseline"] is None
-
-
 # Scenario: An asset with no predictions yet shows an empty state
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

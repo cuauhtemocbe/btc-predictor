@@ -79,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if not activated_model.name.startswith("linear"):
             logger.warning(
-                "  The daily and weekly crons only train 'linear'; "
+                "  The daily cron only train 'linear'; "
                 "this model will not be retrained."
             )
 

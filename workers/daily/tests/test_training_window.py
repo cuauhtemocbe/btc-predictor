@@ -134,9 +134,6 @@ class TestMinimumRows:
         assert trainer.required_training_days(21) == 110
         assert trainer.required_training_days(10) == 55
 
-    def test_a_longer_horizon_needs_extra_rows(self) -> None:
-        assert trainer.required_training_days(21, horizon_days=7) == 116
-
     def test_too_few_rows_names_required_and_available(
         self, db_session: Session
     ) -> None:

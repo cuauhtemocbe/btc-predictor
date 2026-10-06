@@ -15,7 +15,7 @@ import pytest
 
 SCRIPT = Path(__file__).parents[1] / "hooks" / "monitor-railway.sh"
 
-SERVICES = ["btc-predictor", "weekly-predictor", "daily", "fetch-price"]
+SERVICES = ["btc-predictor", "daily", "fetch-price"]
 
 
 def block(
@@ -36,7 +36,6 @@ def snapshot(
     statuses = statuses or {}
     extras = {
         "btc-predictor": ("url:           https://btc.example.app",),
-        "weekly-predictor": ("replicas:      0/1 running",),
         "daily": (
             "url:           https://daily.example.app",
             "replicas:      0/1 running",
