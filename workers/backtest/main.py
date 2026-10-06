@@ -35,6 +35,7 @@ from scripts.backtest_engine import (
 )
 from shared.config import settings
 from shared.db.database import SessionLocal
+from shared.utils import utc_today
 from workers.daily.trainer import required_training_days
 
 # Configure logging
@@ -68,7 +69,7 @@ def plan_range(history: DailyHistory, window_days: int) -> tuple[date, date, dat
             ``TEST_DAYS`` test days plus one validation day.
     """
     needed = required_training_days(window_days)
-    end_date = history.dates[-1] if history.dates else date.today()
+    end_date = history.dates[-1] if history.dates else utc_today()
     wanted_start = end_date - timedelta(days=LOOKBACK_DAYS - 1)
 
     if len(history.dates) > needed:

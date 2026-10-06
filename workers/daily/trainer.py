@@ -38,7 +38,7 @@ from shared.features import (
     build_training_set,
     feature_count,
 )
-from shared.utils import calculate_mape, split_train_validation
+from shared.utils import calculate_mape, split_train_validation, utc_today
 from workers.daily.models import BaseModel, LinearRegressionModel
 from workers.daily.models.factory import instantiate_model
 
@@ -227,7 +227,7 @@ def main() -> int:
 
         # Calculate training date range
         # One row per day, so the series length is the day range
-        train_to = date.today()
+        train_to = utc_today()
         train_from = train_to - timedelta(days=len(series))
 
         # Save model
@@ -510,7 +510,7 @@ def train_all_models(
     logger.info(f"Successfully trained {num_success}/{num_total} models")
 
     # Calculate training date range
-    train_to = date.today()
+    train_to = utc_today()
     train_from = train_to - timedelta(days=len(series))
 
     # Get next version number for each model

@@ -17,13 +17,14 @@ Covers 5 critical Gherkin scenarios from US-025:
 """
 
 from argparse import Namespace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily import evaluator, predictor
 from workers.daily.models import BaseModel
 
@@ -57,8 +58,8 @@ def three_active_models(
         params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
         artifact=cached_linear_artifact,  # NO training!
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=True,
     )
     db_session.add(model1)
@@ -76,8 +77,8 @@ def three_active_models(
         },
         artifact=cached_xgboost_artifact,  # NO training!
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=True,
     )
     db_session.add(model2)
@@ -95,8 +96,8 @@ def three_active_models(
         },
         artifact=cached_lstm_artifact,  # NO training!
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=True,
     )
     db_session.add(model3)
@@ -139,7 +140,7 @@ class TestMultiModelPredictions:
         assert len(three_active_models) == 3
         assert all(m.is_active for m in three_active_models)
 
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         # Verify no predictions exist yet
         count_before = db_session.query(Prediction).count()
@@ -284,7 +285,7 @@ class TestEvaluatorMultiModel:
         And all predictions have error metrics calculated
         """
         # Given: 3 unevaluated predictions for today from 3 different models
-        today = date.today()
+        today = utc_today()
 
         prediction1 = Prediction(
             model_id=three_active_models[0].id,
@@ -444,7 +445,7 @@ class TestMultiModelIdempotency:
         And the job exits successfully (code 0)
         """
         # Given: 3 predictions already exist for tomorrow (one per model)
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         for model in three_active_models:
             prediction = Prediction(

@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily import evaluator
 from workers.daily.evaluator import EvaluationMetrics
 
@@ -148,7 +149,7 @@ class TestCalculateMetrics:
         # Create prediction with predicted_price < price_at_prediction (predicted DOWN)
         prediction = Prediction(
             model_id=sample_trained_model.id,
-            predicted_for=date.today(),
+            predicted_for=utc_today(),
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("66000.00"),
             predicted_price=Decimal("65000.00"),  # Predicted DOWN
@@ -181,7 +182,7 @@ class TestFindUnevaluatedPrediction:
         self, db_session: Session, sample_unevaluated_prediction_for_today: Prediction
     ) -> None:
         """Should find prediction with actual_price=NULL."""
-        today = date.today()
+        today = utc_today()
 
         prediction = evaluator.find_unevaluated_prediction(db_session, today)
 
@@ -193,7 +194,7 @@ class TestFindUnevaluatedPrediction:
         self, db_session: Session, sample_evaluated_prediction_for_today: Prediction
     ) -> None:
         """Should return None when all predictions are evaluated."""
-        today = date.today()
+        today = utc_today()
 
         prediction = evaluator.find_unevaluated_prediction(db_session, today)
 
@@ -201,7 +202,7 @@ class TestFindUnevaluatedPrediction:
 
     def test_no_predictions_for_date(self, db_session: Session) -> None:
         """Should return None when no predictions exist for the date."""
-        today = date.today()
+        today = utc_today()
 
         prediction = evaluator.find_unevaluated_prediction(db_session, today)
 
@@ -215,7 +216,7 @@ class TestFindUnevaluatedPrediction:
 
         When multiple models predict for the same day.
         """
-        today = date.today()
+        today = utc_today()
 
         # Create a second model with higher ID
         model2 = Model(
@@ -288,13 +289,13 @@ class TestFetchActualPrice:
         self, db_session: Session, sample_actual_price_for_today: Price
     ) -> None:
         """A prediction for today is settled by the bar opened yesterday."""
-        price = evaluator.fetch_actual_price(db_session, date.today())
+        price = evaluator.fetch_actual_price(db_session, utc_today())
 
         assert price == Decimal("67500.00")
 
     def test_missing_price_returns_none(self, db_session: Session) -> None:
         """Should return None when the settling bar is not stored."""
-        assert evaluator.fetch_actual_price(db_session, date.today()) is None
+        assert evaluator.fetch_actual_price(db_session, utc_today()) is None
 
     def test_uses_bar_opened_the_day_before(self, db_session: Session) -> None:
         """Predicted for 10-03: the bar opened 10-02, which closes 10-03 00:00."""

@@ -5,7 +5,7 @@ Same bug as the daily worker: PAXGUSDT bars share the ``prices`` table since
 #102, and unfiltered queries returned two rows per day.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 import workers.weekly.predictor as pred_module
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily import predictor as daily_predictor
 from workers.weekly import evaluator, predictor
 
@@ -44,7 +45,7 @@ def _add_bar(
 
 
 def _add_daily_series(session: Session, symbol: str, close: Decimal, days: int) -> None:
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     for i in range(days):
         day = first_day + timedelta(days=i)
         _add_bar(session, symbol, datetime.combine(day, time(0, 0), tzinfo=UTC), close)
@@ -92,7 +93,7 @@ class TestWeeklyPredictorSymbolIsolation:
 
 class TestWeeklyEvaluatorSymbolIsolation:
     def test_fetch_actual_price_ignores_other_symbol(self, db_session: Session) -> None:
-        today = date.today()
+        today = utc_today()
         bar_open = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
         _add_bar(db_session, PAXG, bar_open, PAXG_CLOSE)
         _add_bar(db_session, BTC, bar_open, BTC_CLOSE)

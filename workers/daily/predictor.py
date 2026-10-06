@@ -36,6 +36,7 @@ from shared.features import (
     price_from_return,
     required_history_days,
 )
+from shared.utils import utc_today
 from workers.daily.models import BaseModel, LinearRegressionModel
 
 # Configure logging
@@ -535,7 +536,7 @@ def main(session: Session | None = None) -> int:
 
     try:
         # Calculate tomorrow's date
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         logger.info(f"Predicting for date: {tomorrow}")
 
         # Load active model(s) based on mode

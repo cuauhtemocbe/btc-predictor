@@ -6,7 +6,7 @@ Covers all Gherkin scenarios from US-013:
 """
 
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import numpy as np
@@ -30,6 +30,7 @@ from shared.utils import (
     get_all_models_metrics,
     get_cumulative_pnl,
     split_train_validation,
+    utc_today,
 )
 
 
@@ -1464,3 +1465,22 @@ class TestCapitalNormalizedMetrics:
         assert m1["sharpe_ratio"] == pytest.approx(
             calculate_sharpe_ratio(db_session, model.id, capital=1000.0), abs=0.01
         )
+
+
+class TestUtcToday:
+    """utc_today() follows the UTC clock, not the process time zone (#173)."""
+
+    def test_returns_the_utc_date_while_the_local_date_is_a_day_behind(
+        self, mexico_city_at_0300_utc: datetime
+    ) -> None:
+        # Guard: the local date is the 3rd here, so a local-date call would be wrong
+        assert mexico_city_at_0300_utc.astimezone().date() == date(2026, 10, 3)
+
+        assert utc_today() == date(2026, 10, 4)
+
+    def test_matches_the_utc_calendar_date_of_now(self) -> None:
+        before = datetime.now(UTC).date()
+
+        today = utc_today()
+
+        assert before <= today <= datetime.now(UTC).date()

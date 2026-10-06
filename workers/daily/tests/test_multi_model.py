@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -116,7 +117,7 @@ class TestGetActiveModels:
         sample_trained_model: Model,
     ) -> None:
         """Should continue with other models if one fails to deserialize."""
-        from datetime import date, timedelta
+        from datetime import timedelta
 
         # Create a model with corrupted artifact
         corrupted_model = Model(
@@ -126,8 +127,8 @@ class TestGetActiveModels:
             artifact=b"corrupted_data",  # Invalid pickle
             is_active=True,
             trained_at=datetime.now(UTC),
-            train_from=date.today() - timedelta(days=60),
-            train_to=date.today() - timedelta(days=1),
+            train_from=utc_today() - timedelta(days=60),
+            train_to=utc_today() - timedelta(days=1),
         )
         db_session.add(corrupted_model)
         db_session.commit()
@@ -140,7 +141,7 @@ class TestGetActiveModels:
 
     def test_all_models_fail_raises_error(self, db_session: Session) -> None:
         """Should raise ValueError if ALL models fail to deserialize."""
-        from datetime import date, timedelta
+        from datetime import timedelta
 
         # Create only corrupted models
         corrupted_model = Model(
@@ -150,8 +151,8 @@ class TestGetActiveModels:
             artifact=b"corrupted_data",
             is_active=True,
             trained_at=datetime.now(UTC),
-            train_from=date.today() - timedelta(days=60),
-            train_to=date.today() - timedelta(days=1),
+            train_from=utc_today() - timedelta(days=60),
+            train_to=utc_today() - timedelta(days=1),
         )
         db_session.add(corrupted_model)
         db_session.commit()
@@ -170,7 +171,7 @@ class TestCheckExistingPrediction:
 
     def test_no_prediction_exists(self, db_session: Session) -> None:
         """Should return False when no prediction exists."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         exists = predictor.check_existing_prediction(db_session, tomorrow, model_id=1)
         assert exists is False
 
@@ -180,7 +181,7 @@ class TestCheckExistingPrediction:
         sample_trained_model: Model,
     ) -> None:
         """Should return True when prediction exists for specific model."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         # Create prediction for model
         prediction = Prediction(
@@ -205,7 +206,7 @@ class TestCheckExistingPrediction:
         sample_xgboost_model: Model,
     ) -> None:
         """Should return False when prediction exists for different model."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         # Create prediction for model 1
         prediction = Prediction(
