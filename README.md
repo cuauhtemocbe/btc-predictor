@@ -8,12 +8,7 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 
 ## 🚀 Estado del Proyecto
 
-✅ **Proyecto Completo** — Todas las User Stories implementadas y desplegadas a Railway  
-✅ **16 User Stories (US-001 a US-016)** — 8 iteraciones completadas  
-✅ **Deployed:** [Railway Production](https://btc-predictor.railway.app)
-
-[Ver User Stories en GitHub →](https://github.com/cuauhtemocbe/btc-predictor/issues)  
-[Ver Proyecto Board →](https://github.com/users/cuauhtemocbe/projects/1/views/1)
+Desplegado en Railway: <https://btc-predictor-production-096e.up.railway.app>. El trabajo pendiente y el histórico están en los [issues](https://github.com/cuauhtemocbe/btc-predictor/issues) y en el [tablero](https://github.com/users/cuauhtemocbe/projects/1/views/1).
 
 ---
 
@@ -32,30 +27,17 @@ Webapp de Data Science para predecir el precio del Bitcoin al día siguiente usa
 
 ## 🏗️ Arquitectura
 
-El proyecto se despliega como **6 servicios en Railway**:
+Cinco servicios en Railway. Los comandos de inicio y los horarios viven en el dashboard de Railway, no en los `railway.*.toml` ([RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)).
 
-```
-┌──────────────────┐
-│     postgres     │  Plugin nativo de Railway
-└──────────────────┘
-         ↓
-┌──────────────────┐
-│       api        │  Servicio web siempre activo (FastAPI + Dashboard)
-└──────────────────┘
-         ↓
-┌──────────────────┐
-│   fetch-price    │  Cron diario 00:05 UTC: guarda la vela diaria cerrada de cada símbolo
-└──────────────────┘
-         ↓
-┌──────────────────┐
-│      daily       │  Cron diario 00:10 UTC: evalúa → entrena → predice (horizonte 1 día)
-└──────────────────┘
-┌──────────────────┐
-│ monthly-backtest │  Cron día 1 de cada mes, 00:00 UTC: backtest walk-forward con la configuración de producción
-└──────────────────┘
-```
+| Servicio | Tipo | Qué hace |
+|----------|------|----------|
+| `postgres` | Plugin de Railway | Base de datos compartida |
+| `api` | Web, siempre activo | FastAPI y dashboard |
+| `fetch-price` | Cron `5 0 * * *` | Guarda la vela diaria cerrada de cada símbolo |
+| `daily` | Cron `10 0 * * *` | Evalúa, entrena y predice (horizonte 1 día) |
+| `monthly-backtest` | Cron `0 0 1 * *` | Backtest walk-forward con la configuración de producción |
 
-**Ver documentación completa:** [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)
+Historial de decisiones: [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md).
 
 ---
 
@@ -86,8 +68,6 @@ btc-predictor/
     │   └── models/      # BaseModel abstract + modelos ML
     └── backtest/        # Cron mensual: backtest walk-forward
 ```
-
-**Nota:** Estructura final implementada. Todos los workers están funcionando en Railway.
 
 ---
 
@@ -164,169 +144,59 @@ Ver [docs/BACKTESTING.md](docs/BACKTESTING.md) para el detalle de cómo se calcu
 
 ## 🚦 Inicio Rápido
 
-### Prerrequisitos
-
-- **Docker + Docker Compose** (OBLIGATORIO)
-- Git
-- Un editor de código (VS Code, PyCharm, etc.)
-
-**IMPORTANTE:** NO necesitas instalar Python, Poetry, ni PostgreSQL en tu máquina local. Todo se ejecuta dentro de contenedores.
-
-### Desarrollo Local (Container-First)
+Todo corre en Docker: no instales Python, Poetry ni PostgreSQL en tu máquina, y no ejecutes `pytest` en el host.
 
 ```bash
-# 1. Clonar el repositorio
 git clone https://github.com/cuauhtemocbe/btc-predictor.git
 cd btc-predictor
-
-# 2. Copiar variables de entorno (opcional - hay defaults)
-cp .env.example .env
-
-# 3. Levantar servicios con Docker Compose
-docker compose up
-
-# 4. Acceder al API
-open http://localhost:8010/docs  # Swagger UI
-open http://localhost:8010/health  # Health check
+cp .env.example .env        # opcional, hay valores por defecto
+docker compose up           # PostgreSQL (5433 en el host) y API con hot-reload (8010 en el host)
 ```
 
-El comando `docker compose up` levanta:
-- ✅ PostgreSQL en puerto 5432
-- ✅ API con hot-reload en puerto 8000
-- ✅ Todos los volumes montados para desarrollo
+La API queda en <http://localhost:8010/docs> (Swagger) y <http://localhost:8010/health>. Migraciones: `docker compose exec api sh -c "cd shared && alembic upgrade head"`. Shell: `docker compose exec api bash`.
 
-### Correr Tests (SIEMPRE dentro del contenedor)
+### Tests
 
 ```bash
-# Levantar servicios (si no están corriendo)
-docker compose up -d
-
-# Ejecutar TODOS los tests del proyecto (shared + api-service + workers)
-docker compose exec api pytest
-
-# Con coverage
-docker compose exec api pytest --cov --cov-report=term-missing
-
-# Tests de un servicio específico
-docker compose exec api pytest shared/tests/
-docker compose exec api pytest api-service/tests/
-docker compose exec api pytest workers/fetch_price/tests/
-docker compose exec api pytest workers/daily/tests/
-
-# Un test específico
-docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
-
-# Verbose + mostrar prints
-docker compose exec api pytest -v -s
-
-# Tests en paralelo (más rápido)
-docker compose exec api pytest -n auto
+docker compose exec api pytest                                    # todo el proyecto
+docker compose exec api pytest -n 4 --dist loadscope              # en paralelo, una base de datos por worker
+docker compose exec api pytest --cov --cov-report=term-missing    # con cobertura
+docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl   # uno solo
 ```
 
-**⚠️ NUNCA ejecutes `pytest` directamente en el host** — no tendrá acceso al entorno correcto.
-
-**Aislamiento de datos:** Los tests usan fixtures de pytest (`conftest.py`) que crean datos de entrada y los eliminan automáticamente al final de cada test (patrón `yield`).
+Los tests usan bases de datos propias (`btcpredictor_test`, `btcpredictor_test_gw0`, ...); la base de desarrollo no se toca. Cada criterio de aceptación (Gherkin) tiene al menos un test que falla cuando el criterio se rompe; una User Story no se cierra sin ellos. Las reglas y los comandos de calidad completos están en [CLAUDE.md](CLAUDE.md).
 
 ### CI/CD
 
-GitHub Actions ejecuta la misma validación dentro de Docker en cada push y pull request:
+GitHub Actions (`.github/workflows/ci.yml`, en cada pull request y en cada push a `main`) corre en Docker: Ruff (lint y formato), mypy estricto sobre `shared`, `workers`, `api` y `scripts` con sus tests, pytest con cobertura y la cobertura mínima por módulo (`[tool.coverage_thresholds]` en `pyproject.toml`). Un workflow semanal (`quality.yml`) corre mutation testing con Cosmic Ray, con un máximo de 45 minutos, y sube el artefacto `mutation-report`. Railway despliega con su integración nativa con GitHub. Las protecciones de `main` están en [CLAUDE.md](CLAUDE.md).
 
-- Ruff lint y formato sobre `shared`, `api`, `workers` y `scripts`
-- mypy estricto sobre `shared`, `workers`, `api` y `scripts` (sin los tests de workers, api y scripts)
-- pytest con cobertura mínima del proyecto
-- Cobertura mínima por módulo crítico (`[tool.coverage_thresholds]` en `pyproject.toml`)
-- Reporte de cobertura como artefacto del workflow
+### Carga de historial de precios (#101)
 
-El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray (máximo 45 minutos) y sube el artefacto `mutation-report`; si se agota el tiempo, el reporte es parcial e indica cuántos mutantes se completaron. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
-
-La protección de `main` y la exigencia de checks obligatorios se configura por separado en la issue [#49](https://github.com/cuauhtemocbe/btc-predictor/issues/49).
-
-### Carga de Historial de Precios (#101)
-
-Para cargar años de precios diarios de BTC (`BTCUSDT`, desde 2017-08) y oro (`PAXGUSDT`, proxy desde 2020-08) desde [data.binance.vision](https://data.binance.vision) y entrenar/evaluar con miles de días:
+Carga los precios diarios de `BTCUSDT` (desde 2017-08) y `PAXGUSDT` (desde 2020-08) de [data.binance.vision](https://data.binance.vision):
 
 ```bash
-# Cargar todo el historial de ambos símbolos hasta el último mes cerrado
-docker compose exec api python scripts/load_binance_history.py
-
-# Un solo símbolo
-docker compose exec api python scripts/load_binance_history.py --symbols PAXGUSDT
-
-# Verificar que el host es alcanzable desde Railway (sin HTTP 451/403), sin escribir en la BD
-railway run -s api python scripts/load_binance_history.py --check
-
-# Carga en producción (Railway)
-railway run -s api python scripts/load_binance_history.py
+docker compose exec api python scripts/load_binance_history.py                      # ambos símbolos
+docker compose exec api python scripts/load_binance_history.py --symbols PAXGUSDT   # uno solo
+railway run -s api python scripts/load_binance_history.py --check                   # solo verifica que el host responda desde Railway
 ```
 
-**Características:**
-- ✅ **Idempotente:** volver a ejecutarlo no duplica filas (`ON CONFLICT DO NOTHING` sobre `unique_price_per_symbol`)
-- ✅ **Verificación SHA256:** cada zip se compara con su `.CHECKSUM`; si no coincide no se inserta nada de ese archivo y el error nombra el archivo
-- ✅ **Falla de forma clara:** un mes faltante (404) o un zip corrupto detiene la carga con un error explícito
-- ✅ **Validación de continuidad:** al terminar, reporta cualquier día faltante o con volumen 0
-- ✅ **Timestamps normalizados:** los CSV usan milisegundos hasta 2024 y microsegundos desde 2025-01-01; ambos se guardan como 00:00 UTC
-- El código vive en `shared/shared/binance_vision.py` (solo stdlib para HTTP)
+El código está en `shared/shared/binance_vision.py` (solo stdlib para HTTP):
 
-### Backtesting Walk-Forward (US-020)
+- **Idempotente:** `ON CONFLICT DO NOTHING` sobre `unique_price_per_symbol`.
+- **Verificación SHA256:** cada zip se compara con su `.CHECKSUM`; si no coincide no se inserta nada de ese archivo.
+- **Falla de forma clara:** un mes faltante (404) o un zip corrupto detiene la carga y el error nombra el archivo.
+- **Validación de continuidad:** al terminar reporta los días faltantes o con volumen 0.
+- **Timestamps normalizados:** los CSV traen milisegundos hasta 2024 y microsegundos desde 2025-01-01; ambos se guardan como 00:00 UTC.
 
-Para validar la efectividad del modelo simulando predicciones históricas:
+### Backtesting walk-forward (US-020)
 
 ```bash
-# Backtest de mayo 2024 (30 días)
-docker compose exec api python scripts/backtest.py \
-  --start-date=2024-05-01 --end-date=2024-05-30
-
-# Backtest con ventana de entrenamiento de 60 días
-docker compose exec api python scripts/backtest.py \
-  --start-date=2024-05-01 --end-date=2024-05-30 \
-  --training-window=60
-
-# Split validación/test explícito, reentrenando cada 30 días
-docker compose exec api python scripts/backtest.py \
-  --start-date=2023-01-01 --end-date=2025-12-31 \
+docker compose exec api python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-30
+docker compose exec api python scripts/backtest.py --start-date=2023-01-01 --end-date=2025-12-31 \
   --retrain-every=30 --test-start-date=2025-01-01
-
-# Backtest de últimos 90 días
-docker compose exec api python scripts/backtest.py \
-  --start-date=2024-02-01 --end-date=2024-04-30
 ```
 
-**Características:**
-- ✅ **Walk-Forward Testing:** Entrena modelo progresivamente sin lookahead bias, con el mismo código de features y modelos que el worker diario
-- ✅ **Baselines y significancia:** compara contra always-up, persistence y buy-and-hold, con tamaño de muestra, edge y p-value; el headline usa solo el slice de test
-- ✅ **4 Estrategias PnL:** Simple, Long/Short, Threshold, Realistic (con fees)
-- ✅ **UUID por Run:** Distingue múltiples simulaciones
-- ✅ **Progress Logging:** Muestra progreso cada 10 días
-- ✅ **Manejo de Errores:** Skipea días con datos faltantes o errores de entrenamiento
-
-**Ver resultados:**
-```bash
-docker compose exec postgres psql -U btcpredictor -d btcpredictor \
-  -c "SELECT backtest_run_id, COUNT(*) AS predictions, 
-      SUM(pnl_realistic) AS total_pnl 
-      FROM backtest_results GROUP BY backtest_run_id;"
-```
-
-**Documentación completa:** Ver [docs/BACKTESTING.md](docs/BACKTESTING.md)
-
-### Aplicar Migraciones (después de Iteración 1)
-
-```bash
-# Ejecutar dentro del contenedor
-docker compose exec api sh -c "cd shared && alembic upgrade head"
-```
-
-### Shell Interactivo (para debugging)
-
-```bash
-# Acceder al contenedor
-docker compose exec api bash
-
-# Desde dentro del contenedor puedes ejecutar:
-pytest
-python -m fetch_price.main
-alembic upgrade head
-```
+Entrena de forma progresiva sin sesgo de anticipación, con el mismo código de features y modelos que el worker diario; compara contra los baselines con tamaño de muestra, edge y p-value (el titular usa solo el tramo de test); calcula las 4 estrategias de PnL; y guarda cada corrida con su `backtest_run_id`. Opciones, columnas y consultas: [docs/BACKTESTING.md](docs/BACKTESTING.md).
 
 ---
 
@@ -377,124 +247,6 @@ Corre `scripts/backtest.py` con la configuración de producción (ventana `TRAIN
 
 ---
 
-## 🧪 Testing
-
-### Regla Fundamental
-
-**Cada criterio de aceptación (Gherkin) debe tener al menos 1 test automatizado.**
-
-Esta regla es **no negociable**:
-- Si el criterio no tiene un test que falla cuando se rompe, el criterio no está cubierto
-- "Lo probé manualmente", "se ve bien en el browser", "confío en que funciona" **NO son aceptables**
-- Una User Story no se puede cerrar hasta que todos sus escenarios Gherkin tengan tests que pasen
-
-### Estructura de Tests
-
-Cada servicio tiene su carpeta `tests/`:
-
-```
-shared/tests/           # Config, models, CRUD, utils
-api-service/tests/              # API endpoints + dashboard
-workers/fetch_price/tests/ # Job de ingesta diaria
-workers/daily/tests/       # Evaluator, trainer, predictor, models ML
-```
-
-### Tipos de Tests
-
-- **Unit:** Funciones puras (`calculate_pnl`, model `predict()`)
-- **Integration:** Operaciones de DB, migraciones Alembic
-- **API:** Endpoints FastAPI con `httpx.AsyncClient`
-- **Job:** Idempotencia, error handling, mocking de APIs externas
-
-### Comandos de Tests (SIEMPRE dentro del contenedor)
-
-**⚠️ IMPORTANTE:** Todos los comandos de test deben ejecutarse con `docker compose exec api`.
-
-**El comando `docker compose exec api pytest` (sin argumentos) ejecuta TODOS los tests del proyecto** — no solo los del API, sino también shared, workers, fetch_price, daily, etc.
-
-```bash
-# Levantar servicios (si no están corriendo)
-docker compose up -d
-
-# ✅ Correr TODOS los tests del proyecto (shared + api-service + workers)
-docker compose exec api pytest
-
-# Tests de un servicio específico
-docker compose exec api pytest shared/tests/
-docker compose exec api pytest api-service/tests/
-docker compose exec api pytest workers/fetch_price/tests/
-docker compose exec api pytest workers/daily/tests/
-
-# Tests con cobertura (target: >80%)
-docker compose exec api pytest --cov --cov-report=term-missing
-docker compose exec api pytest --cov --cov-report=html  # genera htmlcov/index.html
-
-# Un test específico
-docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
-
-# Verbose + print statements
-docker compose exec api pytest -v -s
-
-# Tests en paralelo (más rápido)
-docker compose exec api pytest -n auto
-```
-
-**❌ NO ejecutes `pytest` directamente en el host** — no tendrá el entorno Python correcto ni acceso a la base de datos.
-
-### Aislamiento de Tests
-
-**Estrategia simple:** Los tests usan la misma base de datos `postgres` que desarrollo.
-
-El aislamiento se logra mediante **fixtures de pytest** en `conftest.py`:
-
-```python
-# Ejemplo: tests/conftest.py
-@pytest.fixture
-def db_session():
-    """Session con rollback automático"""
-    session = SessionLocal()
-    yield session
-    session.rollback()  # Deshace cambios después del test
-    session.close()
-
-
-@pytest.fixture
-def sample_data(db_session):
-    """Crea datos de prueba, auto-eliminados al terminar"""
-    data = MyModel(name="test")
-    db_session.add(data)
-    db_session.commit()
-    yield data
-    # Cleanup automático por rollback de session
-```
-
-**Beneficios:**
-- ✅ Simple: una sola base de datos
-- ✅ Rápido: no necesitas levantar contenedores adicionales
-- ✅ Seguro: fixtures garantizan cleanup automático
-- ✅ Estándar: patrón común en pytest
-
-**Opción 2: SQLite in-memory** (para CI rápido)
-```python
-# conftest.py usa sqlite:///:memory: automáticamente
-```
-
-### Frameworks & Tools
-
-- `pytest` — test runner principal
-- `pytest-asyncio` — soporte para tests async
-- `httpx` — async HTTP client para API tests
-- `pytest-mock` / `respx` — mocking (Binance API, etc.)
-- `pytest-cov` — reportes de cobertura
-- `pytest-xdist` — ejecución en paralelo
-
-### Ver Testing Strategy Completa
-
-Para ejemplos detallados, fixtures, y configuración de CI/CD:
-- **[IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md#testing-strategy)** — Testing Strategy completa
-
----
-
 ## 🌍 Variables de Entorno
 
 ```bash
@@ -516,71 +268,19 @@ ENVIRONMENT=development
 
 ## 🚢 Deploy en Railway
 
-### Configuración
-
-1. Crear proyecto en Railway
-2. Agregar plugin PostgreSQL
-3. Crear 5 servicios (detalle en [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md)):
-   - **api:** Web service (`Dockerfile.api`)
-   - **fetch-price:** Cron `5 0 * * *` (00:05 UTC diario)
-   - **daily:** Cron `10 0 * * *` (00:10 UTC diario, termina con código 1 si la última vela cerró hace más de 2 horas)
-   - **monthly-backtest:** Cron `0 0 1 * *` (día 1 de cada mes, 00:00 UTC)
-   - **postgres:** Plugin (automático)
-
-4. Conectar servicios al repo de GitHub
-5. Agregar variables de entorno
-6. Deploy automático en cada push a `main`
-
-### Ver Logs
-
-```bash
-railway logs --service api
-railway logs --service fetch-price
-railway logs --service daily
-railway logs --service monthly-backtest
-```
-
----
-
-## 📈 Desarrollo Iterativo
-
-El proyecto siguió un enfoque **incremental y deployable**. Cada iteración agregó features y fue desplegada a Railway.
-
-| Iteración | Goal | User Stories | Status |
-|-----------|------|--------------|--------|
-| 0 | Hello World | - | ✅ Done |
-| 1 | Database Foundation | US-001, US-002 | ✅ Done |
-| 2 | Fetch BTC Prices | US-003, US-004 | ✅ Done |
-| 3 | Prices API | US-005 | ✅ Done |
-| 4 | ML Foundation | US-006, US-007 | ✅ Done |
-| 5 | Predictions & Evaluation | US-008, US-009, US-010 | ✅ Done |
-| 6 | Dashboard UI | US-011, US-012 | ✅ Done |
-| 7 | PnL Simulation | US-013, US-014 | ✅ Done |
-| 8 | Production Crons | US-015, US-016 | ✅ Done |
-
-**Todas las iteraciones completadas** — Ver historial detallado en [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)
+Cada push a `main` despliega solo. Servicios, comandos de inicio y variables: [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) y [RAILWAY_MULTISTAGE_CONFIG.md](RAILWAY_MULTISTAGE_CONFIG.md). `daily` termina con código 1 si la última vela cerró hace más de 2 horas. Logs: `railway logs --service <api|fetch-price|daily|monthly-backtest>`.
 
 ---
 
 ## 📚 Documentación
 
-- **[IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md)** — Historial completo de implementación (8 iteraciones)
-- **[.claude/CLAUDE.md](.claude/CLAUDE.md)** — Contexto del proyecto para Claude Code
-- **[User Stories](https://github.com/cuauhtemocbe/btc-predictor/issues)** — 16 User Stories (todas cerradas ✅)
-
----
+- [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md): historial de decisiones.
+- [CLAUDE.md](CLAUDE.md): contexto del proyecto para Claude Code.
+- [CHANGELOG.md](CHANGELOG.md) e [issues](https://github.com/cuauhtemocbe/btc-predictor/issues).
 
 ## 🤝 Contribuir
 
-Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía issues.
-
-1. Fork el proyecto
-2. Crea una branch: `git checkout -b feature/nueva-feature`
-3. Commit cambios: `git commit -m 'Agrega nueva feature'`
-4. Push a la branch: `git push origin feature/nueva-feature`
-5. Abre un Pull Request
-
-**Importante:** Asegúrate de que los tests pasen antes de abrir PR.
+Proyecto personal de aprendizaje; se aceptan sugerencias en issues. Abre una branch, haz commit, abre un Pull Request y asegúrate de que los tests pasen.
 
 ---
 
@@ -588,12 +288,7 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 
 ### Modelo ML
 
-**Regresión lineal sobre retornos** con ventana de `TRAINING_WINDOW_DAYS` días (21 por defecto), entrenada con todas las velas diarias de `BTCUSDT`:
-- **Features:** `W` retornos logarítmicos rezagados, su volatilidad y `W` cambios logarítmicos de volumen (`2W + 1` features)
-- **Target:** retorno logarítmico del día siguiente
-- **Librería:** scikit-learn
-
-**Otros modelos:** XGBoost, LSTM y ARIMA se eliminaron en la issue [#184](https://github.com/cuauhtemocbe/btc-predictor/issues/184) (siguen en el historial de git). `BaseModel` abstract queda como la interfaz que usan el trainer y el predictor; cualquier modelo nuevo debe superar a la regresión lineal y a la regla de trading después de comisiones. El trainer diario (`python -m workers.daily.trainer`) entrena y activa el modelo lineal; no hay modo multi-modelo ni selección del mejor de varios (se quitaron en #184, segundo paso).
+Regresión lineal sobre retornos, descrita en [Enfoque](#-enfoque). `BaseModel` es la interfaz que usan el trainer, el predictor y el backtest; cualquier modelo nuevo debe superar a la regresión lineal y a la regla de trading después de comisiones. No hay modo multi-modelo ni selección del mejor de varios (se quitaron en #184).
 
 ### Estrategia PnL
 
@@ -604,9 +299,7 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 
 ### Idempotencia
 
-Todos los jobs son **idempotentes** (se pueden ejecutar múltiples veces sin duplicar datos):
-- `fetch-price`: UNIQUE constraint en `(symbol, timestamp)`
-- `predictor`: Check si predicción ya existe antes de insertar
+Los jobs se pueden repetir sin duplicar datos: `fetch-price` por el UNIQUE `(symbol, timestamp)` y el predictor porque comprueba si la predicción ya existe.
 
 ---
 
@@ -621,7 +314,3 @@ Todos los jobs son **idempotentes** (se pueden ejecutar múltiples veces sin dup
 ## 📄 Licencia
 
 Este proyecto es de código abierto bajo licencia MIT.
-
----
-
-**⚡ Ready to build the future of Bitcoin prediction!**

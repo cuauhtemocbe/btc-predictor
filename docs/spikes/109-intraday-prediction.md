@@ -10,7 +10,7 @@ Date: 2026-10-02. Script: deleted after the spike, recover it with `git show 79c
 - Same `BTCUSDT` klines source (`data.binance.vision`, SHA256-verified), 2017-08-17 to 2026-08-31, so 1d and 1h cover the same days.
 - Retrain once a day (every 1 day for 1d, every 24 rows for 1h). The first 1,000 samples only train.
 - Test slice from 2024-01-01 (the headline); everything before is validation. No parameter was tuned.
-- Baselines and p-value as in `shared/baselines.py`: always-up, persistence, one-sided binomial test against the best baseline.
+- Baselines and p-value as in `shared/shared/baselines.py`: always-up, persistence, one-sided binomial test against the best baseline.
 - Strategy: long while the model predicts UP, flat otherwise, 0.1% fee on every entry and every exit. Always-up and persistence use the same rule.
 
 ## Results (test slice, 2024-01-01 to 2026-08-31)
