@@ -137,10 +137,10 @@ def test_ci_publishes_coverage_artifact_and_cleans_up() -> None:
     assert "if: always()" in workflow
 
 
-def test_quality_runs_mutation_testing_weekly_and_manually() -> None:
+def test_quality_runs_mutation_testing_only_on_demand() -> None:
     workflow = read_workflow("quality.yml")
 
-    assert "cron: '0 7 * * 1'" in workflow
+    assert "schedule:" not in workflow
     assert "workflow_dispatch:" in workflow
     assert "cosmic-ray init" in workflow
     assert "cosmic-ray exec" in workflow
