@@ -23,7 +23,7 @@ uvicorn = {extras = ["standard"], version = ">=0.34,<0.54"}
 starlette = ">=0.49.1"
 jinja2 = "^3.1.0"
 httpx = "^0.28.1"
-numpy = "^2.0.0"  # Required by shared/btc_shared/strategies.py
+numpy = "^2.0.0"  # Required by shared/shared/strategies.py
 
 [tool.poetry.group.fetch]
 optional = true
@@ -108,7 +108,6 @@ markers = [
 "scripts/backtest_report.py" = 90
 "scripts/list_models.py" = 95
 "scripts/load_binance_history.py" = 90
-"shared/btc_shared/strategies.py" = 95
 "shared/shared/assets.py" = 95
 "shared/shared/baselines.py" = 95
 "shared/shared/binance_vision.py" = 95
@@ -118,6 +117,7 @@ markers = [
 "shared/shared/db/models.py" = 95
 "shared/shared/features.py" = 90
 "shared/shared/model_baselines.py" = 95
+"shared/shared/strategies.py" = 95
 "shared/shared/utils.py" = 95
 "workers/backtest/main.py" = 90
 "workers/daily/__main__.py" = 90
@@ -134,8 +134,8 @@ markers = [
 python_version = "3.13"
 strict = true
 plugins = ["pydantic.mypy"]
-# explicit_package_bases + mypy_path lets mypy name shared/btc_shared/* as
-# "btc_shared.*" and shared/tests/* as "tests.*" without adding __init__.py
+# explicit_package_bases + mypy_path lets mypy name shared/shared/* as
+# "shared.*" and shared/tests/* as "tests.*" without adding __init__.py
 # files there (which would break pytest test collection for sibling
 # "tests" dirs elsewhere in the monorepo, e.g. workers/daily/tests).
 # api/tests is itself a base so its files are top-level modules ("conftest",
@@ -146,7 +146,6 @@ mypy_path = "shared:api:api/tests"
 explicit_package_bases = true
 files = [
     "shared/shared",
-    "shared/btc_shared",
     "shared/tests",
     "workers",
     "api",
@@ -175,7 +174,7 @@ select = ["E", "F", "I", "UP"]
 # host (repo root has "api-service/") and the dev container (Dockerfile.dev
 # mounts it as "/app/api"), sorting "api.*" imports differently depending
 # on where ruff runs from. Pin it explicitly so lint is deterministic.
-known-first-party = ["api", "shared", "btc_shared", "workers"]
+known-first-party = ["api", "shared", "workers"]
 
 [tool.cosmic-ray]
 module-path = "."

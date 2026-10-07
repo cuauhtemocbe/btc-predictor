@@ -16,10 +16,10 @@ from api.models.predictions import (
 )
 from api.numeric import required_float
 from api.symbols import DEFAULT_SYMBOL, SourceQuery, SymbolQuery
-from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 from shared.db.models import Model, Prediction, PredictionSource
+from shared.strategies import get_all_strategies_metrics
 from shared.utils import DEFAULT_TIMEFRAME
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])

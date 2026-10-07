@@ -31,7 +31,6 @@ services:
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://btcpredictor:btcpredictor@postgres:5432/btcpredictor
-      - BINANCE_BASE_URL=https://api.binance.com
       - TZ=America/Mexico_City
       - PYTHONPATH=/app:/app/api:/app/shared:/app/scripts
     depends_on:

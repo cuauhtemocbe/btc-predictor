@@ -1,5 +1,5 @@
 """
-Integration tests for Price model and prices table.
+Integration tests for the Price model and the prices table.
 
 Covers all Gherkin scenarios from US-002:
 1. Create prices table via migration
@@ -23,7 +23,7 @@ from shared.config import settings
 from shared.db.models import Price
 
 
-class TestBtcPricesTableMigration:
+class TestPricesTableMigration:
     """
     Gherkin Scenario 1: Create prices table via migration
 
@@ -250,7 +250,7 @@ class TestDowngradeMigrationRemovesTable:
         command.upgrade(alembic_cfg, "head")
 
 
-class TestBtcPriceModelEdgeCases:
+class TestPriceModelEdgeCases:
     """Additional tests for edge cases from ZOMBIES analysis."""
 
     def test_zero_volume_is_valid(
@@ -308,3 +308,22 @@ class TestBtcPriceModelEdgeCases:
         db_session.add(price)
         db_session.commit()
         assert price.source == "binance"
+
+    def test_large_price_values(
+        self, db_session: Session, apply_migrations: None
+    ) -> None:
+        """Test boundary values: the largest price NUMERIC(18,8) can hold."""
+        large_price = Decimal("999999999.99999999")
+        price = Price(
+            timestamp=datetime(2026, 5, 16, 17, 0, 0, tzinfo=UTC),
+            open=large_price,
+            high=large_price,
+            low=large_price,
+            close=large_price,
+            volume=Decimal("1000.0"),
+            source="binance",
+        )
+        db_session.add(price)
+        db_session.commit()
+        db_session.refresh(price)
+        assert price.close == large_price, "Should handle large price values"

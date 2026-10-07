@@ -87,7 +87,6 @@ def test_mypy_strict_configured_for_shared() -> None:
     assert mypy_config["strict"] is True
     assert mypy_config["files"] == [
         "shared/shared",
-        "shared/btc_shared",
         "shared/tests",
         "workers",
         "api",
@@ -117,7 +116,7 @@ def _pre_push_hook(hook_id: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     "path",
     [
-        "shared/btc_shared/config.py",
+        "shared/shared/config.py",
         "api-service/api/main.py",
         "workers/daily/trainer.py",
         "scripts/validate.sh",

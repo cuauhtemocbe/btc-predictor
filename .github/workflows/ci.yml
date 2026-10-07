@@ -45,7 +45,7 @@ jobs:
       - name: Run mypy strict checks
         run: >-
           docker compose exec -T api python -m mypy
-          shared/shared shared/btc_shared shared/tests workers api scripts
+          shared/shared shared/tests workers api scripts
 
       - name: Run tests with coverage
         run: >-

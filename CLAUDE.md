@@ -145,7 +145,7 @@ docker compose exec api ruff format shared api workers scripts
 # Types: mypy --strict on shared, workers, api and scripts, test code included
 # (shared/tests, workers/*/tests, api/tests and scripts/tests; no test directory
 # is excluded and no relaxed override remains in pyproject.toml).
-docker compose exec api python -m mypy shared/shared shared/btc_shared shared/tests workers api scripts
+docker compose exec api python -m mypy shared/shared shared/tests workers api scripts
 ```
 
 Migration commands (`alembic upgrade head`, `revision --autogenerate`): see `shared/CLAUDE.md`.

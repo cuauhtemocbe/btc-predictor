@@ -34,7 +34,6 @@ def test_ci_runs_docker_quality_gate_on_push_and_pull_request() -> None:
 PRODUCTION_PACKAGES = ["shared", "api", "workers", "scripts"]
 MYPY_PATHS = [
     "shared/shared",
-    "shared/btc_shared",
     "shared/tests",
     "workers",
     "api",

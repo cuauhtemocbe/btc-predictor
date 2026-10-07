@@ -27,7 +27,7 @@ docker compose exec -T api ruff format --check shared api workers scripts
 
 echo "🔍 mypy --strict..."
 docker compose exec -T api python -m mypy \
-    shared/shared shared/btc_shared shared/tests workers api scripts
+    shared/shared shared/tests workers api scripts
 
 echo "🧪 Pytest with coverage..."
 docker compose exec -T api pytest --cov --cov-report=term-missing \

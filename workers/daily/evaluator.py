@@ -43,59 +43,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def find_unevaluated_predictions(
-    session: Session, predicted_for: date
-) -> list[Prediction]:
-    """
-    Find ALL predictions for the given date that haven't been evaluated yet.
-
-    Several can share a date (one per model version), so this returns a list.
-
-    Args:
-        session: Database session
-        predicted_for: Date to find predictions for (usually today)
-
-    Returns:
-        List of unevaluated Prediction records (may be empty)
-    """
-    stmt = (
-        select(Prediction)
-        .where(Prediction.predicted_for == predicted_for)
-        .where(Prediction.actual_price.is_(None))
-        .order_by(Prediction.model_id.asc())  # Order by model_id for consistent logging
-    )
-    predictions = session.execute(stmt).scalars().all()
-
-    if predictions:
-        logger.info(
-            f"Found {len(predictions)} unevaluated prediction(s) for {predicted_for}"
-        )
-    else:
-        logger.info(f"No unevaluated predictions for {predicted_for}")
-
-    return list(predictions)
-
-
-def find_unevaluated_prediction(
-    session: Session, predicted_for: date
-) -> Prediction | None:
-    """
-    Find a prediction for the given date that hasn't been evaluated yet.
-
-    DEPRECATED: Use find_unevaluated_predictions(), which returns every one.
-    This function returns only the first unevaluated prediction.
-
-    Args:
-        session: Database session
-        predicted_for: Date to find prediction for (usually today)
-
-    Returns:
-        Prediction record if found, None otherwise
-    """
-    predictions = find_unevaluated_predictions(session, predicted_for)
-    return predictions[0] if predictions else None
-
-
 def find_pending_predictions(session: Session, up_to: date) -> list[Prediction]:
     """
     Find every daily prediction due on or before ``up_to`` that is not evaluated.
