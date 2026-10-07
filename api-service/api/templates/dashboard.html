@@ -307,6 +307,16 @@
             background: white;
         }
 
+        .strategy-assumptions {
+            margin: 12px 0 24px;
+            font-size: 0.85rem;
+            color: #4b5563;
+        }
+
+        .strategy-assumptions ul {
+            margin: 4px 0 0 20px;
+        }
+
         .best-strategy-row {
             background-color: #d1fae5 !important;
             font-weight: 600;
@@ -512,7 +522,8 @@
                             <th>Strategy</th>
                             <th>Total PnL</th>
                             <th>Win Rate</th>
-                            <th>Max Drawdown</th>
+                            <th>Worst trade</th>
+                            <th>Max drawdown</th>
                             <th>Avg Win</th>
                             <th>Avg Loss</th>
                             <th>Sharpe Ratio</th>
@@ -534,7 +545,8 @@
                                 {{ '▲' if strategy.total_pnl >= 0 else '▼' }} ${{ "%.2f"|format(strategy.total_pnl) }}
                             </td>
                             <td>{{ "%.1f"|format(strategy.win_rate * 100) }}%</td>
-                            <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.max_drawdown) }}</td>
+                            <td class="{{ 'positive-pnl' if strategy.worst_trade_pct >= 0 else 'negative-pnl' }}">{{ '▲' if strategy.worst_trade_pct >= 0 else '▼' }} {{ "%.2f"|format(strategy.worst_trade_pct) }}%</td>
+                            <td class="negative-pnl">▼ {{ "%.2f"|format(strategy.max_drawdown_pct) }}%</td>
                             <td class="positive-pnl">▲ ${{ "%.2f"|format(strategy.avg_win) }}</td>
                             <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.avg_loss) }}</td>
                             <td>{{ "%.2f"|format(strategy.sharpe_ratio) }}</td>
@@ -543,6 +555,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
+
+                {% include "_strategy_assumptions.html" %}
 
                 <div class="chart-container">
                     <canvas id="cumulativePnlChart"></canvas>

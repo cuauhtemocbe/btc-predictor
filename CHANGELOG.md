@@ -51,6 +51,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Displayed risk numbers change** (#177). Max drawdown, the Sharpe ratio and the
+  equity curve are now derived from returns, `pnl / price_at_prediction`, compounded
+  from 1.0 and recomputed on read; the stored `pnl_*` columns and the schema do not
+  change. Before, "Max Drawdown" was the worst single-day PnL in dollars, and the
+  percentage drawdown and the Sharpe ratio were scaled by a fixed 10,000 USDT, so a
+  -$5,000 day at BTC = $100,000 read as -50%; it is -5% now. The Sharpe ratio is
+  `mean / stdev * sqrt(365)` of the daily returns (sample standard deviation; the
+  strategies table used the population one and no annualization).
+  - Dashboard strategies table: "Max Drawdown ($)" is replaced by "Worst trade" (the
+    worst single-day return) and "Max drawdown" (largest fall of the compounded equity
+    curve), both in percent. The backtesting page shows "Max drawdown" in percent.
+    The models table shows "Max drawdown" in percent.
+  - API: `/api/predictions/strategies` returns `worst_trade_pct` and
+    `max_drawdown_pct` instead of `max_drawdown`; `/api/backtesting/metrics` returns
+    `max_drawdown_pct` instead of `max_drawdown`; `/models/metrics` no longer returns
+    the dollar `max_drawdown` (`max_drawdown_pct` stays, now on the equity curve of
+    returns). The `capital` argument and `DEFAULT_CAPITAL` of `shared.utils` are gone.
+  - The strategies tables state each strategy's assumptions: shorting is not possible
+    on Binance spot and funding is not modeled, the fee is charged every day, and the
+    stop-loss acts on closes because no intraday data is stored.
+  - A day with no positive `price_at_prediction` has no return and is left out of the
+    risk figures; with fewer than 2 returns, or returns that do not vary, the Sharpe
+    ratio is undefined (N/A in the models table, 0.00 in the strategies tables).
 - The predictor now runs right after the daily close (#175): `fetch-price` at 00:05 UTC
   (`5 0 * * *`) and `daily` at 00:10 UTC (`10 0 * * *`) instead of 06:00 and 07:00. The
   prediction used to be saved 7 hours after the close it is anchored to, so the recorded

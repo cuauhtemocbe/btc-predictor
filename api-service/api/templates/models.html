@@ -365,7 +365,7 @@
                         <th>Total PnL</th>
                         <th>Win Rate</th>
                         <th>Sharpe</th>
-                        <th>Max DD</th>
+                        <th>Max drawdown</th>
                         <th>Always-up</th>
                         <th>Persistence</th>
                         <th>Buy &amp; hold PnL</th>
@@ -432,9 +432,9 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if model.max_drawdown is not none %}
+                            {% if model.max_drawdown_pct is not none %}
                             <span class="metric-negative">
-                                ${{ "{:,.2f}".format(model.max_drawdown) }}
+                                {{ "{:,.2f}".format(model.max_drawdown_pct) }}%
                             </span>
                             {% else %}
                             <span class="metric-neutral">N/A</span>

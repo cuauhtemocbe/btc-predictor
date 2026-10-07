@@ -105,7 +105,8 @@ class StrategyMetrics(BaseModel):
         "color": "green",
         "total_pnl": 2800.50,
         "win_rate": 0.6300,
-        "max_drawdown": -450.00,
+        "worst_trade_pct": -0.65,
+        "max_drawdown_pct": -4.50,
         "avg_win": 220.30,
         "avg_loss": -180.50,
         "sharpe_ratio": 1.25,
@@ -120,7 +121,10 @@ class StrategyMetrics(BaseModel):
     color: str = Field(description="Chart color for this strategy")
     total_pnl: float = Field(description="Total accumulated PnL")
     win_rate: float = Field(description="Percentage of winning trades (0-1)")
-    max_drawdown: float = Field(description="Worst single loss")
+    worst_trade_pct: float = Field(description="Worst single-day return, in percent")
+    max_drawdown_pct: float = Field(
+        description="Max drawdown of the compounded equity curve, in percent"
+    )
     avg_win: float = Field(description="Average profit of winning trades")
     avg_loss: float = Field(description="Average loss of losing trades")
     sharpe_ratio: float = Field(description="Risk-adjusted return metric")

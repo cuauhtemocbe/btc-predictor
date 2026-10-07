@@ -5,6 +5,8 @@ Covers all Gherkin scenarios from US-013:
 - Calculate PnL for different prediction/outcome combinations
 """
 
+import math
+import statistics
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -15,7 +17,6 @@ from sqlalchemy.orm import Session
 from shared.db.models import Model, Prediction
 from shared.utils import (
     calculate_accuracy,
-    calculate_max_drawdown,
     calculate_max_drawdown_pct,
     calculate_model_mape,
     calculate_pnl,
@@ -27,6 +28,7 @@ from shared.utils import (
     calculate_win_rate,
     get_all_models_metrics,
     get_cumulative_pnl,
+    get_model_returns,
     utc_now,
     utc_today,
 )
@@ -790,62 +792,111 @@ class TestCalculateSharpeRatio:
         assert sharpe is None  # Need at least 2 for stdev
 
 
-class TestCalculateMaxDrawdown:
-    """Test calculate_max_drawdown function."""
+class TestCalculateMaxDrawdownPct:
+    """Test calculate_max_drawdown_pct function (compounded equity curve, #177)."""
 
-    def test_max_drawdown_calculation(
+    def test_max_drawdown_pct_is_minus_20_for_plus_10_minus_20_plus_5(
         self,
         db_session: Session,
         sample_model: Callable[..., Model],
         evaluated_prediction: Callable[..., Prediction],
     ) -> None:
-        """Test max drawdown calculation."""
+        """Returns of +10%, -20% and +5% (price 100) give a -20% max drawdown."""
         model = sample_model(name="lstm_v1")
+        for i, pnl in enumerate([10, -20, 5]):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("100.00"),
+                pnl_simulated=Decimal(str(pnl)),
+            )
 
-        # Create predictions with drawdown scenario
-        # Cumulative: 100, 50, 200, 100, 80
-        # Running max: 100, 100, 200, 200, 200
-        # Drawdown: 0, -50, 0, -100, -120
-        # Max drawdown: -120
+        max_dd = calculate_max_drawdown_pct(db_session, model.id)
+
+        assert max_dd == pytest.approx(-20.0)
+
+    def test_max_drawdown_pct_one_day_of_minus_5000_at_100000_is_minus_5_pct(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        """The dollar curve read this as -50% of a 10,000 capital; it is -5%."""
+        model = sample_model(name="linear_v1")
         evaluated_prediction(
             model_id=model.id,
             predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("-50.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 3),
-            pnl_simulated=Decimal("150.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 4),
-            pnl_simulated=Decimal("-100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 5),
-            pnl_simulated=Decimal("-20.00"),
+            price_at_prediction=Decimal("100000.00"),
+            pnl_simulated=Decimal("-5000.00"),
         )
 
-        max_dd = calculate_max_drawdown(db_session, model.id)
+        assert calculate_max_drawdown_pct(db_session, model.id) == pytest.approx(-5.0)
 
-        assert max_dd == -120.0
+    def test_max_drawdown_pct_compounds_the_returns_in_date_order(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        """Rows are read oldest first whatever the insertion order: +10%, -10%, -10%."""
+        model = sample_model(name="linear_v1")
+        for day, pnl in [(3, -10), (1, 10), (2, -10)]:
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, day),
+                price_at_prediction=Decimal("100.00"),
+                pnl_simulated=Decimal(str(pnl)),
+            )
 
-    def test_max_drawdown_returns_none_for_no_predictions(
+        assert calculate_max_drawdown_pct(db_session, model.id) == pytest.approx(-19.0)
+
+    def test_max_drawdown_pct_returns_none_for_no_predictions(
         self, db_session: Session, sample_model: Callable[..., Model]
     ) -> None:
         """Test that None is returned when no predictions exist."""
         model = sample_model(name="xgboost_v1")
 
-        max_dd = calculate_max_drawdown(db_session, model.id)
+        assert calculate_max_drawdown_pct(db_session, model.id) is None
 
-        assert max_dd is None
+
+class TestModelReturns:
+    """get_model_returns: pnl / price_at_prediction, oldest first (#177)."""
+
+    def test_skips_predictions_without_a_positive_price(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        """A zero price has no return; the row is skipped, not counted as 0."""
+        model = sample_model(name="linear_v1")
+        for day, price, pnl in [
+            (1, "100.00", "10"),
+            (2, "0.00", "5"),
+            (3, "200.00", "-20"),
+        ]:
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, day),
+                price_at_prediction=Decimal(price),
+                pnl_simulated=Decimal(pnl),
+            )
+
+        returns = get_model_returns(db_session, model.id)
+
+        assert returns == pytest.approx([0.10, -0.10])
+
+    def test_uses_the_requested_pnl_column(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        """Rows whose chosen pnl column is NULL are skipped."""
+        model = sample_model(name="linear_v1")
+        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
+
+        assert get_model_returns(db_session, model.id, pnl_column="pnl_threshold") == []
 
 
 class TestGetCumulativePnl:
@@ -1040,7 +1091,9 @@ class TestMetricsForTheDailyTimeframe:
         assert len(series) == 4
         assert series[-1]["cumulative_pnl"] == 250.0
         assert calculate_sharpe_ratio(db_session, model.id, timeframe="1d") is not None
-        assert calculate_max_drawdown(db_session, model.id, timeframe="1d") is not None
+        assert (
+            calculate_max_drawdown_pct(db_session, model.id, timeframe="1d") is not None
+        )
 
     def test_get_all_models_metrics_accepts_the_daily_timeframe(
         self,
@@ -1058,209 +1111,129 @@ class TestMetricsForTheDailyTimeframe:
         assert row["total_pnl"] == 250.0
 
 
-class TestCapitalNormalizedMetrics:
-    """
-    Capital-normalized financial metrics (issue #72).
+class TestReturnBasedMetrics:
+    """Sharpe ratio and max drawdown are derived from returns (#177)."""
 
-    Sharpe ratio and max-drawdown-% are normalized against a fixed
-    reference capital instead of each trade's own spot price, so they're
-    comparable across trades made at very different BTC prices.
-    """
-
-    def test_sharpe_ratio_normalized_by_capital_not_spot_price(
+    def test_sharpe_ratio_is_mean_over_stdev_of_returns_times_sqrt_365(
         self,
         db_session: Session,
         sample_model: Callable[..., Model],
         evaluated_prediction: Callable[..., Prediction],
     ) -> None:
         """
-        Scenario: Returns are normalized by invested capital, not by spot price
-
-        Given evaluated trades executed at different BTC prices
-        When the Sharpe ratio is calculated
-        Then each trade's return is pnl divided by the configured capital,
-        not by that trade's BTC price
+        Given daily returns with mean m and standard deviation s
+        Then the Sharpe ratio is m / s * sqrt(365)
         """
         model = sample_model(name="linear_v1")
+        returns = [0.01, -0.02, 0.03, 0.005]
+        for i, ret in enumerate(returns):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("100.00"),
+                pnl_simulated=Decimal(str(round(ret * 100, 4))),
+            )
 
-        # Same pnl values, but wildly different price_at_prediction --
-        # under the OLD spot-price-normalized formula these would produce
-        # very different Sharpe ratios; under capital normalization the
-        # price_at_prediction is irrelevant to the result.
+        expected = (
+            statistics.fmean(returns) / statistics.stdev(returns) * math.sqrt(365)
+        )
+
+        assert calculate_sharpe_ratio(db_session, model.id) == pytest.approx(expected)
+
+    def test_sharpe_ratio_does_not_depend_on_the_price_level(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        """The same percentage moves at BTC = 10,000 and 500,000 give one Sharpe."""
+        low = sample_model(name="linear_v1")
+        high = sample_model(name="linear_v2")
+        for i, ret in enumerate([0.01, -0.02, 0.03, 0.005, -0.01]):
+            for model, price in ((low, 10_000), (high, 500_000)):
+                evaluated_prediction(
+                    model_id=model.id,
+                    predicted_for=date(2024, 5, 1 + i),
+                    price_at_prediction=Decimal(price),
+                    pnl_simulated=Decimal(str(round(ret * price, 2))),
+                )
+
+        assert calculate_sharpe_ratio(db_session, low.id) == pytest.approx(
+            calculate_sharpe_ratio(db_session, high.id)
+        )
+
+    def test_sharpe_ratio_is_none_when_the_returns_do_not_vary(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        model = sample_model(name="linear_v1")
+        for i in range(3):
+            evaluated_prediction(
+                model_id=model.id,
+                predicted_for=date(2024, 5, 1 + i),
+                pnl_simulated=Decimal("0.00"),
+            )
+
+        assert calculate_sharpe_ratio(db_session, model.id) is None
+
+    def test_sharpe_ratio_subtracts_the_risk_free_rate(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        model = sample_model(name="linear_v1")
         for i, pnl in enumerate([100, -50, 150, 80, -30]):
             evaluated_prediction(
                 model_id=model.id,
                 predicted_for=date(2024, 5, 1 + i),
-                price_at_prediction=Decimal("10000.00"),
                 pnl_simulated=Decimal(str(pnl)),
             )
 
-        sharpe_low_price = calculate_sharpe_ratio(
-            db_session, model.id, capital=10_000.0
-        )
+        assert calculate_sharpe_ratio(
+            db_session, model.id, risk_free_rate=0.05
+        ) != pytest.approx(calculate_sharpe_ratio(db_session, model.id))
 
-        model2 = sample_model(name="linear_v2")
-        for i, pnl in enumerate([100, -50, 150, 80, -30]):
-            evaluated_prediction(
-                model_id=model2.id,
-                predicted_for=date(2024, 5, 1 + i),
-                price_at_prediction=Decimal("500000.00"),  # 50x higher spot price
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        sharpe_high_price = calculate_sharpe_ratio(
-            db_session, model2.id, capital=10_000.0
-        )
-
-        # Same pnl series + same capital => identical Sharpe, regardless
-        # of how different the trades' spot prices were.
-        assert sharpe_low_price == pytest.approx(sharpe_high_price)
-
-    def test_sharpe_ratio_with_nonzero_risk_free_rate_depends_on_capital(
+    def test_get_all_models_metrics_exposes_return_based_fields_only(
         self,
         db_session: Session,
         sample_model: Callable[..., Model],
         evaluated_prediction: Callable[..., Prediction],
     ) -> None:
         """
-        With risk_free_rate=0 (the default), Sharpe = mean/stdev is scale
-        invariant -- any constant reference capital cancels out of the
-        ratio, so it doesn't matter which one is used. capital only
-        changes the *value* once a nonzero risk_free_rate is mixed in
-        (risk_free_rate/365 is an absolute rate, not scaled by capital).
-        This is exactly why normalizing by a *varying* per-trade spot
-        price was the actual bug: unlike a constant, it does NOT cancel
-        out of mean/stdev, and it directly distorted comparisons across
-        trades made at different BTC prices (the previous test).
+        Given a model with returns of +10%, -10% and -10%
+        Then max_drawdown_pct is the compounded -19%, the dollar max_drawdown
+        figure is gone, and sharpe_ratio matches calculate_sharpe_ratio
         """
         model = sample_model(name="linear_v1")
-        for i, pnl in enumerate([100, -50, 150, 80, -30]):
+        for i, pnl in enumerate([10, -10, -10]):
             evaluated_prediction(
                 model_id=model.id,
                 predicted_for=date(2024, 5, 1 + i),
+                price_at_prediction=Decimal("100.00"),
                 pnl_simulated=Decimal(str(pnl)),
             )
 
-        sharpe_large_capital = calculate_sharpe_ratio(
-            db_session, model.id, capital=10_000.0, risk_free_rate=0.05
+        metrics = get_all_models_metrics(db_session)
+        row = next(m for m in metrics if m["id"] == model.id)
+
+        assert row["max_drawdown_pct"] == pytest.approx(-19.0)
+        assert "max_drawdown" not in row
+        assert row["sharpe_ratio"] == pytest.approx(
+            calculate_sharpe_ratio(db_session, model.id), abs=0.01
         )
-        sharpe_small_capital = calculate_sharpe_ratio(
-            db_session, model.id, capital=100.0, risk_free_rate=0.05
-        )
 
-        assert sharpe_large_capital != pytest.approx(sharpe_small_capital)
-
-    def test_sharpe_ratio_rejects_invalid_capital(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """
-        Scenario: Invalid capital configuration is rejected
-
-        Given a capital configuration of zero or a negative value
-        When Sharpe ratio calculation is attempted
-        Then it raises a validation error
-        """
-        model = sample_model(name="linear_v1")
-        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
-        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 2))
-
-        with pytest.raises(ValueError, match="capital must be positive"):
-            calculate_sharpe_ratio(db_session, model.id, capital=0.0)
-
-        with pytest.raises(ValueError, match="capital must be positive"):
-            calculate_sharpe_ratio(db_session, model.id, capital=-500.0)
-
-    def test_max_drawdown_pct_rejects_invalid_capital(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Scenario: Invalid capital configuration is rejected, for drawdown too."""
-        model = sample_model(name="linear_v1")
-        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
-
-        with pytest.raises(ValueError, match="capital must be positive"):
-            calculate_max_drawdown_pct(db_session, model.id, capital=0.0)
-
-    def test_max_drawdown_pct_computed_from_capital_based_equity_curve(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """
-        Scenario: Drawdown is calculated from a capital-based equity curve,
-        as a percentage
-
-        Given a sequence of gains, losses, and inactive (zero-return) days
-        When maximum drawdown is calculated
-        Then the equity curve starts at the configured capital and
-        accumulates PnL
-        And drawdown is reported as a percentage of the equity curve's
-        running peak, not a raw dollar amount
-        """
-        model = sample_model(name="linear_v1")
-
-        # Equity curve starting at capital=1000: 1000 -> 1200 (peak) ->
-        # 1200 (inactive day, pnl=0) -> 900 (trough) -> 950
-        for i, pnl in enumerate([200, 0, -300, 50]):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        dollar_dd = calculate_max_drawdown(db_session, model.id)
-        pct_dd = calculate_max_drawdown_pct(db_session, model.id, capital=1000.0)
-
-        # Dollar drawdown: trough 900 vs peak 1200 => -300 (unchanged by this issue)
-        assert dollar_dd == -300.0
-
-        # Percentage drawdown: (900 - 1200) / 1200 * 100 = -25%
-        assert pct_dd == pytest.approx(-25.0)
-
-    def test_max_drawdown_pct_returns_none_with_no_data(
+    def test_get_all_models_metrics_has_no_return_metrics_without_predictions(
         self, db_session: Session, sample_model: Callable[..., Model]
     ) -> None:
         model = sample_model(name="linear_v1")
 
-        assert calculate_max_drawdown_pct(db_session, model.id) is None
+        row = next(m for m in get_all_models_metrics(db_session) if m["id"] == model.id)
 
-    def test_get_all_models_metrics_includes_capital_normalized_fields(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """
-        Scenario: Capital normalization is applied consistently across metrics
-
-        Given the same configured capital value
-        When PnL, Sharpe ratio, and drawdown are calculated for the same
-        evaluated predictions
-        Then all three use that same capital base with no discrepancy
-        between them
-        """
-        model = sample_model(name="linear_v1")
-        for i, pnl in enumerate([200, 0, -300, 50]):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        metrics = get_all_models_metrics(db_session, capital=1000.0)
-        m1 = next(m for m in metrics if m["id"] == model.id)
-
-        assert m1["max_drawdown"] == -300.0
-        assert m1["max_drawdown_pct"] == pytest.approx(-25.0, abs=0.01)
-        assert m1["sharpe_ratio"] == pytest.approx(
-            calculate_sharpe_ratio(db_session, model.id, capital=1000.0), abs=0.01
-        )
+        assert row["sharpe_ratio"] is None
+        assert row["max_drawdown_pct"] is None
 
 
 class TestUtcNow:

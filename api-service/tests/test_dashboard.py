@@ -333,3 +333,92 @@ async def test_dashboard_has_no_weekly_tab(
     tabs = {tab.get("data-timeframe") for tab in soup.select("button.tab")}
     assert tabs == {"1d"}
     assert "Weekly" not in soup.get_text()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_worst_trade_and_max_drawdown_as_two_figures(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model: Model,
+) -> None:
+    """
+    Given three predictions with returns of +10%, -10% and -10%
+    When the dashboard renders
+    Then the strategies table has a "Worst trade" column (the minimum single-day
+    return, -10.00%) and a "Max drawdown" column (from the compounded equity
+    curve, -19.00%), as two different figures (#177)
+    """
+    for day, pnl in [(1, "10"), (2, "-10"), (3, "-10")]:
+        db_session.add(
+            Prediction(
+                model_id=sample_model.id,
+                predicted_for=date(2024, 5, day),
+                predicted_at=datetime(2024, 5, day, 0, 10, tzinfo=UTC),
+                price_at_prediction=Decimal("100.00"),
+                predicted_price=Decimal("101.00"),
+                actual_price=Decimal("100.00") + Decimal(pnl),
+                evaluated_at=datetime(2024, 5, day, 10, 0, tzinfo=UTC),
+                error_abs=Decimal("1.00"),
+                error_pct=Decimal("1.00"),
+                direction_correct=True,
+                pnl_simulated=Decimal(pnl),
+                pnl_long_short=Decimal(pnl),
+                pnl_threshold=Decimal(pnl),
+                pnl_realistic=Decimal(pnl),
+            )
+        )
+    db_session.commit()
+
+    response = await client.get("/")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = find_tag(soup, "table", class_="strategy-table")
+    headers = [th.get_text(strip=True) for th in table.find_all("th")]
+    assert "Worst trade" in headers
+    assert "Max drawdown" in headers
+    assert "Max Drawdown" not in headers
+    row = find_tag(find_tag(table, "tbody"), "tr")
+    cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+    assert cells[headers.index("Worst trade")] == "▼ -10.00%"
+    assert cells[headers.index("Max drawdown")] == "▼ -19.00%"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_states_the_assumptions_of_each_strategy(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model: Model,
+) -> None:
+    """
+    Given the strategies table is shown
+    Then the page states, next to it, that shorting is not possible on Binance spot
+    and funding is not modeled, that the fee is charged every day, and that the
+    stop-loss acts on closes because there is no intraday data (#177)
+    """
+    db_session.add(
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2024, 5, 1),
+            predicted_at=datetime(2024, 4, 30, 10, 0, tzinfo=UTC),
+            price_at_prediction=Decimal("100.00"),
+            predicted_price=Decimal("101.00"),
+            actual_price=Decimal("101.00"),
+            evaluated_at=datetime(2024, 5, 1, 10, 0, tzinfo=UTC),
+            error_abs=Decimal("0.00"),
+            error_pct=Decimal("0.00"),
+            direction_correct=True,
+            pnl_simulated=Decimal("1"),
+        )
+    )
+    db_session.commit()
+
+    response = await client.get("/")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    text = find_tag(soup, "div", class_="strategy-assumptions").get_text(
+        " ", strip=True
+    )
+    assert "Shorting is not possible on Binance spot" in text
+    assert "funding" in text
+    assert "fee charged every day" in text
+    assert "no intraday data" in text

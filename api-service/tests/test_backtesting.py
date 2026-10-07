@@ -138,7 +138,7 @@ async def test_fetch_backtest_metrics_success(
         assert "color" in strategy
         assert "total_pnl" in strategy
         assert "win_rate" in strategy
-        assert "max_drawdown" in strategy
+        assert "max_drawdown_pct" in strategy
         assert "best_day" in strategy
         assert "worst_day" in strategy
         assert "sharpe_ratio" in strategy
@@ -293,7 +293,7 @@ async def test_calculate_win_rate(
     assert simple_strategy["win_rate"] == 0.5  # 3 wins / 6 trades
 
 
-# Gherkin Scenario 5: Calculate Max Drawdown (worst single-day loss)
+# Gherkin Scenario 5: Max Drawdown on the compounded equity curve, Worst Day apart
 @pytest.mark.asyncio
 async def test_calculate_max_drawdown(
     client: AsyncClient,
@@ -301,9 +301,11 @@ async def test_calculate_max_drawdown(
 ) -> None:
     """
     Given backtest results with PnL values: [100, -450, 200, -30, 150]
+    And a price at prediction of 67,000 on every day
     When the dashboard calculates Max Drawdown
-    Then it finds the minimum PnL = -450
-    And displays it as Max Drawdown = -450.00
+    Then it is the largest fall of the compounded equity curve, -0.67%
+    (the -450 day is a -0.67% return and the only fall from a peak)
+    And the worst single-day PnL stays -450.00 as Worst Day
     """
     # Arrange
     backtest_run_id = uuid4()
@@ -343,7 +345,8 @@ async def test_calculate_max_drawdown(
     data = response.json()
 
     realistic_strategy = next(s for s in data["strategies"] if s["name"] == "realistic")
-    assert realistic_strategy["max_drawdown"] == -450.0
+    assert realistic_strategy["max_drawdown_pct"] == -0.67
+    assert "max_drawdown" not in realistic_strategy
     assert realistic_strategy["worst_day"] == -450.0
 
 
