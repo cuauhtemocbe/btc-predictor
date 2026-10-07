@@ -218,11 +218,12 @@ class TestDailyOnlyMigration:
         assert _count(engine, "predictions", "1d") == 1
         with pytest.raises(IntegrityError, match="valid_model_timeframe_values"):
             _insert(engine, "linear_weekly_v2", day=3, timeframe="1w")
-        with pytest.raises(IntegrityError, match="valid_timeframe_values"):
-            with engine.begin() as connection:
+        model_id = _model_id(engine, "1d")
+        with engine.begin() as connection:
+            with pytest.raises(IntegrityError, match="valid_timeframe_values"):
                 connection.execute(
                     INSERT_PREDICTION,
-                    {"model_id": _model_id(engine, "1d"), "timeframe": "1w"},
+                    {"model_id": model_id, "timeframe": "1w"},
                 )
 
     def test_downgrade_accepts_weekly_again_without_restoring_rows(

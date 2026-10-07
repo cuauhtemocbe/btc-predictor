@@ -25,8 +25,10 @@ def test_the_linear_model_is_the_only_model_family() -> None:
 
 @pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
 def test_removed_model_families_are_rejected(name: str) -> None:
+    features = feature_count(21)
+
     with pytest.raises(ValueError, match=f"Unknown model '{name}'"):
-        build_model(name, 21, feature_count(21))
+        build_model(name, 21, features)
 
 
 def test_linear_is_built_with_the_return_feature_count() -> None:

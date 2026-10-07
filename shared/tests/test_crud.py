@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from shared.db.crud import (
     get_evaluated_predictions_async,
 )
 from shared.db.models import (
+    MODEL_FAMILY_SQL,
     Model,
     Prediction,
     PredictionSource,
@@ -938,6 +940,32 @@ def test_model_family_strips_only_a_trailing_version_suffix(
     assert model_family(name) == family
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "linear_v1",
+        "linear_v2",
+        "linear_v12",
+        "linear_weekly_v1",
+        "xgboost",
+        "model_v1_extra",
+        # Not an ASCII digit: Python's "\d" would match it, so the pattern keeps
+        # "[0-9]" and both sides leave the name alone.
+        "linear_v\u0663",
+    ],
+)
+def test_model_family_agrees_with_its_sql_expression(
+    db_session: Session, name: str
+) -> None:
+    """The unique index, the activation query and model_family() share one rule."""
+    sql_family = db_session.execute(
+        text(f"SELECT {MODEL_FAMILY_SQL} FROM (SELECT CAST(:name AS text) AS name) t"),
+        {"name": name},
+    ).scalar_one()
+
+    assert sql_family == model_family(name)
+
+
 # --- Replay vs live source (#176) ---
 
 
@@ -1008,4 +1036,5 @@ def test_source_filter_splits_predictions_by_model_params(
     assert {p.model.version for p in get_evaluated_predictions(db_session)} == versions(
         PredictionSource.ALL
     )
-    assert models["replay"].is_replay and not models["false"].is_replay
+    assert models["replay"].is_replay
+    assert not models["false"].is_replay

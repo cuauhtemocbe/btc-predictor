@@ -36,8 +36,11 @@ from sqlalchemy.types import NUMERIC
 # Asset every row belongs to unless told otherwise (the original BTC pipeline).
 DEFAULT_SYMBOL = "BTCUSDT"
 
-# Trailing "_v<N>" the trainers append to a model name ("linear_v2").
-VERSION_SUFFIX_PATTERN = r"_v[0-9]+$"
+# Trailing "_v<N>" the trainers append to a model name ("linear_v2"). It stays
+# "[0-9]", not "\d", on purpose: Python's "\d" also matches non-ASCII digits and
+# PostgreSQL's depends on the locale, so the two sides could disagree, and the
+# index of migration d5a1c7e93b20 is built with "[0-9]".
+VERSION_SUFFIX_PATTERN = r"_v[0-9]+$"  # NOSONAR python:S6353 (reason above)
 
 
 # The same rule as model_family(), as a SQL expression on the ``name`` column.

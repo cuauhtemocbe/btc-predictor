@@ -72,13 +72,14 @@ class TestPredictSingleModel:
         self, fake_predict_one: None, caplog: pytest.LogCaptureFixture
     ) -> None:
         outcome = PredictionOutcome()
+        model = _model("bad_v1")
 
         with (
             caplog.at_level(logging.ERROR),
             pytest.raises(ValueError, match="exploded"),
         ):
             _predict_single_model(
-                NO_SESSION, _model("bad_v1"), NO_INSTANCE, TOMORROW, PRICE, outcome, NOW
+                NO_SESSION, model, NO_INSTANCE, TOMORROW, PRICE, outcome, NOW
             )
 
         assert outcome.failed == [("bad_v1", "bad_v1 exploded")]
