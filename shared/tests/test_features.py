@@ -301,8 +301,10 @@ class TestRequireFreshSeries:
             require_fresh_series(dates, self.TODAY)
 
     def test_a_series_ending_today_is_refused(self) -> None:
+        dates = self._days(date(2026, 9, 7), 30)
+
         with pytest.raises(ValueError, match="expected 2026-10-05"):
-            require_fresh_series(self._days(date(2026, 9, 7), 30), self.TODAY)
+            require_fresh_series(dates, self.TODAY)
 
     def test_a_gap_inside_the_window_names_the_missing_date(self) -> None:
         dates = self._days(date(2026, 9, 6), 30)
