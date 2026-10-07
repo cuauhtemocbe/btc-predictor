@@ -1,10 +1,10 @@
 """
-The cron jobs run Linear Regression only, whatever models the code base has (#124).
+The cron jobs run Linear Regression only, whatever the code base holds (#124, #184).
 
-LSTM, XGBoost and ARIMA are back in the code base and in ``train_all_models``, but
-production still trains and predicts with the linear model of ``BTCUSDT``. This test
-fails if a cron entry point starts loading the other models; the daily trainer test
-that fails if it starts training them is in ``test_return_prediction.py``.
+LSTM, XGBoost and ARIMA were removed in #184, so no cron entry point can load them.
+This test fails if a cron entry point starts loading a model module other than the
+linear one or the libraries of the removed models; the daily trainer test that fails
+if it starts training other models is in ``test_return_prediction.py``.
 """
 
 import subprocess
@@ -19,16 +19,22 @@ CRON_ENTRY_POINTS = [
     "workers.backtest.main",
 ]
 
+ALLOWED_MODEL_MODULES = {
+    "workers.daily.models",
+    "workers.daily.models.base",
+    "workers.daily.models.factory",
+    "workers.daily.models.linear",
+}
 
-def test_importing_the_cron_entry_points_does_not_load_the_non_linear_libraries() -> (
-    None
-):
+
+def test_importing_the_cron_entry_points_loads_only_the_linear_model() -> None:
     imports = "; ".join(f"import {module}" for module in CRON_ENTRY_POINTS)
     code = (
         f"import sys; {imports}; "
-        "heavy = {'tensorflow', 'xgboost', 'statsmodels'} & set(sys.modules); "
-        "print(sorted(heavy)); "
-        "sys.exit(1 if heavy else 0)"
+        "removed = {'tensorflow', 'xgboost', 'statsmodels'} & set(sys.modules); "
+        "models = {m for m in sys.modules if m.startswith('workers.daily.models')}; "
+        "print(sorted(removed), sorted(models)); "
+        f"sys.exit(1 if removed or models - {ALLOWED_MODEL_MODULES!r} else 0)"
     )
 
     result = subprocess.run([sys.executable, "-c", code], capture_output=True)

@@ -348,9 +348,9 @@
             <div class="empty-state">
                 <h2>No Models Found for {{ asset.label }}</h2>
                 <p>No {{ asset.symbol }} models have been trained yet, so there is nothing to compare.</p>
-                <p style="margin-top: 16px;">To train models, run:</p>
-                <code>docker compose exec api python scripts/train_all_models.py</code>
-                <p style="margin-top: 16px;">Models are saved inactive. Add <code>--activate</code> to make the best one the active model.</p>
+                <p style="margin-top: 16px;">To train the model, run:</p>
+                <code>docker compose exec api python -m workers.daily.trainer</code>
+                <p style="margin-top: 16px;">The trainer saves the model and makes it the active one.</p>
             </div>
             {% else %}
             <!-- Model Comparison Table -->
@@ -515,10 +515,7 @@
 
         // Define colors for each model
         const modelColors = {
-            'linear_v1': '#3b82f6',    // Blue
-            'lstm_v1': '#10b981',      // Green
-            'xgboost_v1': '#f59e0b',   // Orange
-            'arima_v1': '#ef4444'      // Red
+            'linear_v1': '#3b82f6'     // Blue
         };
 
         // Build datasets for Chart.js

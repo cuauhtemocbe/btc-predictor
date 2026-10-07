@@ -84,22 +84,8 @@ def deserialize_model(model_record: Model) -> BaseModel:
         RuntimeError: If deserialization fails
     """
     try:
-        # Map model name prefixes to their classes. The heavy ones are imported
-        # on demand: loading them pulls in TensorFlow/XGBoost/statsmodels.
         if model_record.name.startswith("linear"):
             return LinearRegressionModel.deserialize(model_record.artifact)
-        elif model_record.name.startswith("xgboost"):
-            from workers.daily.models import XGBoostModel
-
-            return XGBoostModel.deserialize(model_record.artifact)
-        elif model_record.name.startswith("lstm"):
-            from workers.daily.models import LSTMModel
-
-            return LSTMModel.deserialize(model_record.artifact)
-        elif model_record.name.startswith("arima"):
-            from workers.daily.models import ARIMAModel
-
-            return ARIMAModel.deserialize(model_record.artifact)
         else:
             raise ValueError(f"Unknown model type: {model_record.name}")
     except Exception as e:

@@ -59,6 +59,19 @@ def test_model_defaults_to_linear_and_rejects_unknown_names(
         )
 
 
+@pytest.mark.parametrize("model", ["xgboost", "lstm", "arima"])
+def test_removed_models_exit_two_with_an_invalid_choice_message(
+    capsys: pytest.CaptureFixture[str], model: str
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        backtest.parse_arguments(
+            ["--start-date=2024-01-01", "--end-date=2024-01-02", f"--model={model}"]
+        )
+
+    assert excinfo.value.code == 2
+    assert f"invalid choice: '{model}'" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("args", "message"),
     [

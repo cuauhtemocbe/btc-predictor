@@ -9,7 +9,7 @@ multi-stage con targets, como en versiones anteriores de este documento):
 |----------|-----------|------------------------|
 | `api` | `Dockerfile.api` | `api` (FastAPI, Uvicorn, Jinja2) |
 | `fetch-price` | `Dockerfile.fetch` | `fetch` (httpx, urllib3, yarl) |
-| `daily` | `Dockerfile.ml` | `ml` (scikit-learn, TensorFlow, XGBoost, statsmodels) |
+| `daily` | `Dockerfile.ml` | `ml` (scikit-learn, numpy) |
 | `monthly-backtest` | `Dockerfile.backtest` | `ml` |
 
 Todos comparten el mismo `shared/` (base) instalado via
@@ -144,7 +144,7 @@ fastapi, uvicorn, starlette, jinja2, httpx
 httpx, urllib3, yarl
 
 [tool.poetry.group.ml.dependencies]
-scikit-learn, numpy, tensorflow-cpu, xgboost, statsmodels
+scikit-learn, numpy
 ```
 
 **Instalación real en cada Dockerfile** (usa `--with`, no `--only main`):

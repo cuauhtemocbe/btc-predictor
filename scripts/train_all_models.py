@@ -5,7 +5,7 @@ Train all ML models with same training data; activation is opt-in.
 This script:
 1. Fetches historical BTC price data
 2. Splits into train/validation sets (70/20/10)
-3. Trains all 4 models (Linear, LSTM, XGBoost, ARIMA)
+3. Trains the linear model, the only one (#184)
 4. Calculates validation error (MAPE) for each
 5. Saves all models to database
 6. Activates the model with lowest validation error only with --activate;

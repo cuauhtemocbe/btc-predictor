@@ -13,9 +13,6 @@ Training needs at least (window + 1) * 5 daily rows so the 70/20/10 split leaves
 the validation set enough samples; with fewer rows the job fails and reports the
 required and available counts.
 
-Multi-Model Training:
-- ARIMA requires 60+ days (excluded automatically with less data)
-
 Entry point: python -m workers.daily.trainer
 """
 
@@ -268,8 +265,8 @@ def train_single_model(
     Train a single model with validation data and calculate validation error.
 
     Args:
-        model_class: Model class to instantiate (e.g., LSTMModel)
-        model_name: Model name (e.g., "lstm")
+        model_class: Model class to instantiate (e.g., LinearRegressionModel)
+        model_name: Model name (e.g., "linear")
         X_train: Training features
         y_train: Training targets
         X_val: Validation features
@@ -285,9 +282,9 @@ def train_single_model(
 
     Example:
         >>> model, error = train_single_model(
-        ...     LSTMModel, "lstm", X_train, y_train, X_val, y_val, 30
+        ...     LinearRegressionModel, "linear", X_train, y_train, X_val, y_val, 30
         ... )
-        >>> print(f"LSTM validation error: {error:.2f}%")
+        >>> print(f"Linear validation error: {error:.2f}%")
     """
     import time
 
@@ -296,9 +293,7 @@ def train_single_model(
 
     try:
         # Same construction the walk-forward backtest uses
-        model = instantiate_model(
-            model_class, model_name, window_days, X_train.shape[1]
-        )
+        model = instantiate_model(model_class, window_days, X_train.shape[1])
 
         # Train model
         model.train(X_train, y_train)
@@ -330,34 +325,15 @@ def train_single_model(
         return None
 
 
-def model_registry(days_available: int) -> dict[str, type[BaseModel]]:
+def model_registry() -> dict[str, type[BaseModel]]:
     """
-    Model classes to train for the amount of data available.
-
-    ARIMA requires at least 60 days of data. The LSTM, XGBoost and ARIMA
-    classes are imported here, not at module level, because importing them
-    loads TensorFlow, XGBoost and statsmodels.
+    Model classes ``train_all_models`` trains: the linear model, the only one (#184).
 
     Only ``train_all_models`` uses this registry, and only
     ``scripts/train_all_models.py`` (a manual run) calls that. The crons do not:
-    ``main()`` here trains the linear model alone, so
-    production does not train or predict with the other models (#124).
+    ``main()`` here trains the linear model alone.
     """
-    from workers.daily.models import ARIMAModel, LSTMModel, XGBoostModel
-
-    registry: dict[str, type[BaseModel]] = {
-        "linear": LinearRegressionModel,
-        "lstm": LSTMModel,
-        "xgboost": XGBoostModel,
-    }
-
-    if days_available >= 60:
-        registry["arima"] = ARIMAModel
-        logger.info("ARIMA model included (sufficient data: 60+ days)")
-    else:
-        logger.info(f"ARIMA model excluded (need 60+ days, have {days_available} days)")
-
-    return registry
+    return {"linear": LinearRegressionModel}
 
 
 def _train_candidate_models(
@@ -433,13 +409,13 @@ def train_all_models(
     """
     Train all available ML models with the same training data.
 
-    Uses every stored BTCUSDT daily row; excludes ARIMA if fewer than 60 days.
+    Uses every stored BTCUSDT daily row. The linear model is the only candidate.
 
     This function:
     1. Reads the window from settings.training_window_days (if not provided)
     2. Fetches historical price data
     3. Splits into train/validation sets (70/20/10)
-    4. Trains available models (3-4 models depending on data)
+    4. Trains the candidate models (the linear model only)
     5. Calculates validation error (MAPE) for each
     6. Saves all models to database with is_active=False
     7. Activates the model with lowest validation error, only if ``activate``
@@ -466,8 +442,7 @@ def train_all_models(
     series = fetch_training_data(session, window_days)
     require_fresh_series(series.dates, utc_today())
 
-    # Model registry - ARIMA needs 60+ days of data
-    MODEL_CLASSES = model_registry(len(series))
+    MODEL_CLASSES = model_registry()
 
     # Split into train/validation (70/20/10)
     logger.info("Splitting data: 70% train, 20% validation, 10% buffer")

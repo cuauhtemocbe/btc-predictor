@@ -204,52 +204,6 @@ def cached_linear_artifact() -> bytes:
     return lr_model.serialize()
 
 
-@pytest.fixture(scope="module")
-def cached_xgboost_artifact() -> bytes:
-    """
-    Module-scoped cached XGBoost model artifact.
-
-    Trains the model ONCE and caches the serialized bytes.
-    Tests use this to create fresh DB records without re-training.
-    """
-    window_days = 30
-    training_set = _cached_return_training_set(window_days)
-
-    # Train model ONCE
-    from workers.daily.models import XGBoostModel  # heavy import, only if used
-
-    xgb_model = XGBoostModel(
-        window_days=window_days, n_features=feature_count(window_days)
-    )
-    xgb_model.train(training_set.X, training_set.y)
-
-    # Return serialized bytes (cached for all tests in this module)
-    return xgb_model.serialize()
-
-
-@pytest.fixture(scope="module")
-def cached_lstm_artifact() -> bytes:
-    """
-    Module-scoped cached LSTM model artifact.
-
-    Trains the model ONCE and caches the serialized bytes.
-    Tests use this to create fresh DB records without re-training.
-    """
-    window_days = 30
-    training_set = _cached_return_training_set(window_days)
-
-    # Train model ONCE
-    from workers.daily.models import LSTMModel  # heavy import, only if used
-
-    lstm_model = LSTMModel(
-        window_days=window_days, n_features=feature_count(window_days), epochs=10
-    )
-    lstm_model.train(training_set.X, training_set.y)
-
-    # Return serialized bytes (cached for all tests in this module)
-    return lstm_model.serialize()
-
-
 # ============================================================================
 # Function-scoped model fixtures (use cached artifacts)
 # ============================================================================
@@ -286,9 +240,15 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
 
 
 @pytest.fixture
-def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) -> Model:
+def sample_second_linear_model(
+    db_session: Session, cached_linear_artifact: bytes
+) -> Model:
     """
-    Function-scoped XGBoostModel using cached artifact.
+    Function-scoped second linear model ("linear_b_v1") using the cached artifact.
+
+    Stands in for another model family in the multi-model tests (#184): the
+    family is the name without its ``_v<N>`` suffix, so "linear_b" can be active
+    next to "linear" (one active version per family).
 
     Uses pre-trained model artifact (cached at module scope) to avoid
     redundant training. Each test gets a fresh DB record.
@@ -298,16 +258,10 @@ def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) ->
     """
     # Use cached artifact (NO re-training!)
     model_record = Model(
-        name="xgboost_v1",
+        name="linear_b_v1",
         version="1.0.0",
-        params={
-            "window_days": 30,
-            "horizon_days": 1,
-            "target": "log_return",
-            "n_estimators": 100,
-            "learning_rate": 0.1,
-        },
-        artifact=cached_xgboost_artifact,  # Use cached bytes
+        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
+        artifact=cached_linear_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
         train_from=utc_today() - timedelta(days=60),
         train_to=utc_today() - timedelta(days=1),

@@ -39,9 +39,6 @@ optional = true
 [tool.poetry.group.ml.dependencies]
 scikit-learn = "^1.5.0"
 numpy = "^2.0.0"
-tensorflow-cpu = ">=2.13.0"
-xgboost = ">=2.0.0"
-statsmodels = ">=0.14.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
@@ -127,12 +124,9 @@ markers = [
 "workers/daily/__main__.py" = 90
 "workers/daily/evaluator.py" = 90
 "workers/daily/models/__init__.py" = 85
-"workers/daily/models/arima_model.py" = 95
 "workers/daily/models/base.py" = 70
 "workers/daily/models/factory.py" = 95
 "workers/daily/models/linear.py" = 95
-"workers/daily/models/lstm_model.py" = 95
-"workers/daily/models/xgboost_model.py" = 95
 "workers/daily/predictor.py" = 90
 "workers/daily/trainer.py" = 90
 "workers/fetch_price/main.py" = 90
@@ -167,7 +161,7 @@ exclude = [
 
 [[tool.mypy.overrides]]
 # These libraries ship neither stubs nor a py.typed marker.
-module = ["sklearn.*", "statsmodels.*", "xgboost.*", "tensorflow.*", "keras.*"]
+module = ["sklearn.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -353,3 +353,26 @@ def test_docker_compose_api_service_has_healthcheck() -> None:
     api_service = compose.split("\n  api:")[1].split("\nvolumes:")[0]
     assert "healthcheck:" in api_service
     assert "/health" in api_service
+
+
+REMOVED_ML_PACKAGES = {"tensorflow-cpu", "xgboost", "statsmodels"}
+
+
+def test_lock_file_has_none_of_the_removed_ml_packages() -> None:
+    """`poetry show` lists poetry.lock packages; none is a removed ML one (#184)."""
+    lock = tomllib.loads((REPO_ROOT / "poetry.lock").read_text())
+
+    locked = {package["name"].lower() for package in lock["package"]}
+
+    assert locked & REMOVED_ML_PACKAGES == set()
+
+
+def test_pyproject_does_not_declare_the_removed_ml_packages() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    groups = pyproject["tool"]["poetry"]["group"]
+
+    declared = {
+        name.lower() for group in groups.values() for name in group["dependencies"]
+    }
+
+    assert declared & REMOVED_ML_PACKAGES == set()

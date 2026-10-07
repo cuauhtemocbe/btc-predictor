@@ -73,12 +73,12 @@ class TestGetActiveModels:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
     ) -> None:
         """Should fetch ALL active models in multi-model mode."""
         # Ensure both models are active
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = True
+        sample_second_linear_model.is_active = True
         db_session.commit()
 
         models = predictor.get_active_models(db_session, multi_model=True)
@@ -86,18 +86,18 @@ class TestGetActiveModels:
         assert len(models) == 2
         model_names = [m[0].name for m in models]
         assert sample_trained_model.name in model_names
-        assert sample_xgboost_model.name in model_names
+        assert sample_second_linear_model.name in model_names
 
     def test_skip_inactive_models_in_multi_model_mode(
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
     ) -> None:
         """Should skip inactive models in multi-model mode."""
         # Activate only one model
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = False
+        sample_second_linear_model.is_active = False
         db_session.commit()
 
         models = predictor.get_active_models(db_session, multi_model=True)
@@ -203,7 +203,7 @@ class TestCheckExistingPrediction:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
     ) -> None:
         """Should return False when prediction exists for different model."""
         tomorrow = utc_today() + timedelta(days=1)
@@ -221,7 +221,7 @@ class TestCheckExistingPrediction:
 
         # Check for model 2 (should not exist)
         exists = predictor.check_existing_prediction(
-            db_session, tomorrow, model_id=sample_xgboost_model.id
+            db_session, tomorrow, model_id=sample_second_linear_model.id
         )
         assert exists is False
 
@@ -238,13 +238,13 @@ class TestMultiModelPrediction:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
         sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should generate predictions from all active models."""
         # Ensure both models are active
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = True
+        sample_second_linear_model.is_active = True
         db_session.commit()
 
         # Mock main with --multi-model flag
@@ -263,19 +263,19 @@ class TestMultiModelPrediction:
 
         model_ids = {p.model_id for p in predictions}
         assert sample_trained_model.id in model_ids
-        assert sample_xgboost_model.id in model_ids
+        assert sample_second_linear_model.id in model_ids
 
     def test_single_model_mode_generates_one_prediction(
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
         sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should generate only one prediction in single-model mode."""
         # Ensure both models are active
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = True
+        sample_second_linear_model.is_active = True
         db_session.commit()
 
         # Run without --multi-model flag
@@ -296,13 +296,13 @@ class TestMultiModelPrediction:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
         sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should not duplicate predictions when re-running in multi-model mode."""
         # Ensure both models are active
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = True
+        sample_second_linear_model.is_active = True
         db_session.commit()
 
         # Run predictor first time
@@ -333,13 +333,13 @@ class TestMultiModelPrediction:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
         sample_btc_prices_31_days: list[Price],
     ) -> None:
         """Should use same current price for all models (fair comparison)."""
         # Ensure both models are active
         sample_trained_model.is_active = True
-        sample_xgboost_model.is_active = True
+        sample_second_linear_model.is_active = True
         db_session.commit()
 
         # Run predictor
@@ -372,7 +372,7 @@ class TestEvaluatorMultiModel:
         self,
         db_session: Session,
         sample_trained_model: Model,
-        sample_xgboost_model: Model,
+        sample_second_linear_model: Model,
     ) -> None:
         """Should evaluate ALL predictions for a given date."""
         from workers.daily import evaluator
@@ -388,7 +388,7 @@ class TestEvaluatorMultiModel:
             predicted_price=Decimal("51000"),
         )
         prediction2 = Prediction(
-            model_id=sample_xgboost_model.id,
+            model_id=sample_second_linear_model.id,
             predicted_for=today,
             predicted_at=datetime.now(UTC),
             price_at_prediction=Decimal("50000"),

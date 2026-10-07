@@ -12,13 +12,7 @@ import numpy as np
 import pytest
 
 from shared.features import feature_count
-from workers.daily.models import (
-    ARIMAModel,
-    BaseModel,
-    LinearRegressionModel,
-    LSTMModel,
-    XGBoostModel,
-)
+from workers.daily.models import BaseModel, LinearRegressionModel
 from workers.daily.models.factory import (
     MODEL_NAMES,
     build_model,
@@ -27,8 +21,14 @@ from workers.daily.models.factory import (
 )
 
 
-def test_model_names_are_the_four_model_families() -> None:
-    assert MODEL_NAMES == ("linear", "xgboost", "lstm", "arima")
+def test_the_linear_model_is_the_only_model_family() -> None:
+    assert MODEL_NAMES == ("linear",)
+
+
+@pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
+def test_removed_model_families_are_rejected(name: str) -> None:
+    with pytest.raises(ValueError, match=f"Unknown model '{name}'"):
+        build_model(name, 21, feature_count(21))
 
 
 def test_linear_is_built_with_the_return_feature_count() -> None:
@@ -76,36 +76,18 @@ def test_instantiate_model_matches_what_the_trainer_does_for_each_class() -> Non
         def is_trained(self) -> bool:  # pragma: no cover
             raise NotImplementedError
 
-    plain = instantiate_model(Plain, "custom", 30, 61)
+    plain = instantiate_model(Plain, 30, 61)
     assert isinstance(plain, Plain)
     assert (plain.window_days, plain.n_features) == (30, 61)
-    linear = instantiate_model(LinearRegressionModel, "linear", 30, 61)
+    linear = instantiate_model(LinearRegressionModel, 30, 61)
     assert isinstance(linear, LinearRegressionModel)
     assert (linear.window_days, linear.n_features) == (30, 61)
 
 
-@pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
-def test_every_model_name_resolves_to_a_base_model(name: str) -> None:
-    model = build_model(name, 21, feature_count(21))
+def test_linear_name_resolves_to_the_linear_class() -> None:
+    model = build_model("linear", 21, feature_count(21))
 
-    assert isinstance(model, BaseModel)
-    assert type(model) is model_class_for(name)
-
-
-def test_arima_is_built_with_the_return_order_and_the_feature_count() -> None:
-    model = build_model("arima", 21, feature_count(21))
-
-    assert isinstance(model, ARIMAModel)
-    assert model.order == (5, 0, 0)
-    assert (model.window_days, model.n_features) == (21, feature_count(21))
-
-
-@pytest.mark.parametrize("name", ["xgboost", "lstm"])
-def test_xgboost_and_lstm_are_built_with_the_feature_count(name: str) -> None:
-    model = build_model(name, 21, feature_count(21))
-
-    assert isinstance(model, XGBoostModel | LSTMModel)
-    assert (model.window_days, model.n_features) == (21, feature_count(21))
+    assert type(model) is model_class_for("linear")
 
 
 def test_building_linear_does_not_import_the_heavy_libraries() -> None:

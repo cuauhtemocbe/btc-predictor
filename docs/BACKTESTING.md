@@ -64,7 +64,7 @@ This will:
 |----------|----------|---------|-------------|
 | `--start-date` | Yes | - | First day predicted (YYYY-MM-DD) |
 | `--end-date` | Yes | - | Last day predicted (YYYY-MM-DD, inclusive) |
-| `--model` | No | `linear` | `linear`, `xgboost`, `lstm` or `arima` |
+| `--model` | No | `linear` | `linear` (the only model since #184) |
 | `--training-window` | No | `settings.training_window_days` (21) | Window in days; same default as production |
 | `--seed` | No | 42 | Seeds `random`, `numpy` and TensorFlow before every training |
 | `--retrain-every` | No | 1 | Retrain every N days and reuse the model in between |
@@ -85,11 +85,11 @@ docker compose exec api python scripts/backtest.py \
   --test-start-date=2025-01-01
 ```
 
-**A heavier model, retrained monthly:**
+**Retrained monthly:**
 ```bash
 docker compose exec api python scripts/backtest.py \
   --start-date=2024-01-01 --end-date=2024-12-31 \
-  --model=arima --retrain-every=30
+  --retrain-every=30
 ```
 
 **Print the report of a stored run again:**
@@ -348,7 +348,7 @@ ORDER BY timestamp;
 ### Error: "Every one of the N days failed to train"
 
 ```
-ValueError: Every one of the 91 days failed to train the xgboost model, nothing was stored;
+ValueError: Every one of the 91 days failed to train the linear model, nothing was stored;
 first error: X must have 5 features (window_days), got 11
 ```
 
@@ -366,7 +366,7 @@ A year of Linear predictions (retrain every day) takes about 10 s. If a run take
 
 ### Current Limitations
 
-- **Heavy models**: XGBoost, LSTM and ARIMA accept the return features (#124) but are slow, so use `--retrain-every` with them. The monthly cron backtests only the linear model.
+- **One model**: the linear model is the only one (#184). `--model` accepts only `linear`; XGBoost, LSTM and ARIMA were removed and live in git history.
 - **Expanding window only**: like production; there is no rolling-window mode.
 - **No hyperparameter search**: the validation/test split and its labelling make it possible to tune without leaking, but no tuner is built in.
 - **Sequential processing**: No parallelization
