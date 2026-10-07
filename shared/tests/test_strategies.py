@@ -8,12 +8,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from btc_shared.strategies import (
+from shared.db.models import Model, Prediction
+from shared.strategies import (
     calculate_cumulative_pnl,
     calculate_strategy_metrics,
     get_all_strategies_metrics,
 )
-from shared.db.models import Model, Prediction
 
 
 @pytest.fixture

@@ -22,10 +22,10 @@ from api.symbols import (
     asset_context,
     source_context,
 )
-from btc_shared.strategies import get_all_strategies_metrics
 from shared.db.crud import get_evaluated_predictions
 from shared.db.database import get_db
 from shared.db.models import PredictionSource
+from shared.strategies import get_all_strategies_metrics
 from shared.utils import DEFAULT_TIMEFRAME
 
 app = FastAPI(title="BTC Predictor", version="0.1.0")

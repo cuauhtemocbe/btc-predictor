@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session
 
-from btc_shared.strategies import get_all_strategies_metrics
 from shared.baselines import BaselineReport
 from shared.db.crud import get_evaluated_predictions
 from shared.db.models import Model, Prediction, Price
@@ -21,6 +20,7 @@ from shared.model_baselines import (
     daily_closes,
     verdict,
 )
+from shared.strategies import get_all_strategies_metrics
 from shared.utils import get_all_models_metrics
 
 FIRST_DAY = date(2026, 1, 1)

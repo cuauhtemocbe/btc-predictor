@@ -23,7 +23,7 @@ if ! docker compose ps | grep -q "api.*running"; then
     fi
 fi
 
-if ! docker compose exec -T api sh -c "cd /app && python -m mypy shared/shared shared/btc_shared shared/tests workers api scripts"; then
+if ! docker compose exec -T api sh -c "cd /app && python -m mypy shared/shared shared/tests workers api scripts"; then
     echo "❌ mypy found type errors. Fix them before committing."
     exit 1
 fi

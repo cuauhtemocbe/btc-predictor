@@ -12,7 +12,7 @@ This package is part of a Poetry workspace. Other services depend on it using:
 
 ```toml
 [tool.poetry.dependencies]
-btc-shared = {path = "../shared", develop = true}
+shared = {path = "../shared", develop = true}
 ```
 
 ## Usage
@@ -20,7 +20,7 @@ btc-shared = {path = "../shared", develop = true}
 ### Configuration
 
 ```python
-from btc_shared.config import Settings
+from shared.config import Settings
 
 settings = Settings()
 print(settings.database_url)  # Loaded from DATABASE_URL env var
@@ -29,7 +29,7 @@ print(settings.database_url)  # Loaded from DATABASE_URL env var
 ### Database Connection
 
 ```python
-from btc_shared.db.database import engine, SessionLocal, get_db
+from shared.db.database import engine, SessionLocal, get_db
 
 # Direct session usage
 session = SessionLocal()
@@ -65,7 +65,7 @@ poetry install
 pytest
 
 # Run tests with coverage
-pytest --cov=btc_shared --cov-report=term-missing
+pytest --cov=shared --cov-report=term-missing
 ```
 
 ## Project Structure
@@ -74,7 +74,7 @@ pytest --cov=btc_shared --cov-report=term-missing
 shared/
 ├── pyproject.toml          # Poetry package definition
 ├── README.md               # This file
-├── btc_shared/
+├── shared/
 │   ├── __init__.py        # Package exports
 │   ├── config.py          # Settings (pydantic-settings)
 │   └── db/
