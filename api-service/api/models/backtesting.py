@@ -25,7 +25,9 @@ class BacktestStrategyMetrics(BaseModel):
     color: str = Field(description="Chart color for this strategy")
     total_pnl: float = Field(description="Total accumulated PnL")
     win_rate: float = Field(description="Percentage of winning trades (0-1)")
-    max_drawdown: float = Field(description="Worst single-day loss")
+    max_drawdown_pct: float = Field(
+        description="Max drawdown of the compounded equity curve, in percent"
+    )
     best_day: float = Field(description="Best single-day PnL")
     worst_day: float = Field(description="Worst single-day PnL")
     sharpe_ratio: float = Field(description="Risk-adjusted return metric")
@@ -67,7 +69,7 @@ class BacktestMetricsResponse(BaseModel):
                 "color": "blue",
                 "total_pnl": 1200.50,
                 "win_rate": 0.63,
-                "max_drawdown": -450.00,
+                "max_drawdown_pct": -4.50,
                 "best_day": 320.00,
                 "worst_day": -450.00,
                 "sharpe_ratio": 1.25,

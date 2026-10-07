@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -20,6 +19,7 @@ from api.models.backtesting import (
 from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
 from shared.db.database import get_db
 from shared.db.models import BacktestResult
+from shared.returns import max_drawdown_pct, returns_from_pnl, sharpe_ratio
 
 router = APIRouter(tags=["backtesting"])
 
@@ -38,8 +38,12 @@ def calculate_backtest_strategy_metrics(
     """
     Calculate aggregate performance metrics for a backtest strategy.
 
+    Dollar figures come from the stored PnL column; the Sharpe ratio and the max
+    drawdown come from returns, ``pnl / price_at_prediction``, compounded from 1.0
+    and recomputed on read (#177).
+
     Args:
-        results: List of BacktestResult objects
+        results: List of BacktestResult objects, ordered by predicted_for
         strategy_key: One of 'pnl_simple', 'pnl_long_short',
             'pnl_threshold', 'pnl_realistic'
 
@@ -47,54 +51,43 @@ def calculate_backtest_strategy_metrics(
         Dictionary with metrics:
         - total_pnl: Sum of all PnL values
         - win_rate: Percentage of winning trades (0-1)
-        - max_drawdown: Worst single loss
+        - max_drawdown_pct: Largest fall of the compounded equity curve, in percent
         - best_day: Best single-day PnL
         - worst_day: Worst single-day PnL
-        - sharpe_ratio: Risk-adjusted return metric
+        - sharpe_ratio: Annualized Sharpe ratio of the daily returns; 0.0 with
+          fewer than 2 returns or no variance
         - trade_count: Number of trades
     """
-    # Extract PnL values for this strategy (convert Decimal to float)
-    pnl_values = [
-        float(getattr(result, strategy_key))
-        for result in results
-        if getattr(result, strategy_key) is not None
-    ]
+    evaluated = [r for r in results if getattr(r, strategy_key) is not None]
+    pnl_values = [float(getattr(result, strategy_key)) for result in evaluated]
 
     # Handle zero trades case
     if not pnl_values:
         return {
             "total_pnl": 0.0,
             "win_rate": 0.0,
-            "max_drawdown": 0.0,
+            "max_drawdown_pct": 0.0,
             "best_day": 0.0,
             "worst_day": 0.0,
             "sharpe_ratio": 0.0,
             "trade_count": 0,
         }
 
-    # Calculate basic metrics
     total_pnl = sum(pnl_values)
     wins = [p for p in pnl_values if p > 0]
     trade_count = len(pnl_values)
 
-    win_rate = len(wins) / trade_count if trade_count > 0 else 0.0
-    max_drawdown = min(pnl_values)
-    best_day = max(pnl_values)
-    worst_day = min(pnl_values)
-
-    # Calculate Sharpe Ratio (simplified: mean / std_dev)
-    if trade_count >= 2 and np.std(pnl_values) > 0:
-        sharpe_ratio = float(np.mean(pnl_values) / np.std(pnl_values))
-    else:
-        sharpe_ratio = 0.0
+    returns = returns_from_pnl(
+        (getattr(r, strategy_key), r.price_at_prediction) for r in evaluated
+    )
 
     return {
         "total_pnl": round(total_pnl, 2),
-        "win_rate": round(win_rate, 4),
-        "max_drawdown": round(max_drawdown, 2),
-        "best_day": round(best_day, 2),
-        "worst_day": round(worst_day, 2),
-        "sharpe_ratio": round(sharpe_ratio, 2),
+        "win_rate": round(len(wins) / trade_count, 4),
+        "max_drawdown_pct": round(max_drawdown_pct(returns) or 0.0, 2),
+        "best_day": round(max(pnl_values), 2),
+        "worst_day": round(min(pnl_values), 2),
+        "sharpe_ratio": round(sharpe_ratio(returns) or 0.0, 2),
         "trade_count": trade_count,
     }
 

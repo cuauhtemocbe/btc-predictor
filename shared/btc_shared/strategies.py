@@ -7,6 +7,12 @@ from sqlalchemy.orm import Session
 
 from shared.db.crud import source_filter
 from shared.db.models import Model, Prediction, PredictionSource
+from shared.returns import (
+    max_drawdown_pct,
+    returns_from_pnl,
+    sharpe_ratio,
+    worst_trade_pct,
+)
 
 
 def calculate_strategy_metrics(
@@ -14,6 +20,12 @@ def calculate_strategy_metrics(
 ) -> dict[str, Any]:
     """
     Calculate aggregate performance metrics for a given PnL strategy.
+
+    Dollar figures (total, average win and loss) come from the stored ``pnl_*``
+    column. Risk figures come from returns, ``pnl / price_at_prediction``, compounded
+    from 1.0 and recomputed on read (#177). A prediction whose price is not positive
+    has no return: it counts in the dollar figures and the trade count, not in the
+    risk figures.
 
     Args:
         predictions: List of Prediction objects with evaluated PnL values
@@ -24,26 +36,33 @@ def calculate_strategy_metrics(
         Dictionary with metrics:
         - total_pnl: Sum of all PnL values
         - win_rate: Percentage of winning trades (0-1)
-        - max_drawdown: Worst single loss
+        - worst_trade_pct: Worst single-day return, in percent
+        - max_drawdown_pct: Largest fall of the compounded equity curve, in percent
         - avg_win: Average of positive PnL values
         - avg_loss: Average of negative PnL values
-        - sharpe_ratio: Risk-adjusted return metric (simplified, risk-free rate = 0)
+        - sharpe_ratio: Annualized Sharpe ratio of the daily returns (risk-free
+          rate = 0); 0.0 with fewer than 2 returns or no variance
         - trade_count: Number of trades
     """
-    # Extract PnL values for this strategy (only evaluated predictions)
-    # Convert Decimal to float to avoid type issues with numpy operations
-    pnl_values = [
-        float(getattr(pred, strategy_key))
-        for pred in predictions
-        if pred.actual_price is not None and getattr(pred, strategy_key) is not None
-    ]
+    # Evaluated predictions of this strategy, oldest first so the equity curve is in
+    # time order; Decimal is converted to float for numpy.
+    evaluated = sorted(
+        (
+            pred
+            for pred in predictions
+            if pred.actual_price is not None and getattr(pred, strategy_key) is not None
+        ),
+        key=lambda p: p.predicted_for,
+    )
+    pnl_values = [float(getattr(pred, strategy_key)) for pred in evaluated]
 
     # Handle zero trades case
     if not pnl_values:
         return {
             "total_pnl": 0.0,
             "win_rate": 0.0,
-            "max_drawdown": 0.0,
+            "worst_trade_pct": 0.0,
+            "max_drawdown_pct": 0.0,
             "avg_win": 0.0,
             "avg_loss": 0.0,
             "sharpe_ratio": 0.0,
@@ -56,26 +75,25 @@ def calculate_strategy_metrics(
     losses = [p for p in pnl_values if p < 0]
     trade_count = len(pnl_values)
 
-    win_rate = len(wins) / trade_count if trade_count > 0 else 0.0
-    max_drawdown = min(pnl_values) if pnl_values else 0.0
+    win_rate = len(wins) / trade_count
     avg_win = float(np.mean(wins)) if wins else 0.0
     avg_loss = float(np.mean(losses)) if losses else 0.0
 
-    # Calculate Sharpe Ratio (simplified)
-    # Note: Using PnL values directly as "returns"
-    # In production, you'd calculate actual percentage returns
-    if trade_count >= 2 and np.std(pnl_values) > 0:
-        sharpe_ratio = float(np.mean(pnl_values) / np.std(pnl_values))
-    else:
-        sharpe_ratio = 0.0
+    returns = returns_from_pnl(
+        (getattr(pred, strategy_key), pred.price_at_prediction) for pred in evaluated
+    )
+    worst_trade = worst_trade_pct(returns)
+    max_drawdown = max_drawdown_pct(returns)
+    sharpe = sharpe_ratio(returns)
 
     return {
         "total_pnl": round(total_pnl, 2),
         "win_rate": round(win_rate, 4),
-        "max_drawdown": round(max_drawdown, 2),
+        "worst_trade_pct": round(worst_trade or 0.0, 2),
+        "max_drawdown_pct": round(max_drawdown or 0.0, 2),
         "avg_win": round(avg_win, 2),
         "avg_loss": round(avg_loss, 2),
-        "sharpe_ratio": round(sharpe_ratio, 2),
+        "sharpe_ratio": round(sharpe or 0.0, 2),
         "trade_count": trade_count,
     }
 

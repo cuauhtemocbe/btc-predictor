@@ -234,7 +234,7 @@ async def test_models_dashboard_shows_all_metrics(
     Given there are 3 models with different performance
     When I view the model comparison table
     Then I see columns: Model, Predictions, Accuracy, Avg Error %,
-         Total PnL, Win Rate, Sharpe, Max DD and the baseline columns
+         Total PnL, Win Rate, Sharpe, Max drawdown and the baseline columns
     And I see metrics for all 3 models
     """
     # Act
@@ -254,7 +254,7 @@ async def test_models_dashboard_shows_all_metrics(
         "Total PnL",
         "Win Rate",
         "Sharpe",
-        "Max DD",
+        "Max drawdown",
         "Always-up",
         "Persistence",
         "Buy & hold PnL",
@@ -433,7 +433,8 @@ async def test_models_metrics_api_returns_json(
         assert "total_pnl" in model
         assert "win_rate" in model
         assert "sharpe_ratio" in model
-        assert "max_drawdown" in model
+        assert "max_drawdown_pct" in model
+        assert "max_drawdown" not in model
 
 
 @pytest.mark.asyncio

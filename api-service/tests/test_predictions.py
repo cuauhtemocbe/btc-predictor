@@ -583,7 +583,8 @@ async def test_get_strategies_endpoint(
         assert "color" in strategy
         assert "total_pnl" in strategy
         assert "win_rate" in strategy
-        assert "max_drawdown" in strategy
+        assert "worst_trade_pct" in strategy
+        assert "max_drawdown_pct" in strategy
         assert "avg_win" in strategy
         assert "avg_loss" in strategy
         assert "sharpe_ratio" in strategy
@@ -604,7 +605,7 @@ async def test_strategies_metrics_calculation(
     When the backend calculates metrics for "Long/Short" strategy
     Then Total PnL = 370
     And Win Rate = 60% (3 wins out of 5 trades)
-    And Max Drawdown = -50 (worst single loss)
+    And Worst trade = -0.1% (-50 at 51,000) and Max drawdown = -0.1%
     And Avg Win = 150 (mean of 100, 200, 150)
     And Avg Loss = -40 (mean of -50, -30)
     """
@@ -618,7 +619,9 @@ async def test_strategies_metrics_calculation(
     # Assert metrics
     assert long_short["total_pnl"] == 370.0
     assert long_short["win_rate"] == 0.6  # 60%
-    assert long_short["max_drawdown"] == -50.0
+    assert long_short["worst_trade_pct"] == -0.1
+    assert long_short["max_drawdown_pct"] == -0.1
+    assert "max_drawdown" not in long_short
     assert long_short["avg_win"] == 150.0  # (100 + 200 + 150) / 3
     assert long_short["avg_loss"] == -40.0  # (-50 + -30) / 2
     assert long_short["trade_count"] == 5
@@ -679,7 +682,8 @@ async def test_strategies_with_zero_trades(
     for strategy in data["strategies"]:
         assert strategy["total_pnl"] == 0.0
         assert strategy["win_rate"] == 0.0
-        assert strategy["max_drawdown"] == 0.0
+        assert strategy["worst_trade_pct"] == 0.0
+        assert strategy["max_drawdown_pct"] == 0.0
         assert strategy["avg_win"] == 0.0
         assert strategy["avg_loss"] == 0.0
         assert strategy["sharpe_ratio"] == 0.0
