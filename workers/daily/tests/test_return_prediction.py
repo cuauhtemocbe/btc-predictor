@@ -92,8 +92,8 @@ class TestLinearModelTrainsOnReturns:
     def test_the_daily_cron_trains_only_the_linear_model(
         self, use_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """LSTM, XGBoost and ARIMA are re-enabled in train_all_models (#124), but
-        the cron's trainer.main must keep training Linear Regression only."""
+        """The cron's trainer.main trains Linear Regression only, never through
+        the multi-model path of train_all_models."""
 
         def forbidden(*_args: object, **_kwargs: object) -> None:
             raise AssertionError("the daily cron must not train non-linear models")

@@ -125,6 +125,24 @@ class TestPrepareFeatures:
         assert np.array_equal(X[0], training.X[-1])
 
 
+class TestDeserializeModel:
+    """Only linear models can be loaded since LSTM, ARIMA and XGBoost went (#184)."""
+
+    def test_loads_a_linear_model(self, sample_trained_model: Model) -> None:
+        assert isinstance(
+            predictor.deserialize_model(sample_trained_model), LinearRegressionModel
+        )
+
+    @pytest.mark.parametrize("name", ["lstm_v1", "xgboost_v1", "arima_v1"])
+    def test_removed_model_types_raise_runtime_error_naming_the_type(
+        self, sample_trained_model: Model, name: str
+    ) -> None:
+        sample_trained_model.name = name
+
+        with pytest.raises(RuntimeError, match=f"Unknown model type: {name}"):
+            predictor.deserialize_model(sample_trained_model)
+
+
 class TestRequireReturnModel:
     """A model trained on price levels must not be read as a return."""
 

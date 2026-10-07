@@ -37,14 +37,12 @@ from workers.daily.models import BaseModel
 def three_active_models(
     db_session: Session,
     cached_linear_artifact: bytes,
-    cached_xgboost_artifact: bytes,
-    cached_lstm_artifact: bytes,
 ) -> list[Model]:
     """
-    Create 3 trained models (linear, xgboost, lstm) all active.
+    Create 3 trained linear models (linear_v1, linear_b_v1, linear_c_v1) all active.
 
-    Uses cached artifacts from module-scoped fixtures to avoid
-    redundant training (3-5s speedup per test).
+    Uses the cached artifact from the module-scoped fixture to avoid
+    redundant training.
 
     Returns:
         List of 3 Model records with is_active=True
@@ -65,17 +63,12 @@ def three_active_models(
     db_session.add(model1)
     models.append(model1)
 
-    # Model 2: XGBoost (using cached artifact)
+    # Model 2: LinearRegression (using cached artifact)
     model2 = Model(
-        name="xgboost_v1",
+        name="linear_b_v1",
         version="1.0.0",
-        params={
-            "window_days": 30,
-            "horizon_days": 1,
-            "target": "log_return",
-            "n_estimators": 100,
-        },
-        artifact=cached_xgboost_artifact,  # NO training!
+        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
+        artifact=cached_linear_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=utc_today() - timedelta(days=60),
         train_to=utc_today() - timedelta(days=1),
@@ -84,17 +77,12 @@ def three_active_models(
     db_session.add(model2)
     models.append(model2)
 
-    # Model 3: LSTM (using cached artifact)
+    # Model 3: LinearRegression (using cached artifact)
     model3 = Model(
-        name="lstm_v1",
+        name="linear_c_v1",
         version="1.0.0",
-        params={
-            "window_days": 30,
-            "horizon_days": 1,
-            "target": "log_return",
-            "epochs": 10,
-        },
-        artifact=cached_lstm_artifact,  # NO training!
+        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
+        artifact=cached_linear_artifact,  # NO training!
         trained_at=datetime.now(UTC),
         train_from=utc_today() - timedelta(days=60),
         train_to=utc_today() - timedelta(days=1),
@@ -130,7 +118,7 @@ class TestMultiModelPredictions:
         """
         Gherkin Scenario: Predictor generates predictions from all active models
 
-        Given there are 3 active models (linear, xgboost, lstm)
+        Given there are 3 active models (linear_v1, linear_b_v1, linear_c_v1)
         When the predictor runs with --multi-model flag
         Then it generates 3 predictions for tomorrow (one per model)
         And all predictions have predicted_for = tomorrow
@@ -385,13 +373,13 @@ class TestMultiModelFailureHandling:
         # Given: 3 active models exist
         assert len(three_active_models) == 3
 
-        # Mock deserialize_model to fail for LSTM (model 3)
+        # Mock deserialize_model to fail for linear_c_v1 (model 3)
 
         original_deserialize = predictor.deserialize_model
 
         def mock_deserialize(model_record: Model) -> BaseModel:
-            if model_record.name == "lstm_v1":
-                raise RuntimeError("LSTM deserialization failed (simulated)")
+            if model_record.name == "linear_c_v1":
+                raise RuntimeError("linear_c_v1 deserialization failed (simulated)")
             return original_deserialize(model_record)
 
         # Mock parse_args for multi-model mode
@@ -407,15 +395,15 @@ class TestMultiModelFailureHandling:
         # Then: job exits successfully (despite 1 model failing)
         assert exit_code == 0
 
-        # And: only 2 predictions are created (linear + xgboost)
+        # And: only 2 predictions are created (linear_v1 + linear_b_v1)
         predictions = db_session.query(Prediction).all()
         assert len(predictions) == 2
 
         # And: predictions are from models 1 and 2 (not model 3)
         model_ids = {p.model_id for p in predictions}
-        assert three_active_models[0].id in model_ids  # linear
-        assert three_active_models[1].id in model_ids  # xgboost
-        assert three_active_models[2].id not in model_ids  # lstm failed
+        assert three_active_models[0].id in model_ids  # linear_v1
+        assert three_active_models[1].id in model_ids  # linear_b_v1
+        assert three_active_models[2].id not in model_ids  # linear_c_v1 failed
 
 
 # ============================================================================

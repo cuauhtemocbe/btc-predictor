@@ -98,6 +98,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The LSTM, ARIMA and XGBoost models and the `tensorflow-cpu`, `xgboost` and
+  `statsmodels` dependencies (#184, step 1). `LinearRegressionModel` is the only model:
+  it is the benchmark any later model has to beat after fees. `--model` of
+  `scripts/backtest.py` accepts only `linear` (anything else exits 2), and
+  `deserialize_model` raises `RuntimeError` for a stored model that is not linear. All
+  production models were `linear_v1`, so no data migration is needed. The code stays in
+  git history. `train_all_models` now trains the linear model alone; its removal and
+  that of the multi-model mode are the second step of the issue.
+
 - The weekly worker (`workers/weekly/`, `railway.weekly.toml`), the `weekly-predictor`
   Railway service, the Weekly dashboard tab and the `1w` timeframe (#183). At 52
   predictions a year a 55% hit rate cannot be told from 50% for about 12 years, and

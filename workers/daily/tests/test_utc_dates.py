@@ -91,7 +91,7 @@ class TestDailyJobsUseTheUtcDate:
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            trainer, "model_registry", lambda days: {"linear": LinearRegressionModel}
+            trainer, "model_registry", lambda: {"linear": LinearRegressionModel}
         )
         _add_daily_prices(db_session, 150)
 

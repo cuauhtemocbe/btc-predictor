@@ -23,7 +23,7 @@ from testdb import database_name_for_tests, ensure_database
 def _limit_threads_per_xdist_worker() -> None:
     """Keep numeric libraries to one thread per xdist worker.
 
-    TensorFlow, XGBoost and BLAS each default to one thread per core. With N
+    BLAS libraries default to one thread per core. With N
     workers that oversubscribes the CPU and makes the parallel run slower than
     the serial one. Must run before those libraries are imported.
     """
@@ -32,8 +32,6 @@ def _limit_threads_per_xdist_worker() -> None:
             "OMP_NUM_THREADS",
             "OPENBLAS_NUM_THREADS",
             "MKL_NUM_THREADS",
-            "TF_NUM_INTRAOP_THREADS",
-            "TF_NUM_INTEROP_THREADS",
         ):
             os.environ.setdefault(variable, "1")
 

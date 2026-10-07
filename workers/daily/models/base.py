@@ -18,7 +18,7 @@ class BaseModel(ABC):
     All concrete model implementations must inherit from this class
     and implement all abstract methods. This ensures a consistent
     interface for training, prediction, and serialization across
-    different ML algorithms (Linear Regression, LSTM, XGBoost, etc.).
+    different ML algorithms (Linear Regression today).
 
     Example:
         >>> class MyModel(BaseModel):

@@ -1,8 +1,8 @@
 """
-"Every model type can be backtested" (#106 Scenario Outline).
+"The model can be backtested" (#106 Scenario Outline).
 
-Every model runs on the return features of the production feature builder, with the
-same code as the daily trainer (#124).
+The linear model runs on the return features of the production feature builder, with
+the same code as the daily trainer (#124). It is the only model since #184.
 """
 
 from datetime import date, timedelta
@@ -20,23 +20,18 @@ START, END = date(2024, 1, 1), date(2024, 3, 31)
 WINDOW = 5
 
 
-@pytest.mark.parametrize(
-    "model",
-    ["linear", "xgboost", "lstm", "arima"],
-)
+@pytest.mark.parametrize("model", ["linear"])
 def test_backtest_stores_one_result_per_day(
     db_session: Session, seeded_prices: DailyRows, model: str
 ) -> None:
     # Given the model, when I backtest 2024-01-01 to 2024-03-31
     run_id = uuid4()
-    # retraining once (91 days = the whole range) keeps the heavy models fast;
-    # the frequency is stored in every row and printed in the report
     config = BacktestConfig(
         model_name=model,
         window_days=WINDOW,
         start_date=START,
         end_date=END,
-        retrain_every=1 if model == "linear" else 91,
+        retrain_every=1,
     )
 
     engine.run_walk_forward(db_session, config, run_id)

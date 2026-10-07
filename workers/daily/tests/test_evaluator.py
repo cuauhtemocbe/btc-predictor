@@ -220,7 +220,7 @@ class TestFindUnevaluatedPrediction:
 
         # Create a second model with higher ID
         model2 = Model(
-            name="lstm_v1",
+            name="linear_v2",
             version="1.0.0",
             is_active=False,
             trained_at=datetime.now(UTC),

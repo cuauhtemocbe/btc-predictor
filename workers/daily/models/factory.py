@@ -1,49 +1,30 @@
 """
 Model construction shared by the daily trainer and the walk-forward backtest.
 
-One place knows how each model class is built (every model takes the window and
-the feature count, ARIMA also takes an ``order``), so the backtest instantiates
-exactly the models the daily worker does. LSTM, XGBoost and ARIMA are imported on
-demand: loading them pulls in TensorFlow, XGBoost and statsmodels.
+One place knows how the model class is built (it takes the window and the feature
+count), so the backtest instantiates exactly the model the daily worker does.
 """
 
 from workers.daily.models.base import BaseModel
 from workers.daily.models.linear import LinearRegressionModel
 
-MODEL_NAMES = ("linear", "xgboost", "lstm", "arima")
-
-# The series ARIMA fits is the daily log return, which is already differenced, so
-# d = 0 (the d = 1 of a price-level ARIMA would difference it twice).
-ARIMA_ORDER = (5, 0, 0)
+MODEL_NAMES = ("linear",)
 
 
 def model_class_for(name: str) -> type[BaseModel]:
     """
-    Model class of a model family name (``linear``, ``xgboost``, ``lstm``, ``arima``).
+    Model class of a model family name (``linear``).
 
     Raises:
         ValueError: If ``name`` is not one of MODEL_NAMES.
     """
     if name == "linear":
         return LinearRegressionModel
-    if name == "xgboost":
-        from workers.daily.models.xgboost_model import XGBoostModel
-
-        return XGBoostModel
-    if name == "lstm":
-        from workers.daily.models.lstm_model import LSTMModel
-
-        return LSTMModel
-    if name == "arima":
-        from workers.daily.models.arima_model import ARIMAModel
-
-        return ARIMAModel
     raise ValueError(f"Unknown model '{name}'; valid models: {', '.join(MODEL_NAMES)}")
 
 
 def instantiate_model(
     model_class: type[BaseModel],
-    model_name: str,
     window_days: int,
     n_features: int,
 ) -> BaseModel:
@@ -52,14 +33,9 @@ def instantiate_model(
 
     Args:
         model_class: Class to instantiate.
-        model_name: Model family name; ``arima`` is built with ARIMA_ORDER.
         window_days: Sliding-window size.
         n_features: Feature columns of the training matrix.
     """
-    if model_name == "arima":
-        return model_class(  # type: ignore[call-arg]
-            order=ARIMA_ORDER, window_days=window_days, n_features=n_features
-        )
     return model_class(  # type: ignore[call-arg]
         window_days=window_days, n_features=n_features
     )
@@ -67,4 +43,4 @@ def instantiate_model(
 
 def build_model(name: str, window_days: int, n_features: int) -> BaseModel:
     """Build an untrained model by family name; see ``instantiate_model``."""
-    return instantiate_model(model_class_for(name), name, window_days, n_features)
+    return instantiate_model(model_class_for(name), window_days, n_features)

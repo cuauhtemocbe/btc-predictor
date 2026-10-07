@@ -15,7 +15,6 @@ succeeds, and a start date without enough history fails before any work.
 
 import logging
 import random
-import sys
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -64,12 +63,12 @@ class BacktestConfig:
     """Parameters of one walk-forward run.
 
     Attributes:
-        model_name: Model family: linear, xgboost, lstm or arima.
+        model_name: Model family: linear.
         window_days: Sliding-window size of the features.
         start_date: First day predicted.
         end_date: Last day predicted (inclusive).
         symbol: Asset whose daily prices are backtested.
-        seed: Seeds ``random``, ``numpy`` and TensorFlow before every training, so
+        seed: Seeds ``random`` and ``numpy`` before every training, so
             the same run stores the same predictions.
         retrain_every: The model is retrained every this many days and reused in
             between; the features are rebuilt every day. Part of the report.
@@ -191,12 +190,9 @@ def resolve_test_start(config: BacktestConfig) -> date:
 
 
 def seed_everything(seed: int) -> None:
-    """Seed the global RNGs the models draw from (TensorFlow only if it is loaded)."""
+    """Seed the global RNGs the models draw from."""
     random.seed(seed)
     np.random.seed(seed)
-    tensorflow = sys.modules.get("tensorflow")
-    if tensorflow is not None:
-        tensorflow.random.set_seed(seed)
 
 
 def _midnight(day: date) -> datetime:

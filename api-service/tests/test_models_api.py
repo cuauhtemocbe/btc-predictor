@@ -321,7 +321,7 @@ async def test_models_dashboard_empty_state(
     Given there are no models in the database
     When I visit /models
     Then I see a message "No models have been trained yet"
-    And I see instructions to run train_all_models.py
+    And I see instructions to run the daily trainer
     """
     # Arrange: No models in database (db_session is clean)
 
@@ -344,7 +344,7 @@ async def test_models_dashboard_empty_state(
     # Verify instructions
     code = empty_state.find("code")
     assert code is not None
-    assert "train_all_models.py" in code.text
+    assert "workers.daily.trainer" in code.text
 
 
 @pytest.mark.asyncio

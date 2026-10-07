@@ -27,9 +27,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No `docker/setup-buildx-action` on purpose: it switches to the
-      # docker-container driver, which then has to export the 4.5 GB image
-      # (TensorFlow, XGBoost) as a tarball and load it into the daemon, ~130 s
-      # of a ~220 s build. The runner's default builder writes layers directly.
+      # docker-container driver, which then has to export the image as a
+      # tarball and load it into the daemon, which costs a large share of the build
+      # time. The runner's default builder writes layers directly.
       - name: Start Docker Compose services
         run: docker compose up -d --wait
 

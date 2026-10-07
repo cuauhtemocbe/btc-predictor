@@ -68,17 +68,16 @@ class _BrokenModel(LinearRegressionModel):
 def model_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, type[LinearRegressionModel]]:
-    """Replace the trained models with cheap ones (no TensorFlow/XGBoost).
+    """Replace the trained models with a biased variant and the linear model.
 
-    The real LSTM/XGBoost/ARIMA are covered by their own tests and by
-    ``test_train_all_models_success``; these tests are about the orchestration.
-    Returns the registry dict so a test can add models to it.
+    These tests are about the orchestration (best-model selection, partial
+    failures). Returns the registry dict so a test can add models to it.
     """
     registry: dict[str, type[LinearRegressionModel]] = {
         "linear": LinearRegressionModel,
         "biased": _BiasedModel,
     }
-    monkeypatch.setattr(trainer, "model_registry", lambda days_available: registry)
+    monkeypatch.setattr(trainer, "model_registry", lambda: registry)
     return registry
 
 
@@ -211,21 +210,15 @@ class TestTrainAllModels:
         self, db_session: Session, sample_prices: list[Price]
     ) -> None:
         """
-        Gherkin Scenario: The trainer covers every enabled model again
+        Gherkin Scenario: The trainer trains the linear model only (#184)
 
-        Given 200 daily rows, enough for every model
+        Given 200 daily rows
         When train_all_models runs with the configured window
-        Then it returns the linear model and the LSTM, XGBoost and ARIMA models
+        Then it returns the linear model alone
         """
         models = train_all_models(db_session, activate=True)
 
-        # Linear, LSTM, XGBoost and ARIMA all trained (200 days >= 60 for ARIMA)
-        assert {m.name for m in models} == {
-            "linear_v1",
-            "lstm_v1",
-            "xgboost_v1",
-            "arima_v1",
-        }
+        assert {m.name for m in models} == {"linear_v1"}
 
         # Verify models are saved to database
         all_models = get_all_models(db_session)
@@ -348,35 +341,6 @@ class TestTrainAllModels:
 
         with pytest.raises(ValueError, match=r"need 110 daily rows.*have 29"):
             train_all_models(db_session)
-
-    def test_train_all_models_excludes_arima_with_limited_data(
-        self, db_session: Session
-    ) -> None:
-        """
-        Gherkin Scenario: ARIMA is excluded below its minimum data threshold
-
-        Given 55 daily rows, fewer than the 60 ARIMA needs
-        When train_all_models runs
-        Then it returns the linear, LSTM and XGBoost models but not ARIMA
-        """
-        # 55 days: enough for window=5 to build the 70/20 split, but not for ARIMA
-        for i in range(55):
-            price_record = Price(
-                timestamp=datetime.now(UTC) - timedelta(days=55 - i),
-                open=Decimal(50000 + i * 100),
-                high=Decimal(50000 + i * 100 + 500),
-                low=Decimal(50000 + i * 100 - 500),
-                close=Decimal(50000 + i * 100),
-                volume=Decimal("1000.5"),
-                source="binance",
-            )
-            db_session.add(price_record)
-
-        db_session.commit()
-
-        models = train_all_models(db_session, window_days=5)
-
-        assert {m.name for m in models} == {"linear_v1", "lstm_v1", "xgboost_v1"}
 
 
 class TestNextVersionNumber:
