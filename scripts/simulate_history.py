@@ -2,7 +2,7 @@
 """
 Replay the daily job over past days so the dashboard has history to show.
 
-For every run date D of the range it does what the 07:00 UTC cron does on day D,
+For every run date D of the range it does what the daily cron (00:10 UTC) does on day D,
 using only the bars opened before D:
 
 1. Train the linear model on the stored daily rows (``workers.daily.trainer`` data
