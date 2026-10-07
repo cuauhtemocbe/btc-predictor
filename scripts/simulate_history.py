@@ -61,7 +61,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "linear_v1"
-PREDICTOR_HOUR_UTC = 7  # the daily cron runs at 07:00 UTC
+PREDICTOR_HOUR_UTC = 7  # hour stamped on replayed rows; the live cron runs at 00:10 UTC
 PRICE_QUANTUM = Decimal("0.01")
 DEFAULT_DAYS = 31
 

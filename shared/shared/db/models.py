@@ -1,12 +1,4 @@
-"""
-SQLAlchemy models for BTC Predictor.
-
-Models:
-- Price: Historical OHLCV price data, one series per asset symbol
-- Model: Trained ML models with versioning
-- Prediction: Daily price predictions with evaluation metrics
-- BacktestResult: Walk-forward backtesting simulation results
-"""
+"""SQLAlchemy tables: prices, models, predictions and backtest results."""
 
 import re
 from datetime import date, datetime
@@ -66,12 +58,10 @@ def is_replay_params(params: dict[str, Any] | None) -> bool:
 
 
 def model_family(name: str) -> str:
-    """
-    Model name without its trailing version suffix: "linear_v2" -> "linear".
+    """Model name without its trailing version suffix: ``linear_v2`` -> ``linear``.
 
-    The family is the "same model" scope of the one-active-version rule: the
-    trainers put the version in the name, so every version of a model has a
-    different name but the same family.
+    The family is the scope of the one-active-version rule: the trainers put the
+    version in the name, so every version of a model has its own name and one family.
     """
     return re.sub(VERSION_SUFFIX_PATTERN, "", name)
 
@@ -83,12 +73,9 @@ class Base(DeclarativeBase):
 
 
 class Price(Base):
-    """
-    Historical OHLCV (Open, High, Low, Close, Volume) price data per asset.
+    """Daily OHLCV bar of one asset, identified by ``symbol``.
 
-    Each row belongs to one asset, identified by ``symbol`` (e.g. 'BTCUSDT',
-    'PAXGUSDT'); a timestamp is unique per symbol, so several assets share the
-    table. Used for model training, evaluation, and historical analysis.
+    The timestamp is unique per symbol, so several assets share the table.
     """
 
     __tablename__ = "prices"
@@ -139,21 +126,14 @@ class Price(Base):
 
 
 class Model(Base):
-    """
-    Trained ML models with versioning and training metadata.
+    """Trained model with its serialized artifact, parameters and training period.
 
-    Stores serialized model artifacts (pickled scikit-learn models), training
-    parameters, and metadata. Supports model versioning and rollback.
-    Each model is trained for one asset (``symbol``); predictions get their
-    asset through ``model_id``. At most one active version per
-    (symbol, family, timeframe) is allowed at a time, enforced by the partial
-    unique index ix_models_one_active_version_per_name_timeframe -- not just
-    application logic. The family is the name without its ``_v<N>`` suffix
-    (see ``model_family``), so "linear_v1" and "linear_v2" are versions of
-    one model. Different families (e.g. "linear_v1" and "xgboost_v1") can be
-    active at the same time within the same timeframe; that's what powers
-    multi-model prediction mode (US-025). The same model name can be trained
-    once per asset.
+    Each model is trained for one asset (``symbol``); predictions get their asset
+    through ``model_id``. The partial unique index
+    ``ix_models_one_active_version_per_name_timeframe`` allows one active version per
+    (symbol, family, timeframe), so ``linear_v1`` and ``linear_v2`` (the family is the
+    name without ``_v<N>``, see ``model_family``) cannot both be active, whatever the
+    application code does. The same name can be trained once per asset.
     """
 
     __tablename__ = "models"
@@ -240,19 +220,13 @@ class Model(Base):
 
 
 class Prediction(Base):
-    """
-    Daily Bitcoin price predictions with evaluation metrics.
+    """Daily price prediction with its evaluation, in two phases.
 
-    Two-phase lifecycle:
-    1. Insert: Predictor job creates record with predicted_price,
-       evaluation fields NULL
-    2. Update: Evaluator job fills actual_price, errors,
-       direction_correct, pnl_simulated
+    1. The predictor inserts it with ``predicted_price`` and the evaluation fields NULL.
+    2. The evaluator fills ``actual_price``, the errors, the direction and the PnLs.
 
-    Tracks model accuracy, error rates, and simulated trading profitability.
-
-    Only the daily timeframe (1d) is allowed; the column is kept so the unique
-    constraint and the queries do not change.
+    Only ``1d`` is allowed; the column stays so the unique constraint and the queries
+    do not change.
     """
 
     __tablename__ = "predictions"
@@ -345,7 +319,6 @@ class Prediction(Base):
         comment="PnL with trading fees (0.1%) and stop-loss (2% max loss)",
     )
 
-    # Relationship to Model
     model: Mapped["Model"] = relationship("Model")
 
     def __repr__(self) -> str:
@@ -358,17 +331,9 @@ class Prediction(Base):
 
 
 class BacktestResult(Base):
-    """
-    Walk-forward backtesting simulation results.
+    """One predicted day of a walk-forward backtest.
 
-    Stores historical backtest predictions where each day:
-    1. Model is trained on rolling window of past data
-    2. Next day's price is predicted
-    3. Actual price is fetched
-    4. All 4 PnL strategies are calculated
-
-    Each backtest run has a unique backtest_run_id (UUID) to distinguish
-    different simulation runs.
+    Rows of one run share ``backtest_run_id``; the four PnLs are stored per row.
     """
 
     __tablename__ = "backtest_results"

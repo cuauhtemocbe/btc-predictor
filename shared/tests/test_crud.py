@@ -565,8 +565,8 @@ def test_activate_model_success(
 ) -> None:
     """
     Test that activate_model activates the target and deactivates the
-    previous active version of the SAME name -- but leaves a different-
-    named active model untouched (multi-model mode, US-025).
+    previous active version of the SAME family -- but leaves an active model of
+    a different family untouched.
     """
     # Two versions of "linear_v1", the first one currently active
     linear_v1 = Model(
@@ -618,7 +618,7 @@ def test_activate_model_success(
     db_session.refresh(linear_v1)
     assert linear_v1.is_active is False
 
-    # Verify the different-named model is still active (multi-model mode)
+    # Verify the different-named model is still active
     db_session.refresh(xgboost_v1)
     assert xgboost_v1.is_active is True
 
@@ -710,9 +710,8 @@ def test_activate_model_keeps_different_names_independently_active(
     db_session: Session, sample_model_artifact: bytes
 ) -> None:
     """
-    Activating models with different names accumulates active models --
-    this is what powers multi-model prediction mode (US-025). Only
-    activating a NEW VERSION of the SAME name replaces the previous one.
+    Activating models of different families accumulates active models; only a
+    NEW VERSION of the SAME family replaces the previous one.
     """
     # Create 4 models (all different types/names)
     models = []
