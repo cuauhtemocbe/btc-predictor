@@ -50,30 +50,19 @@ async def get_prediction_history(
     source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> list[PredictionHistoryResponse]:
-    """
-    Get historical predictions with evaluation metrics.
-
-    Returns only evaluated predictions (actual_price IS NOT NULL),
-    joined with model information, ordered by prediction date descending.
+    """Evaluated predictions with their model, newest ``predicted_for`` first.
 
     Args:
-        from_date: Optional start date filter (query param: ?from=2026-05-01)
-        to_date: Optional end date filter (query param: ?to=2026-05-15)
-        timeframe: Optional timeframe filter (query param: ?timeframe=1d)
-        symbol: Asset to show (query param: ?symbol=PAXGUSDT, default BTCUSDT)
-        source: Predictions to include (query param: ?source=live|replay|all,
-            default all). Each row carries ``is_replay`` either way.
-        db: Database session (injected)
+        from_date: Query ``from``, inclusive lower bound on ``predicted_for``.
+        to_date: Query ``to``, inclusive upper bound.
+        timeframe: Query ``timeframe`` filter.
+        symbol: Query ``symbol``; default BTCUSDT.
+        source: Query ``source``, ``live``, ``replay`` or ``all`` (default); each row
+            carries ``is_replay`` either way.
+        db: Database session (injected).
 
     Returns:
-        List of evaluated predictions with model info. Empty array if no data.
-
-    Examples:
-        - GET /api/predictions/history
-        - GET /api/predictions/history?from=2026-05-01
-        - GET /api/predictions/history?from=2026-05-01&to=2026-05-15
-        - GET /api/predictions/history?timeframe=1d&from=2026-05-01
-        - GET /api/predictions/history?source=live
+        The evaluated predictions; an empty list if there are none.
     """
     predictions = get_evaluated_predictions(
         session=db,
@@ -112,28 +101,17 @@ async def get_total_pnl(
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> PnlResponse:
-    """
-    Get total accumulated profit/loss across all evaluated predictions for
-    one timeframe.
+    """Total simulated PnL and count of evaluated predictions of one timeframe.
 
-    This endpoint aggregates the simulated PnL from all predictions that have
-    been evaluated (actual_price IS NOT NULL). Useful for assessing overall
-    model profitability. Defaults to DEFAULT_TIMEFRAME so PnL of different
-    timeframes is never silently summed into one misleading figure.
+    Defaults to ``DEFAULT_TIMEFRAME`` so timeframes are never summed into one figure.
 
     Args:
-        timeframe: Timeframe to aggregate (query param: ?timeframe=1d)
-        symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
-        db: Database session (injected)
+        timeframe: Query ``timeframe``.
+        symbol: Query ``symbol``; default BTCUSDT.
+        db: Database session (injected).
 
     Returns:
-        Aggregated PnL summary with total_pnl and evaluated_predictions count.
-        If no predictions have been evaluated yet, returns total_pnl=0 and
-        evaluated_predictions=0.
-
-    Examples:
-        - GET /api/predictions/pnl
-          Response: {"total_pnl": 12345.67, "evaluated_predictions": 30}
+        ``total_pnl`` and ``evaluated_predictions``, both 0 if nothing is evaluated.
     """
     # Query for SUM(pnl_simulated) and COUNT(*) where pnl_simulated IS NOT NULL
     result = (
@@ -166,45 +144,18 @@ async def get_strategies_comparison(
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> StrategiesResponse:
-    """
-    Get performance metrics for all trading strategies, for one timeframe.
+    """Metrics and cumulative PnL series of the four strategies for one timeframe.
 
-    Returns aggregate metrics (Total PnL, Win Rate, Sharpe Ratio, etc.) and
-    cumulative PnL time series for all 4 strategies: Simple, Long/Short,
-    Threshold, and Realistic. Defaults to DEFAULT_TIMEFRAME so results of
-    different timeframes are never silently combined.
+    The strategies are Simple, Long/Short, Threshold and Realistic. Defaults to
+    ``DEFAULT_TIMEFRAME`` so timeframes are never combined.
 
     Args:
-        timeframe: Timeframe to aggregate (query param: ?timeframe=1d)
-        symbol: Asset to aggregate (query param: ?symbol=PAXGUSDT, default BTCUSDT)
-        db: Database session (injected)
+        timeframe: Query ``timeframe``.
+        symbol: Query ``symbol``; default BTCUSDT.
+        db: Database session (injected).
 
     Returns:
-        Collection of strategy metrics with cumulative PnL time series.
-        If no predictions have been evaluated yet, returns all strategies
-        with zero metrics.
-
-    Examples:
-        - GET /api/predictions/strategies
-          Response: {
-              "strategies": [
-                  {
-                      "name": "simple",
-                      "display_name": "Simple",
-                      "color": "blue",
-                      "total_pnl": 1200.50,
-                      "win_rate": 0.63,
-                      "worst_trade_pct": -0.65,
-                      "max_drawdown_pct": -4.50,
-                      "avg_win": 220.30,
-                      "avg_loss": -180.50,
-                      "sharpe_ratio": 1.25,
-                      "trade_count": 30,
-                      "cumulative_pnl": [...]
-                  },
-                  ...
-              ]
-          }
+        The strategies, with zero metrics if nothing is evaluated.
     """
     strategies_data = get_all_strategies_metrics(db, timeframe=timeframe, symbol=symbol)
 

@@ -60,21 +60,12 @@ Coverage threshold check FAILED: 1 of 42 critical modules.
   exercises it, or fix the key in `pyproject.toml`.
 - New critical module: add its path with a minimum (largest multiple of 5 at least 2 points below the measured value).
 
-## Manual Execution
+## Manual execution
 
 ```bash
-# Run all pre-commit hooks manually
-pre-commit run --all-files
-
-# Run only pre-push hooks
-pre-commit run --hook-stage push --all-files
-
-# Run specific hook
-pre-commit run ruff --all-files
-pre-commit run pytest-docker --hook-stage push
-
-# Update hook versions
-pre-commit autoupdate
+pre-commit run --all-files                          # every pre-commit hook
+pre-commit run --hook-stage push --all-files        # the pre-push hooks
+pre-commit run ruff --all-files                     # one hook
 ```
 
 ## Troubleshooting: `No module named pre_commit`
@@ -117,49 +108,14 @@ GIT_SSH_COMMAND="ssh -o ServerAliveInterval=10 -o ServerAliveCountMax=60" git pu
 
 The hooks run again in full. Do not use `--no-verify`.
 
-## Bypass Hooks (use sparingly!)
+## Bypass hooks
 
-```bash
-# Skip pre-commit hooks
-git commit --no-verify
+`git commit --no-verify` and `git push --no-verify` skip the hooks (the first also skips the gitleaks scan). Use them only for WIP commits on a feature branch.
 
-# Skip pre-push hooks
-git push --no-verify
-```
-
-⚠️ **Warning:** Only bypass hooks when absolutely necessary (e.g., WIP commits on feature branch).
-
-## Troubleshooting
-
-### Hooks not running?
-```bash
-# Reinstall hooks
-pre-commit uninstall
-pre-commit install --install-hooks
-pre-commit install --hook-type pre-push
-```
-
-### Docker not starting?
-```bash
-# Manually start services
-docker compose up -d
-
-# Check services are healthy
-docker compose ps
-```
-
-### Update hook dependencies
-```bash
-# Update to latest versions
-pre-commit autoupdate
-
-# Clean cache and reinstall
-pre-commit clean
-pre-commit install --install-hooks
-```
+Other problems: if the hooks do not run, reinstall them (`pre-commit uninstall`, then the two `pre-commit install` commands of the quick setup); if the pre-push hook cannot reach Docker, run `docker compose up -d` and check `docker compose ps`; to refresh hook versions run `pre-commit autoupdate`, and `pre-commit clean` before reinstalling.
 
 ## Configuration
 
 Hooks are configured in `.pre-commit-config.yaml` at the repo root.
 
-See: https://pre-commit.com/ for full documentation.
+Documentation: <https://pre-commit.com/>.

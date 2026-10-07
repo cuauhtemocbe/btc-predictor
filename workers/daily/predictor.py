@@ -1,14 +1,11 @@
-"""
-Daily predictor job - predicts tomorrow's BTC price.
+"""Daily predictor job: predicts tomorrow's BTC price with the active model.
 
-This job:
-1. Loads the active ML model from the database
-2. Fetches the recent daily closes and volumes
-3. Builds the return features (shared.features) and predicts tomorrow's log return
-4. Stores the predicted price, ``last close * exp(predicted return)``, in the
-   database for later evaluation
+Loads the active model, builds the return features of the recent daily closes
+(``shared.features``) and stores ``last close * exp(predicted return)`` for the
+evaluator. Exits 1 and saves nothing on a stale or gapped series or an old price
+anchor (#174, #175).
 
-Entry point: python -m workers.daily.predictor
+Entry point: ``python -m workers.daily.predictor``, also run by ``workers.daily``.
 """
 
 import logging
@@ -37,7 +34,6 @@ from shared.features import (
 from shared.utils import utc_now, utc_today
 from workers.daily.models import BaseModel, LinearRegressionModel
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,18 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 def deserialize_model(model_record: Model) -> BaseModel:
-    """
-    Deserialize a model from its binary artifact.
-
-    Args:
-        model_record: Model database record with artifact bytes
-
-    Returns:
-        Deserialized BaseModel instance
+    """Rebuild a model from the artifact of its database record.
 
     Raises:
-        ValueError: If model type is unknown
-        RuntimeError: If deserialization fails
+        RuntimeError: If the name is unknown or deserialization fails.
     """
     try:
         if model_record.name.startswith("linear"):
@@ -71,21 +59,14 @@ def deserialize_model(model_record: Model) -> BaseModel:
 
 
 def get_active_model(session: Session) -> tuple[Model, BaseModel]:
-    """
-    Load the active daily (timeframe='1d') model from the database.
-
-    Scoped to timeframe='1d', the only timeframe the models table accepts. If
-    several models are active, the first one is used.
-
-    Args:
-        session: Database session
+    """Load the active ``1d`` model; the first one if several are active.
 
     Returns:
-        Tuple of (Model record, deserialized BaseModel instance)
+        The model record and its deserialized instance.
 
     Raises:
-        ValueError: If no active model found
-        RuntimeError: If deserialization fails
+        ValueError: If no model is active.
+        RuntimeError: If deserialization fails.
     """
     stmt = select(Model).where(
         Model.is_active == True,  # noqa: E712
@@ -106,25 +87,17 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
 def get_recent_series(
     session: Session, days: int, symbol: str = DEFAULT_SYMBOL
 ) -> DailySeries:
-    """
-    Fetch the most recent N DAYS of close prices and volumes of one symbol.
+    """Fetch the latest ``days`` daily closes and volumes of ``symbol``.
 
-    Uses date aggregation to get exactly one row per day (not per hour/4h).
-    Takes the latest row (its close and volume) for each day.
-
-    Args:
-        session: Database session
-        days: Number of DAYS to fetch
-        symbol: Asset whose prices are read (default BTCUSDT)
+    Takes the latest stored row of each day.
 
     Returns:
-        Bar dates, closes and volumes (oldest to newest). Freshness and gaps are
-        checked by the caller with ``require_fresh_series``.
+        Bar dates, closes and volumes, oldest to newest. The caller checks freshness
+        and gaps with ``require_fresh_series``.
 
     Raises:
-        ValueError: If insufficient historical data available
+        ValueError: If fewer than ``days`` days are stored.
     """
-    # Subquery: Get the latest timestamp for each day
     latest_per_day = (
         select(
             func.date_trunc("day", Price.timestamp).label("day"),
@@ -137,7 +110,6 @@ def get_recent_series(
         .subquery()
     )
 
-    # Main query: Join to get the close and volume for the latest timestamp each day
     stmt = (
         select(latest_per_day.c.day, Price.close, Price.volume)
         .join(
@@ -153,7 +125,6 @@ def get_recent_series(
     if len(rows) < days:
         raise ValueError(f"Insufficient data: need {days} days, have {len(rows)}")
 
-    # Reverse to get oldest to newest (chronological order)
     rows.reverse()
 
     logger.info(
@@ -169,14 +140,10 @@ def get_recent_series(
 
 
 def require_return_model(model_record: Model) -> None:
-    """
-    Reject a model that was not trained on log returns.
-
-    A model trained on price levels would have its output read as a return, so
-    the predictor refuses it until the trainer replaces it.
+    """Reject a model not trained on log returns, whose output would be misread.
 
     Raises:
-        ValueError: If the model's params do not mark a log-return target
+        ValueError: If ``params["target"]`` is not the log-return marker.
     """
     if model_record.params.get("target") != LOG_RETURN_TARGET:
         raise ValueError(
@@ -187,16 +154,9 @@ def require_return_model(model_record: Model) -> None:
 
 
 def prepare_features(series: DailySeries, window_days: int) -> npt.NDArray[np.float64]:
-    """
-    Build the return features of the most recent day for a single prediction.
+    """Features of the most recent day, shape (1, feature_count(window_days)).
 
-    Args:
-        series: Daily closes and volumes (oldest to newest), at least
-            window_days + 1 rows
-        window_days: Window the model was trained with
-
-    Returns:
-        Numpy array of shape (1, feature_count(window_days))
+    ``series`` needs at least ``window_days + 1`` rows.
     """
     return build_prediction_features(series.closes, series.volumes, window_days)
 
@@ -204,17 +164,7 @@ def prepare_features(series: DailySeries, window_days: int) -> npt.NDArray[np.fl
 def check_existing_prediction(
     session: Session, predicted_for: date, model_id: int | None = None
 ) -> bool:
-    """
-    Check if a prediction already exists for the given date and model.
-
-    Args:
-        session: Database session
-        predicted_for: Date to check
-        model_id: Model ID to check (optional, for idempotency per model)
-
-    Returns:
-        True if prediction exists, False otherwise
-    """
+    """True if a prediction exists for ``predicted_for``, of ``model_id`` if given."""
     stmt = select(Prediction).where(Prediction.predicted_for == predicted_for)
 
     if model_id is not None:
@@ -232,18 +182,11 @@ def save_prediction(
     current_price: Decimal,
     predicted_price: float,
 ) -> Prediction:
-    """
-    Save a new prediction to the database.
+    """Insert a prediction with its evaluation fields NULL (phase 1 of the lifecycle).
 
     Args:
-        session: Database session
-        model_id: ID of the model used for prediction
-        predicted_for: Date being predicted (tomorrow)
-        current_price: BTC price at prediction time
-        predicted_price: Predicted BTC price
-
-    Returns:
-        Created Prediction record
+        current_price: Price the prediction anchors on.
+        predicted_price: Predicted price for ``predicted_for``.
     """
     prediction = Prediction(
         model_id=model_id,
@@ -251,7 +194,6 @@ def save_prediction(
         predicted_at=datetime.now(UTC),
         price_at_prediction=current_price,
         predicted_price=Decimal(str(predicted_price)),
-        # Evaluation fields remain NULL until evaluator runs
         actual_price=None,
         evaluated_at=None,
         error_abs=None,
@@ -275,7 +217,7 @@ def save_prediction(
 
 @dataclass
 class PredictionOutcome:
-    """Results of one predictor run, one entry per model."""
+    """What one predictor run generated, skipped and failed, by model name."""
 
     generated: list[tuple[str, float]] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
@@ -291,15 +233,12 @@ def _predict_one(
     outcome: PredictionOutcome,
     now: datetime,
 ) -> None:
-    """
-    Generate and save the prediction of one model, unless it already exists.
+    """Generate and save the prediction of one model, unless it already exists.
 
-    Records the result in ``outcome`` (skipped or generated). Any error
-    propagates to the caller, which decides whether to continue.
+    Records the result in ``outcome``; errors propagate to the caller.
     """
     model_name = model_record.name
 
-    # Check if prediction already exists for this model (idempotency)
     if check_existing_prediction(session, tomorrow, model_id=model_record.id):
         logger.info(
             f"Prediction for {tomorrow} from {model_name} already exists, skipping"
@@ -307,13 +246,11 @@ def _predict_one(
         outcome.skipped.append(model_name)
         return
 
-    # Get window_days from model params
     window_days = model_record.params.get("window_days", 30)
     logger.info(f"{model_name} requires {window_days} days of historical data")
 
     require_return_model(model_record)
 
-    # Fetch recent prices (window_days returns need window_days + 1 closes)
     series = get_recent_series(session, required_history_days(window_days))
 
     # Refuse a stale series or one with gaps: no prediction is saved (#174)
@@ -324,7 +261,6 @@ def _predict_one(
         series.dates[-1], now, timedelta(hours=settings.max_bar_age_hours)
     )
 
-    # Prepare features
     X = prepare_features(series, window_days)
 
     # The model predicts tomorrow's log return; the price follows from it
@@ -335,7 +271,6 @@ def _predict_one(
         f"price: ${predicted_price:.2f}"
     )
 
-    # Save prediction
     save_prediction(
         session=session,
         model_id=model_record.id,
@@ -356,11 +291,9 @@ def _predict_single_model(
     outcome: PredictionOutcome,
     now: datetime,
 ) -> None:
-    """
-    Predict with the active model and fail immediately.
+    """Predict with the active model; log, record and re-raise any failure.
 
-    A failure is logged, recorded in ``outcome`` and re-raised so ``main``
-    turns it into a non-zero exit code.
+    ``main`` turns the re-raised error into a non-zero exit code.
     """
     try:
         _predict_one(
@@ -397,8 +330,7 @@ def _log_prediction_summary(tomorrow: date, outcome: PredictionOutcome) -> None:
 
 
 def _exit_code(outcome: PredictionOutcome) -> int:
-    """Exit code of the run: 0 if anything was generated or already existed."""
-    # Success if at least one prediction was generated
+    """0 if a prediction was generated or already existed, else 1."""
     if outcome.generated:
         logger.info(
             f"Predictor job completed successfully: "
@@ -406,45 +338,39 @@ def _exit_code(outcome: PredictionOutcome) -> int:
         )
         return 0
     if outcome.skipped:
-        # All predictions already existed (idempotent re-run)
         logger.info(
             "Predictor job completed: all predictions already existed (idempotent)"
         )
         return 0
 
-    # No predictions generated and none skipped = all failed
     logger.error("Predictor job failed: no predictions generated")
     return 1
 
 
 def main(session: Session | None = None, now: datetime | None = None) -> int:
-    """
-    Main entry point for the predictor job.
+    """Run the predictor job.
 
     Args:
-        session: Optional database session (for testing). If None, creates new session.
-        now: Optional clock (for testing). If None, the current UTC instant. The
-            last closed bar must be at most ``max_bar_age_hours`` old (#175).
+        session: Database session; tests pass one, otherwise a new one is opened.
+        now: Clock; tests pass one. The last closed bar must be at most
+            ``max_bar_age_hours`` old (#175).
 
     Returns:
-        Exit code (0 = success, 1 = failure)
+        Exit code, 0 on success and 1 on failure.
     """
     logger.info("Starting daily predictor job")
 
-    # Use provided session or create new one
     session_provided = session is not None
     if session is None:
         session = SessionLocal()
 
     try:
-        # Calculate tomorrow's date
         run_at = now if now is not None else utc_now()
         tomorrow = utc_today() + timedelta(days=1)
         logger.info(f"Predicting for date: {tomorrow}")
 
         model_record, model_instance = get_active_model(session)
 
-        # Get the current price
         current_price_stmt = (
             select(Price.close)
             .where(Price.symbol == DEFAULT_SYMBOL)
@@ -480,7 +406,6 @@ def main(session: Session | None = None, now: datetime | None = None) -> int:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         return 1
     finally:
-        # Only close session if we created it
         if not session_provided:
             session.close()
 

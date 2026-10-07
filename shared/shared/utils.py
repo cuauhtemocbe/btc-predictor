@@ -1,18 +1,4 @@
-"""
-Utility functions for BTC Predictor.
-
-Functions:
-- utc_now: Current instant in UTC, the clock of the freshness guard
-- utc_today: Current calendar date in UTC, the day boundary of the whole pipeline
-- calculate_pnl: Calculate simulated profit/loss from prediction strategy
-- calculate_pnl_long_short: Calculate PnL with long/short symmetric strategy
-- calculate_pnl_threshold: Calculate PnL with threshold filter
-- calculate_pnl_realistic: Calculate PnL with trading fees and stop-loss
-
-Model Metrics Functions (for dashboard):
-- get_all_models_metrics: Metrics per model family (all versions), fixed query count
-- get_family_cumulative_pnl: Cumulative PnL series per model family, in one query
-"""
+"""Day boundary, simulated-PnL strategies and per-family model metrics."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -29,10 +15,7 @@ from shared.db.models import Model, Prediction, PredictionSource, model_family
 from shared.model_baselines import BASELINE_TIMEFRAME, baseline_for_predictions
 from shared.returns import max_drawdown_pct, returns_from_pnl, sharpe_ratio
 
-# Prediction.timeframe values, and the one used when a caller doesn't name
-# one explicitly. Applied consistently across every metric function below
-# and every API endpoint that doesn't require an explicit timeframe query
-# param -- see issue #67.
+# Prediction.timeframe values and the default for callers that name none (#67).
 SUPPORTED_TIMEFRAMES = ("1d",)
 DEFAULT_TIMEFRAME = "1d"
 
@@ -61,40 +44,16 @@ def calculate_pnl(
     price_at_prediction: Decimal,
     actual_price: Decimal,
 ) -> Decimal:
-    """
-    Calculate simulated profit/loss (PnL) from a prediction-based trading strategy.
-
-    Strategy:
-    - If predicted_price > price_at_prediction (predicted UP):
-      → Go long 1 BTC at price_at_prediction
-      → PnL = actual_price - price_at_prediction
-    - Else (predicted DOWN or flat):
-      → Stay in cash (no trade)
-      → PnL = 0
+    """Long-only PnL in USDT of 1 unit: long if predicted UP, else cash (PnL 0).
 
     Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-
-    Returns:
-        Simulated PnL in USDT (positive = profit, negative = loss, 0 = no trade)
-
-    Examples:
-        >>> calculate_pnl(Decimal("67000"), Decimal("66000"), Decimal("67500"))
-        Decimal('1500.00')  # Predicted UP, actual UP → profit
-
-        >>> calculate_pnl(Decimal("67000"), Decimal("66000"), Decimal("65000"))
-        Decimal('-1000.00')  # Predicted UP, actual DOWN → loss
-
-        >>> calculate_pnl(Decimal("65000"), Decimal("66000"), Decimal("64000"))
-        Decimal('0.00')  # Predicted DOWN → no trade
+        predicted_price: Predicted price.
+        price_at_prediction: Price when the prediction was made (the entry).
+        actual_price: Price at evaluation time (the exit).
     """
-    # If predicted UP (prediction higher than current), go long
     if predicted_price > price_at_prediction:
         pnl = actual_price - price_at_prediction
     else:
-        # Predicted DOWN or flat → stay in cash
         pnl = Decimal("0.00")
 
     return pnl
@@ -105,32 +64,13 @@ def calculate_pnl_long_short(
     price_at_prediction: Decimal,
     actual_price: Decimal,
 ) -> Decimal:
-    """
-    Calculate PnL from long/short symmetric trading strategy.
+    """Long/short PnL in USDT of 1 unit: long if predicted UP, else short.
 
-    Strategy:
-    - If predicted_price > price_at_prediction (predicted UP):
-      → Go long 1 BTC at price_at_prediction
-      → PnL = actual_price - price_at_prediction
-    - Else (predicted DOWN):
-      → Go short 1 BTC at price_at_prediction
-      → PnL = price_at_prediction - actual_price
-
-    This strategy profits from correct predictions in BOTH directions.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-
-    Returns:
-        PnL in USDT (positive = profit, negative = loss)
+    Args: same as ``calculate_pnl``.
     """
     if predicted_price > price_at_prediction:
-        # Long position
         pnl = actual_price - price_at_prediction
     else:
-        # Short position
         pnl = price_at_prediction - actual_price
 
     return pnl
@@ -142,35 +82,18 @@ def calculate_pnl_threshold(
     actual_price: Decimal,
     threshold: Decimal = Decimal("1.0"),
 ) -> Decimal:
+    """Long/short PnL, but 0 when the predicted change is under ``threshold`` %.
+
+    Args: same as ``calculate_pnl``, plus ``threshold``, the minimum absolute
+        predicted change in percent that triggers a trade.
     """
-    Calculate PnL with threshold filter: only trade if predicted change > threshold %.
-
-    Strategy:
-    - Calculate predicted change percentage
-    - If abs(change) < threshold → no trade, PnL = 0
-    - Else → apply long/short symmetric strategy
-
-    This avoids trading on weak signals and reduces transaction costs.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-        threshold: Minimum predicted change % to trigger trade (default 1.0%)
-
-    Returns:
-        PnL in USDT (positive = profit, negative = loss, 0 = no trade)
-    """
-    # Calculate predicted change percentage
     change_pct = abs(
         (predicted_price - price_at_prediction) / price_at_prediction * 100
     )
 
-    # If change below threshold, no trade
     if change_pct < threshold:
         return Decimal("0.00")
 
-    # Otherwise, use long/short symmetric strategy
     return calculate_pnl_long_short(predicted_price, price_at_prediction, actual_price)
 
 
@@ -181,50 +104,28 @@ def calculate_pnl_realistic(
     fee_pct: Decimal = Decimal("0.1"),
     stop_loss_pct: Decimal = Decimal("2.0"),
 ) -> Decimal:
+    """Long/short PnL after fees, with the gross loss capped by a stop-loss.
+
+    Fees are ``fee_pct`` of ``price_at_prediction`` on entry and on exit; the
+    gross loss is capped at ``stop_loss_pct`` of ``price_at_prediction``.
+
+    Args: same as ``calculate_pnl``, plus ``fee_pct`` (per trade, percent) and
+        ``stop_loss_pct`` (percent).
     """
-    Calculate PnL with realistic trading conditions: fees and stop-loss.
-
-    Strategy:
-    - Apply long/short symmetric strategy
-    - Deduct trading fees: fee_pct * price_at_prediction * 2 (entry + exit)
-    - Apply stop-loss: cap loss at stop_loss_pct * price_at_prediction
-
-    This simulates real trading with transaction costs and risk management.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-        fee_pct: Trading fee percentage per trade (default 0.1%)
-        stop_loss_pct: Maximum loss percentage before stop-loss triggers (default 2%)
-
-    Returns:
-        PnL in USDT after fees and stop-loss (positive = profit, negative = loss)
-    """
-    # Calculate gross PnL using long/short symmetric strategy
     gross_pnl = calculate_pnl_long_short(
         predicted_price, price_at_prediction, actual_price
     )
 
-    # Calculate trading fees (entry + exit = 2 trades)
     fees = price_at_prediction * (fee_pct / 100) * 2
 
-    # Calculate maximum loss (stop-loss limit)
     max_loss = price_at_prediction * (stop_loss_pct / 100)
 
-    # Apply stop-loss: cap gross loss at max_loss
     if gross_pnl < -max_loss:
         gross_pnl = -max_loss
 
-    # Net PnL after fees
     net_pnl = gross_pnl - fees
 
     return net_pnl
-
-
-# ============================================================================
-# Model Metrics Functions for Dashboard
-# ============================================================================
 
 
 def _round_or_none(value: float | None, digits: int) -> float | None:
@@ -267,13 +168,11 @@ def _load_families(
     symbol: str | None,
     source: PredictionSource,
 ) -> list[_Family]:
-    """
-    Group the models by (symbol, family, timeframe) with their evaluated predictions.
+    """Group the models by (symbol, family, timeframe) with their evaluated predictions.
 
-    Always two queries (the models, then every evaluated prediction of those
-    models), however many model rows exist: the trainer saves one per day (#178).
-    Families come back ordered by symbol and name; predictions by ``predicted_for``
-    (then id), across every version of the family.
+    Two queries however many model rows exist: the trainer saves one per day
+    (#178). Families are ordered by symbol and name; predictions by
+    ``predicted_for`` then id, across every version of the family.
     """
 
     families: dict[tuple[str, str, str], _Family] = {}
@@ -310,12 +209,10 @@ def _load_families(
 def _family_metrics(
     predictions: Sequence[Prediction], pnl_column: str
 ) -> dict[str, float | None]:
-    """
-    Raw (unrounded) performance metrics over the predictions of one family.
+    """Unrounded metrics over the evaluated predictions of one family.
 
-    ``predictions`` are evaluated and in ``predicted_for`` order, so the Sharpe
-    ratio and the drawdown run over the whole history of the family, across its
-    versions. Every metric is None when there are no predictions.
+    ``predictions`` must be in ``predicted_for`` order: Sharpe ratio and drawdown
+    run over the whole history of the family. Every metric is None without predictions.
     """
     pnls = [getattr(p, pnl_column) for p in predictions]
     valid_pnls = [float(pnl) for pnl in pnls if pnl is not None]
@@ -365,13 +262,12 @@ def get_family_cumulative_pnl(
     symbol: str | None = None,
     source: PredictionSource = PredictionSource.ALL,
 ) -> dict[str, list[dict[str, Any]]]:
-    """
-    Cumulative PnL series of every model family, keyed by family name.
+    """Cumulative PnL series per model family, keyed by family name.
 
-    Same filters and the same days as ``get_all_models_metrics``; each series
-    runs over all the versions of the family in ``predicted_for`` order. Two
-    queries in total, however many model rows exist. With no ``symbol`` two assets
-    that share a family name collapse into one key, so callers pass one.
+    Same filters and days as ``get_all_models_metrics``; each series covers all
+    versions of the family in ``predicted_for`` order, in two queries. Without
+    ``symbol``, two assets sharing a family name collapse into one key, so callers
+    pass one.
     """
     series: dict[str, list[dict[str, Any]]] = {}
     for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
@@ -399,67 +295,33 @@ def get_all_models_metrics(
     symbol: str | None = None,
     source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
-    """
-    Get performance metrics per model family, one row per (symbol, family, timeframe).
+    """Performance metrics per model family, one row per (symbol, family, timeframe).
 
-    The trainer saves a new model row (``linear_v<N>``) every run and each one makes
-    a handful of predictions, so a metric per row means nothing (#178). A row here
-    covers every version of the family: counts, accuracy, MAPE, PnL, win rate,
-    Sharpe ratio, drawdown and baselines run over all their evaluated predictions
-    together, in ``predicted_for`` order. Every model row stays in the database
-    with its version and ``train_to``; the family row summarizes them.
-
-    The number of queries does not depend on how many model rows exist: two to
-    load the models and predictions (``_load_families``) plus one prices query per
-    family for the baselines.
+    The trainer saves a new row (``linear_v<N>``) every run and each makes a handful
+    of predictions, so a metric per row means nothing (#178). A family row pools
+    all its versions' evaluated predictions in ``predicted_for`` order; every model
+    row stays in the database. Queries: two (``_load_families``) plus one prices
+    query per family for the baselines.
 
     Args:
-        db: Database session
-        start_date: Optional start date filter for metrics calculation
-        end_date: Optional end date filter for metrics calculation
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1d'). If None,
-            every timeframe is mixed together for every metric below.
-        symbol: Optional asset filter; only models trained for it are returned.
-        source: ``live``, ``replay`` or ``all`` (default); only the models, and
-            the predictions of the models, of that source count (replay = trained
-            by ``simulate_history``).
+        db: Database session.
+        start_date: Optional lower bound on ``predicted_for``.
+        end_date: Optional upper bound on ``predicted_for``.
+        pnl_column: PnL column to use.
+        timeframe: Optional filter; ``None`` mixes every timeframe.
+        symbol: Optional asset filter.
+        source: ``live``, ``replay`` or ``all``; filters the models and so their
+            predictions (replay = trained by ``simulate_history``).
 
     Returns:
-        List of dictionaries, ordered by symbol and family name, with structure:
-        {
-            "id": int,  # the active version, else the newest one
-            "name": str,  # the family: "linear" for linear_v1, linear_v2, ...
-            "version": str,  # version string of the model in "id"
-            "is_active": bool,  # any version is active
-            "trained_at": datetime,  # latest training of the family
-            "versions_count": int,
-            "first_train_to": date,  # earliest ``train_to`` among the versions
-            "last_train_to": date,  # latest ``train_to`` among the versions
-            "predictions_count": int,
-            "accuracy": float | None,
-            "avg_error_pct": float | None,
-            "total_pnl": float | None,
-            "win_rate": float | None,
-            "sharpe_ratio": float | None,
-            "max_drawdown_pct": float | None,
-            "symbol": str,
-            "is_replay": bool,  # every version is simulated (history replay)
-            "baseline": dict | None,  # see baseline_for_predictions (daily only)
-        }
-
-    Examples:
-        >>> get_all_models_metrics(db)
-        [
-            {
-                "id": 7,
-                "name": "linear",
-                "versions_count": 40,
-                "predictions_count": 40,
-                "accuracy": 0.65,
-                ...
-            },
-        ]
+        One dict per family, ordered by symbol and name. ``id`` and ``version``
+        are those of the active version, else the newest; ``is_active`` is true if
+        any version is; ``is_replay`` if every version is; ``baseline`` is None
+        unless ``timeframe`` is the baseline one (see ``baseline_for_predictions``).
+        The remaining keys are ``name``, ``trained_at``, ``versions_count``,
+        ``first_train_to``, ``last_train_to``, ``predictions_count``, ``accuracy``,
+        ``avg_error_pct``, ``total_pnl``, ``win_rate``, ``sharpe_ratio``,
+        ``max_drawdown_pct`` and ``symbol``.
     """
     results = []
     for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
