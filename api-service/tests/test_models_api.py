@@ -286,7 +286,7 @@ async def test_models_dashboard_highlights_best_model(
 
     Given the models have different Total PnL
     When I view the comparison table
-    Then the lstm_v1 row is highlighted (green background)
+    Then the lstm family row is highlighted (green background)
     And there is a badge "🏆 Best Return" next to it
     """
     # Act
@@ -301,7 +301,7 @@ async def test_models_dashboard_highlights_best_model(
 
     # Verify the best model is lstm_v1 (highest total PnL: $220)
     model_name_cell = find_tag(best_row, "span", class_="model-name")
-    assert "lstm_v1" in model_name_cell.text
+    assert "lstm" in model_name_cell.text
 
     # Verify the "🏆 Best Return" badge exists
     badges = best_row.find_all("span", class_="badge")
@@ -511,7 +511,7 @@ async def test_models_metrics_calculates_correctly(
     data = response.json()
 
     # Find lstm_v1
-    lstm = next(m for m in data["models"] if m["name"] == "lstm_v1")
+    lstm = next(m for m in data["models"] if m["name"] == "lstm")
 
     # Verify metrics
     assert lstm["predictions_count"] == 3

@@ -74,6 +74,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A day with no positive `price_at_prediction` has no return and is left out of the
     risk figures; with fewer than 2 returns, or returns that do not vary, the Sharpe
     ratio is undefined (N/A in the models table, 0.00 in the strategies tables).
+- The models page and `/models/metrics` show one row per model family, not one per
+  model row (#178). The trainer saves a new `linear_v<N>` row every day and each made
+  one prediction, so per-row accuracy was 0% or 100%, the Sharpe ratio needed 2 points
+  and the page ran 11 queries per row (about 4,400 queries and 3.7 s at 365 rows; now
+  6 queries, whatever the number of rows). A row is now one (symbol, family,
+  timeframe), family being the name without `_v<N>` (`model_family`): counts,
+  accuracy, MAPE, PnL, win rate, Sharpe, drawdown and baselines cover the predictions
+  of all its versions in `predicted_for` order. Every model row stays in the database
+  with its version and `train_to`; nothing is deleted and there is no migration.
+  - `/models/metrics` `models[]`: `name` is the family (`linear`, not `linear_v1`);
+    `id` and `version` are those of the active version, else the newest;
+    `is_active` is true when any version is active; `trained_at` is the latest
+    training; `is_replay` is true only when every version of the row is simulated.
+    New fields: `versions_count`, `first_train_to`, `last_train_to`. `daily_pnl` is
+    keyed by family name and runs over all its versions.
+  - `source=live|replay|all` filters the versions and the predictions that make up
+    each row, so a replay version counts in the row only under `replay` or `all`.
+  - The page shows the number of versions and their `train_to` range under the name.
 - The predictor now runs right after the daily close (#175): `fetch-price` at 00:05 UTC
   (`5 0 * * *`) and `daily` at 00:10 UTC (`10 0 * * *`) instead of 06:00 and 07:00. The
   prediction used to be saved 7 hours after the close it is anchored to, so the recorded

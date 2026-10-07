@@ -17,18 +17,23 @@ Model Metrics Functions (for dashboard):
 - calculate_sharpe_ratio: Annualized Sharpe ratio of a model's returns
 - calculate_max_drawdown_pct: Max drawdown of a model's compounded equity curve, in %
 - get_cumulative_pnl: Get daily cumulative PnL time series for a model
-- get_all_models_metrics: Get metrics for all models in one call
+- get_all_models_metrics: Metrics per model family (all versions), fixed query count
+- get_family_cumulative_pnl: Cumulative PnL series per model family, in one query
 """
 
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
 import numpy as np
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, func, select
+from sqlalchemy.orm import Session, defer
 
-from shared.db.models import PredictionSource
+from shared.db.crud import source_filter
+from shared.db.models import Model, Prediction, PredictionSource, model_family
+from shared.model_baselines import BASELINE_TIMEFRAME, baseline_for_predictions
 from shared.returns import max_drawdown_pct, returns_from_pnl, sharpe_ratio
 
 # Prediction.timeframe values, and the one used when a caller doesn't name
@@ -258,7 +263,6 @@ def calculate_accuracy(
         >>> calculate_accuracy(db, model_id=1, timeframe="1d")
         0.65  # 65% accuracy
     """
-    from shared.db.models import Prediction
 
     # Base query: only evaluated predictions (actual_price IS NOT NULL)
     query = db.query(Prediction).filter(
@@ -311,7 +315,6 @@ def calculate_model_mape(
         >>> calculate_model_mape(db, model_id=1, timeframe="1d")
         2.5  # 2.5% average error
     """
-    from shared.db.models import Prediction
 
     # Base query: only evaluated predictions
     query = db.query(Prediction).filter(
@@ -374,7 +377,6 @@ def calculate_total_pnl(
         >>> calculate_total_pnl(db, model_id=1, timeframe="1d")
         1200.50  # Total profit of $1,200.50
     """
-    from shared.db.models import Prediction
 
     # Base query
     query = db.query(func.sum(getattr(Prediction, pnl_column))).filter(
@@ -426,7 +428,6 @@ def calculate_win_rate(
         >>> calculate_win_rate(db, model_id=1, timeframe="1d")
         0.60  # 60% win rate
     """
-    from shared.db.models import Prediction
 
     # Base query
     query = db.query(Prediction).filter(
@@ -479,7 +480,6 @@ def get_model_returns(
     Returns:
         Returns as fractions (-0.05 for -5%); empty when there is no data.
     """
-    from shared.db.models import Prediction
 
     query = db.query(getattr(Prediction, pnl_column), Prediction.price_at_prediction)
     query = query.filter(
@@ -607,7 +607,6 @@ def get_cumulative_pnl(
             ...
         ]
     """
-    from shared.db.models import Prediction
 
     # Base query
     query = db.query(Prediction).filter(
@@ -647,69 +646,115 @@ def _round_or_none(value: float | None, digits: int) -> float | None:
     return round(value, digits) if value is not None else None
 
 
-def _count_evaluated_predictions(
+@dataclass
+class _Family:
+    """Versions of one model family for one asset and timeframe, and their days."""
+
+    symbol: str
+    name: str
+    timeframe: str
+    models: list[Model] = field(default_factory=list)
+    predictions: list[Prediction] = field(default_factory=list)
+
+    @property
+    def representative(self) -> Model:
+        """The active version, else the newest one (by ``trained_at``, then id)."""
+        active = [m for m in self.models if m.is_active]
+        return max(active or self.models, key=lambda m: (m.trained_at, m.id))
+
+
+def _model_conditions(
+    symbol: str | None, source: PredictionSource
+) -> list[ColumnElement[bool]]:
+    """WHERE conditions on ``models`` selecting one asset (if given) and source."""
+    conditions = [source_filter(source)]
+    if symbol:
+        conditions.append(Model.symbol == symbol)
+    return conditions
+
+
+def _load_families(
     db: Session,
-    model_id: int,
     start_date: date | None,
     end_date: date | None,
     timeframe: str | None,
-) -> int:
-    """Count the evaluated predictions of a model within the given filters."""
-    from shared.db.models import Prediction
+    symbol: str | None,
+    source: PredictionSource,
+) -> list[_Family]:
+    """
+    Group the models by (symbol, family, timeframe) with their evaluated predictions.
 
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
+    Always two queries (the models, then every evaluated prediction of those
+    models), however many model rows exist: the trainer saves one per day (#178).
+    Families come back ordered by symbol and name; predictions by ``predicted_for``
+    (then id), across every version of the family.
+    """
 
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
+    families: dict[tuple[str, str, str], _Family] = {}
+    family_of_model: dict[int, _Family] = {}
+    conditions = _model_conditions(symbol, source)
+    models_query = select(Model).options(defer(Model.artifact)).where(*conditions)
+    for model in db.execute(models_query).scalars():
+        name = model_family(model.name)
+        key = (model.symbol, name, model.timeframe)
+        family = families.setdefault(key, _Family(model.symbol, name, model.timeframe))
+        family.models.append(model)
+        family_of_model[model.id] = family
 
-    return query.count()
+    if family_of_model:
+        query = (
+            select(Prediction)
+            .join(Model, Prediction.model_id == Model.id)
+            .where(Prediction.actual_price.isnot(None))
+            .where(*conditions)
+            .order_by(Prediction.predicted_for, Prediction.id)
+        )
+        if start_date:
+            query = query.where(Prediction.predicted_for >= start_date)
+        if end_date:
+            query = query.where(Prediction.predicted_for <= end_date)
+        if timeframe:
+            query = query.where(Prediction.timeframe == timeframe)
+        for prediction in db.execute(query).scalars():
+            family_of_model[prediction.model_id].predictions.append(prediction)
+
+    return [families[key] for key in sorted(families)]
 
 
-def _calculate_model_metrics(
-    db: Session,
-    model_id: int,
-    predictions_count: int,
-    start_date: date | None,
-    end_date: date | None,
-    pnl_column: str,
-    timeframe: str | None,
+def _family_metrics(
+    predictions: Sequence[Prediction], pnl_column: str
 ) -> dict[str, float | None]:
     """
-    Calculate the raw (unrounded) performance metrics of one model.
+    Raw (unrounded) performance metrics over the predictions of one family.
 
-    Every metric is None when the model has no evaluated predictions.
+    ``predictions`` are evaluated and in ``predicted_for`` order, so the Sharpe
+    ratio and the drawdown run over the whole history of the family, across its
+    versions. Every metric is None when there are no predictions.
     """
-    if predictions_count <= 0:
-        return {
-            "accuracy": None,
-            "mape": None,
-            "total_pnl": None,
-            "win_rate": None,
-            "sharpe": None,
-            "max_dd_pct": None,
-        }
-
+    pnls = [getattr(p, pnl_column) for p in predictions]
+    valid_pnls = [float(pnl) for pnl in pnls if pnl is not None]
+    errors = [
+        abs(float((p.actual_price - p.predicted_price) / p.actual_price))
+        for p in predictions
+        if p.actual_price
+    ]
+    returns = returns_from_pnl(
+        (pnl, p.price_at_prediction) for pnl, p in zip(pnls, predictions, strict=True)
+    )
+    count = len(predictions)
     return {
-        "accuracy": calculate_accuracy(db, model_id, start_date, end_date, timeframe),
-        "mape": calculate_model_mape(db, model_id, start_date, end_date, timeframe),
-        "total_pnl": calculate_total_pnl(
-            db, model_id, start_date, end_date, pnl_column, timeframe
+        "accuracy": (
+            sum(p.direction_correct is True for p in predictions) / count
+            if count
+            else None
         ),
-        "win_rate": calculate_win_rate(
-            db, model_id, start_date, end_date, pnl_column, timeframe
+        "mape": float(np.mean(errors)) * 100 if errors else None,
+        "total_pnl": sum(valid_pnls) if valid_pnls else None,
+        "win_rate": (
+            sum(pnl is not None and pnl > 0 for pnl in pnls) / count if count else None
         ),
-        "sharpe": calculate_sharpe_ratio(
-            db, model_id, start_date, end_date, pnl_column, timeframe=timeframe
-        ),
-        "max_dd_pct": calculate_max_drawdown_pct(
-            db, model_id, start_date, end_date, pnl_column, timeframe
-        ),
+        "sharpe": sharpe_ratio(returns),
+        "max_dd_pct": max_drawdown_pct(returns),
     }
 
 
@@ -725,6 +770,40 @@ def _round_model_metrics(metrics: dict[str, float | None]) -> dict[str, float | 
     }
 
 
+def get_family_cumulative_pnl(
+    db: Session,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    pnl_column: str = "pnl_simulated",
+    timeframe: str | None = None,
+    symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Cumulative PnL series of every model family, keyed by family name.
+
+    Same filters and the same days as ``get_all_models_metrics``; each series
+    runs over all the versions of the family in ``predicted_for`` order. Two
+    queries in total, however many model rows exist. With no ``symbol`` two assets
+    that share a family name collapse into one key, so callers pass one.
+    """
+    series: dict[str, list[dict[str, Any]]] = {}
+    for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
+        cumsum = 0.0
+        points = series.setdefault(family.name, [])
+        for prediction in family.predictions:
+            pnl = getattr(prediction, pnl_column)
+            if pnl is not None:
+                cumsum += float(pnl)
+                points.append(
+                    {
+                        "date": prediction.predicted_for.isoformat(),
+                        "cumulative_pnl": round(cumsum, 2),
+                    }
+                )
+    return series
+
+
 def get_all_models_metrics(
     db: Session,
     start_date: date | None = None,
@@ -735,9 +814,18 @@ def get_all_models_metrics(
     source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
     """
-    Get performance metrics for all models in one call.
+    Get performance metrics per model family, one row per (symbol, family, timeframe).
 
-    Returns list of dictionaries with model metadata and calculated metrics.
+    The trainer saves a new model row (``linear_v<N>``) every run and each one makes
+    a handful of predictions, so a metric per row means nothing (#178). A row here
+    covers every version of the family: counts, accuracy, MAPE, PnL, win rate,
+    Sharpe ratio, drawdown and baselines run over all their evaluated predictions
+    together, in ``predicted_for`` order. Every model row stays in the database
+    with its version and ``train_to``; the family row summarizes them.
+
+    The number of queries does not depend on how many model rows exist: two to
+    load the models and predictions (``_load_families``) plus one prices query per
+    family for the baselines.
 
     Args:
         db: Database session
@@ -747,17 +835,21 @@ def get_all_models_metrics(
         timeframe: Optional timeframe filter ('1d'). If None,
             every timeframe is mixed together for every metric below.
         symbol: Optional asset filter; only models trained for it are returned.
-        source: ``live``, ``replay`` or ``all`` (default); only models of that
-            source are returned (replay = trained by ``simulate_history``).
+        source: ``live``, ``replay`` or ``all`` (default); only the models, and
+            the predictions of the models, of that source count (replay = trained
+            by ``simulate_history``).
 
     Returns:
-        List of dictionaries with structure:
+        List of dictionaries, ordered by symbol and family name, with structure:
         {
-            "id": int,
-            "name": str,
-            "version": str,
-            "is_active": bool,
-            "trained_at": datetime,
+            "id": int,  # the active version, else the newest one
+            "name": str,  # the family: "linear" for linear_v1, linear_v2, ...
+            "version": str,  # version string of the model in "id"
+            "is_active": bool,  # any version is active
+            "trained_at": datetime,  # latest training of the family
+            "versions_count": int,
+            "first_train_to": date,  # earliest ``train_to`` among the versions
+            "last_train_to": date,  # latest ``train_to`` among the versions
             "predictions_count": int,
             "accuracy": float | None,
             "avg_error_pct": float | None,
@@ -766,7 +858,7 @@ def get_all_models_metrics(
             "sharpe_ratio": float | None,
             "max_drawdown_pct": float | None,
             "symbol": str,
-            "is_replay": bool,  # simulated model (history replay), not live
+            "is_replay": bool,  # every version is simulated (history replay)
             "baseline": dict | None,  # see get_model_baseline (daily only)
         }
 
@@ -774,54 +866,36 @@ def get_all_models_metrics(
         >>> get_all_models_metrics(db)
         [
             {
-                "id": 1,
-                "name": "linear_v1",
-                "version": "1.0.0",
+                "id": 7,
+                "name": "linear",
+                "versions_count": 40,
+                "predictions_count": 40,
                 "accuracy": 0.65,
-                "total_pnl": 1200.50,
                 ...
             },
-            ...
         ]
     """
-    from shared.db.crud import source_filter
-    from shared.db.models import Model
-    from shared.model_baselines import get_model_baseline
-
-    # Get all models (of one asset when a symbol is given)
-    model_query = db.query(Model)
-    if symbol:
-        model_query = model_query.filter(Model.symbol == symbol)
-    models = model_query.filter(source_filter(source)).all()
-
     results = []
-    for model in models:
-        predictions_count = _count_evaluated_predictions(
-            db, model.id, start_date, end_date, timeframe
-        )
-        metrics = _calculate_model_metrics(
-            db,
-            model.id,
-            predictions_count,
-            start_date,
-            end_date,
-            pnl_column,
-            timeframe,
-        )
-
+    for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
+        model = family.representative
         results.append(
             {
                 "id": model.id,
-                "name": model.name,
+                "name": family.name,
                 "version": model.version,
-                "is_active": model.is_active,
-                "trained_at": model.trained_at,
-                "predictions_count": predictions_count,
-                **_round_model_metrics(metrics),
-                "symbol": model.symbol,
-                "is_replay": model.is_replay,
-                "baseline": get_model_baseline(
-                    db, model.id, model.symbol, start_date, end_date, timeframe
+                "is_active": any(m.is_active for m in family.models),
+                "trained_at": max(m.trained_at for m in family.models),
+                "versions_count": len(family.models),
+                "first_train_to": min(m.train_to for m in family.models),
+                "last_train_to": max(m.train_to for m in family.models),
+                "predictions_count": len(family.predictions),
+                **_round_model_metrics(_family_metrics(family.predictions, pnl_column)),
+                "symbol": family.symbol,
+                "is_replay": all(m.is_replay for m in family.models),
+                "baseline": (
+                    baseline_for_predictions(db, family.symbol, family.predictions)
+                    if timeframe == BASELINE_TIMEFRAME
+                    else None
                 ),
             }
         )

@@ -32,7 +32,11 @@ from api.symbols import (
 )
 from shared.db.database import get_db
 from shared.db.models import PredictionSource
-from shared.utils import DEFAULT_TIMEFRAME, get_all_models_metrics, get_cumulative_pnl
+from shared.utils import (
+    DEFAULT_TIMEFRAME,
+    get_all_models_metrics,
+    get_family_cumulative_pnl,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -72,7 +76,7 @@ async def models_dashboard(
     Returns:
         HTML template with model comparison table and chart
     """
-    # Get metrics for all models
+    # Get metrics for all model families
     models_metrics = get_all_models_metrics(
         db, start_date, end_date, timeframe=timeframe, symbol=symbol, source=source
     )
@@ -85,15 +89,10 @@ async def models_dashboard(
             best_model = max(models_with_pnl, key=lambda m: m["total_pnl"])
             best_model_id = best_model["id"]
 
-    # Get cumulative PnL for all models (for chart)
-    daily_pnl = {}
-    for model_metrics in models_metrics:
-        model_id = model_metrics["id"]
-        model_name = model_metrics["name"]
-        cumulative = get_cumulative_pnl(
-            db, model_id, start_date, end_date, timeframe=timeframe
-        )
-        daily_pnl[model_name] = cumulative
+    # Get cumulative PnL for all model families (for chart)
+    daily_pnl = get_family_cumulative_pnl(
+        db, start_date, end_date, timeframe=timeframe, symbol=symbol, source=source
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -133,7 +132,9 @@ async def models_metrics_api(
     Get model performance metrics as JSON.
 
     This endpoint returns metrics for all models, useful for AJAX requests
-    or mobile clients.
+    or mobile clients. A "model" is a family (``linear`` for ``linear_v1``,
+    ``linear_v2``, ...): one row per (symbol, family, timeframe), computed over
+    the predictions of every version (#178).
 
     Args:
         start_date: Optional start date for filtering metrics
@@ -142,8 +143,9 @@ async def models_metrics_api(
         timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
             metrics of different timeframes are never silently combined
         symbol: Asset to show (default BTCUSDT); only its models are returned
-        source: ``live``, ``replay`` or ``all`` (default); each model carries
-            ``is_replay`` either way
+        source: ``live``, ``replay`` or ``all`` (default); only the versions
+            of that source count in each family; ``is_replay`` is true when
+            every version of the family is simulated
         db: Database session
 
     Returns:
@@ -151,11 +153,14 @@ async def models_metrics_api(
         {
             "models": [
                 {
-                    "id": 1,
-                    "name": "linear_v1",
-                    "version": "1.0.0",
+                    "id": 40,
+                    "name": "linear",
+                    "version": "2024-05-18-001",
                     "is_active": true,
                     "trained_at": "2024-05-18T10:00:00",
+                    "versions_count": 40,
+                    "first_train_to": "2024-04-09",
+                    "last_train_to": "2024-05-17",
                     "predictions_count": 30,
                     "accuracy": 0.65,
                     "avg_error_pct": 2.5,
@@ -168,7 +173,7 @@ async def models_metrics_api(
                 ...
             ],
             "daily_pnl": {
-                "linear_v1": [
+                "linear": [
                     {"date": "2024-05-01", "cumulative_pnl": 100.0},
                     ...
                 ],
@@ -176,7 +181,7 @@ async def models_metrics_api(
             }
         }
     """
-    # Get metrics for all models
+    # Get metrics for all model families
     models_metrics = get_all_models_metrics(
         db,
         start_date,
@@ -187,20 +192,17 @@ async def models_metrics_api(
         source=source,
     )
 
-    # Get daily cumulative PnL for all models
-    daily_pnl = {}
-    for model_metrics in models_metrics:
-        model_id = model_metrics["id"]
-        model_name = model_metrics["name"]
-        cumulative = get_cumulative_pnl(
-            db, model_id, start_date, end_date, pnl_column, timeframe
-        )
-        daily_pnl[model_name] = cumulative
+    # Get daily cumulative PnL for all model families
+    daily_pnl = get_family_cumulative_pnl(
+        db, start_date, end_date, pnl_column, timeframe, symbol=symbol, source=source
+    )
 
     # Convert datetime to ISO format for JSON serialization
     for model in models_metrics:
         if model["trained_at"]:
             model["trained_at"] = model["trained_at"].isoformat()
+        model["first_train_to"] = model["first_train_to"].isoformat()
+        model["last_train_to"] = model["last_train_to"].isoformat()
 
     return {
         "models": models_metrics,
