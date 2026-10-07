@@ -309,7 +309,7 @@
     <div class="container">
         <header>
             <h1>📊 Model Performance Comparison</h1>
-            <p class="subtitle">Compare accuracy, PnL, and risk metrics across all ML models</p>
+            <p class="subtitle">Compare accuracy, PnL, and risk metrics per model; each row covers every version of the model</p>
             <a href="/?symbol={{ asset.symbol }}" class="nav-link">← Back to Dashboard</a>
         </header>
 
@@ -377,8 +377,9 @@
                     <tr class="{% if model.id == best_model_id %}best-model{% endif %}">
                         <td>
                             <span class="model-name">{{ model.name }}</span>
+                            <span class="baseline-detail version-detail" title="Metrics cover the predictions of every version">{{ model.versions_count }} version{{ '' if model.versions_count == 1 else 's' }}, trained on data up to {{ model.first_train_to }}{% if model.last_train_to != model.first_train_to %} to {{ model.last_train_to }}{% endif %}</span>
                             {% if model.is_replay %}
-                            <span class="replay-badge" title="Trained by the history replay, not a live model">Replay</span>
+                            <span class="replay-badge" title="Every version was trained by the history replay, not a live model">Replay</span>
                             {% endif %}
                             {% if model.is_active %}
                             <span class="badge active-badge">ACTIVE</span>
@@ -515,7 +516,7 @@
 
         // Define colors for each model
         const modelColors = {
-            'linear_v1': '#3b82f6'     // Blue
+            'linear': '#3b82f6'     // Blue
         };
 
         // Build datasets for Chart.js

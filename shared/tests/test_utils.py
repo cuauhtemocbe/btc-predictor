@@ -10,6 +10,7 @@ import statistics
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ from shared.utils import (
     calculate_win_rate,
     get_all_models_metrics,
     get_cumulative_pnl,
+    get_family_cumulative_pnl,
     get_model_returns,
     utc_now,
     utc_today,
@@ -987,14 +989,14 @@ class TestGetAllModelsMetrics:
         assert len(metrics) == 2
 
         # Check model 1 metrics
-        m1 = next(m for m in metrics if m["name"] == "linear_v1")
+        m1 = next(m for m in metrics if m["name"] == "linear")
         assert m1["predictions_count"] == 2
         assert m1["accuracy"] == 1.0
         assert m1["total_pnl"] == 150.0
         assert m1["is_active"] is True
 
         # Check model 2 metrics
-        m2 = next(m for m in metrics if m["name"] == "lstm_v1")
+        m2 = next(m for m in metrics if m["name"] == "lstm")
         assert m2["predictions_count"] == 1
         assert m2["accuracy"] == 0.0
         assert m2["total_pnl"] == -30.0
@@ -1018,6 +1020,186 @@ class TestGetAllModelsMetrics:
         assert metrics[0]["predictions_count"] == 0
         assert metrics[0]["accuracy"] is None
         assert metrics[0]["total_pnl"] is None
+
+
+class TestPerModelMetricsHonorFilters:
+    """The single-model metric functions keep their date and timeframe filters."""
+
+    def test_each_function_reads_only_the_filtered_days(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        model = sample_model(name="linear_v1")
+        for day in (1, 2, 3):
+            evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, day))
+        window: dict[str, Any] = {
+            "start_date": date(2024, 5, 2),
+            "end_date": date(2024, 5, 2),
+            "timeframe": "1d",
+        }
+
+        assert calculate_model_mape(db_session, model.id, **window) is not None
+        assert calculate_win_rate(db_session, model.id, **window) == 1.0
+        assert len(get_model_returns(db_session, model.id, **window)) == 1
+        assert get_cumulative_pnl(db_session, model.id, **window) == [
+            {"date": "2024-05-02", "cumulative_pnl": 500.0}
+        ]
+
+
+class TestFamilyAggregation:
+    """One row per (symbol, family, timeframe) over every version (#178)."""
+
+    def test_versions_of_a_family_make_one_row_over_all_their_predictions(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        old = sample_model(
+            name="linear_v1",
+            version="a",
+            train_from=date(2024, 3, 1),
+            train_to=date(2024, 4, 30),
+            trained_at=datetime(2024, 5, 1, tzinfo=UTC),
+        )
+        new = sample_model(
+            name="linear_v2",
+            version="b",
+            is_active=True,
+            train_from=date(2024, 3, 1),
+            train_to=date(2024, 5, 2),
+            trained_at=datetime(2024, 5, 3, tzinfo=UTC),
+        )
+        # Created newest first: the order of the series is by date, not by version.
+        evaluated_prediction(
+            model_id=new.id, predicted_for=date(2024, 5, 3), pnl_simulated=Decimal("50")
+        )
+        evaluated_prediction(
+            model_id=old.id,
+            predicted_for=date(2024, 5, 2),
+            direction_correct=False,
+            pnl_simulated=Decimal("-100"),
+        )
+        evaluated_prediction(
+            model_id=old.id, predicted_for=date(2024, 5, 1), pnl_simulated=Decimal("20")
+        )
+
+        (row,) = get_all_models_metrics(db_session)
+
+        assert row["name"] == "linear"
+        assert row["id"] == new.id
+        assert row["version"] == "b"
+        assert row["is_active"] is True
+        assert row["versions_count"] == 2
+        assert row["first_train_to"] == date(2024, 4, 30)
+        assert row["last_train_to"] == date(2024, 5, 2)
+        assert row["trained_at"] == datetime(2024, 5, 3, tzinfo=UTC)
+        assert row["predictions_count"] == 3
+        assert row["accuracy"] == round(2 / 3, 4)
+        assert row["win_rate"] == round(2 / 3, 4)
+        assert row["total_pnl"] == -30.0
+        returns = [20 / 67000, -100 / 67000, 50 / 67000]
+        assert row["sharpe_ratio"] == round(
+            statistics.mean(returns) / statistics.stdev(returns) * math.sqrt(365), 2
+        )
+        # Equity 1 -> +0.03% -> -0.15% -> +0.07%: the fall is the second day's.
+        assert row["max_drawdown_pct"] == round(-100 / 67000 * 100, 2)
+
+    def test_the_representative_model_is_the_newest_when_none_is_active(
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
+        sample_model(name="linear_v1", trained_at=datetime(2024, 5, 1, tzinfo=UTC))
+        newest = sample_model(
+            name="linear_v2", version="2", trained_at=datetime(2024, 5, 2, tzinfo=UTC)
+        )
+
+        (row,) = get_all_models_metrics(db_session)
+
+        assert row["id"] == newest.id
+        assert row["is_active"] is False
+
+    def test_families_and_symbols_stay_separate_rows(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        btc = sample_model(name="linear_v1")
+        gold = sample_model(name="linear_v1", version="g")
+        gold.symbol = "PAXGUSDT"
+        other = sample_model(name="other_v1", version="o")
+        db_session.flush()
+        for model in (btc, gold, other):
+            evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
+
+        rows = get_all_models_metrics(db_session)
+
+        assert [(r["symbol"], r["name"]) for r in rows] == [
+            ("BTCUSDT", "linear"),
+            ("BTCUSDT", "other"),
+            ("PAXGUSDT", "linear"),
+        ]
+        assert [r["predictions_count"] for r in rows] == [1, 1, 1]
+
+    def test_date_filter_applies_to_the_whole_family(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        one = sample_model(name="linear_v1")
+        two = sample_model(name="linear_v2", version="2")
+        for model, day in ((one, 1), (one, 2), (two, 3), (two, 4)):
+            evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, day))
+
+        (row,) = get_all_models_metrics(
+            db_session, start_date=date(2024, 5, 2), end_date=date(2024, 5, 3)
+        )
+
+        assert row["predictions_count"] == 2
+
+    def test_a_family_without_evaluated_predictions_has_no_metrics(
+        self, db_session: Session, sample_model: Callable[..., Model]
+    ) -> None:
+        sample_model(name="linear_v1")
+
+        (row,) = get_all_models_metrics(db_session, timeframe="1d")
+
+        assert row["predictions_count"] == 0
+        assert row["sharpe_ratio"] is None
+        assert row["max_drawdown_pct"] is None
+        assert row["baseline"] is None
+
+    def test_cumulative_series_runs_over_every_version_in_date_order(
+        self,
+        db_session: Session,
+        sample_model: Callable[..., Model],
+        evaluated_prediction: Callable[..., Prediction],
+    ) -> None:
+        one = sample_model(name="linear_v1")
+        two = sample_model(name="linear_v2", version="2")
+        evaluated_prediction(
+            model_id=two.id, predicted_for=date(2024, 5, 2), pnl_simulated=Decimal("5")
+        )
+        evaluated_prediction(
+            model_id=one.id, predicted_for=date(2024, 5, 1), pnl_simulated=Decimal("10")
+        )
+
+        series = get_family_cumulative_pnl(db_session, timeframe="1d")
+
+        assert series == {
+            "linear": [
+                {"date": "2024-05-01", "cumulative_pnl": 10.0},
+                {"date": "2024-05-02", "cumulative_pnl": 15.0},
+            ]
+        }
+
+    def test_cumulative_series_without_models_is_empty(
+        self, db_session: Session
+    ) -> None:
+        assert get_family_cumulative_pnl(db_session) == {}
 
 
 class TestMetricsForTheDailyTimeframe:

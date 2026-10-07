@@ -290,16 +290,20 @@ async def test_models_page_marks_simulated_models(
     """
     Given a simulated model
     When /models/ renders
-    Then its row shows the replay marker
+    Then its row shows the replay marker; a family that also has a live
+    version is not marked, because its row mixes both
     """
-    soup = BeautifulSoup((await client.get("/models/")).text, "html.parser")
+    mixed = BeautifulSoup((await client.get("/models/")).text, "html.parser")
+    mixed_rows = find_tag(mixed, "tbody").find_all("tr")
+    assert len(mixed_rows) == 1
+    assert mixed_rows[0].find(class_="replay-badge") is None
 
+    soup = BeautifulSoup(
+        (await client.get("/models/?source=replay")).text, "html.parser"
+    )
     rows = find_tag(soup, "tbody").find_all("tr")
-    assert len(rows) == 2
-    badged = [bool(r.find(class_="replay-badge")) for r in rows]
-    assert sorted(badged) == [False, True]
-    replay_row = next(r for r in rows if r.find(class_="replay-badge"))
-    assert "Replay" in find_tag(replay_row, class_="replay-badge").get_text()
+    assert len(rows) == 1
+    assert "Replay" in find_tag(rows[0], class_="replay-badge").get_text()
 
 
 @pytest.mark.asyncio
@@ -308,8 +312,8 @@ async def test_models_page_marks_simulated_models(
     [
         ("?source=live", [False]),
         ("?source=replay", [True]),
-        ("?source=all", [False, True]),
-        ("", [False, True]),
+        ("?source=all", [False]),
+        ("", [False]),
     ],
 )
 async def test_models_metrics_flags_and_filters_by_source(
@@ -318,7 +322,11 @@ async def test_models_metrics_flags_and_filters_by_source(
     query: str,
     expected: list[bool],
 ) -> None:
-    """The metrics JSON carries is_replay per model and honors ``source``."""
+    """The metrics JSON carries is_replay per family and honors ``source``.
+
+    Under ``all`` the live and the replay version share one family row, which is
+    not marked as replay because only some of its versions are.
+    """
     body = (await client.get(f"/models/metrics{query}")).json()
 
     assert sorted(m["is_replay"] for m in body["models"]) == expected
