@@ -6,7 +6,6 @@ daily bar is a UTC day. At 00:10 UTC on 2026-10-04 the local date is still
 2026-10-03, so a job built on ``date.today()`` is a day behind the pipeline.
 """
 
-from argparse import Namespace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -16,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from workers.daily import evaluator, predictor, trainer
-from workers.daily.models import LinearRegressionModel
 
 UTC_DAY = date(2026, 10, 4)
 
@@ -52,9 +50,6 @@ class TestDailyJobsUseTheUtcDate:
     ) -> None:
         """Then it stores predicted_for = 2026-10-05, not the local date plus one."""
         _add_daily_prices(db_session, 31)
-        monkeypatch.setattr(
-            predictor, "parse_args", lambda: Namespace(multi_model=False)
-        )
 
         assert predictor.main(session=db_session) == 0
 
@@ -77,7 +72,7 @@ class TestDailyJobsUseTheUtcDate:
 
         assert asked == [UTC_DAY]
 
-    def test_the_single_model_trainer_ends_the_training_range_on_the_utc_day(
+    def test_the_trainer_ends_the_training_range_on_the_utc_day(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(trainer, "SessionLocal", lambda: db_session)
@@ -86,15 +81,3 @@ class TestDailyJobsUseTheUtcDate:
         assert trainer.main() == 0
 
         assert db_session.query(Model).one().train_to == UTC_DAY
-
-    def test_the_multi_model_trainer_ends_the_training_range_on_the_utc_day(
-        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(
-            trainer, "model_registry", lambda: {"linear": LinearRegressionModel}
-        )
-        _add_daily_prices(db_session, 150)
-
-        models = trainer.train_all_models(db_session)
-
-        assert [m.train_to for m in models] == [UTC_DAY]

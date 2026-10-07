@@ -9,14 +9,12 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction
 from shared.utils import (
     calculate_accuracy,
-    calculate_mape,
     calculate_max_drawdown,
     calculate_max_drawdown_pct,
     calculate_model_mape,
@@ -29,7 +27,6 @@ from shared.utils import (
     calculate_win_rate,
     get_all_models_metrics,
     get_cumulative_pnl,
-    split_train_validation,
     utc_now,
     utc_today,
 )
@@ -433,137 +430,6 @@ class TestCalculatePnlRealistic:
         # Loss is capped at -1980, Fees: 132
         # Net: -1980 - 132 = -2112
         assert result == Decimal("-2112.00")
-
-
-# ============================================================================
-# Validation Split and MAPE Tests (US-024)
-# ============================================================================
-
-
-class TestSplitTrainValidation:
-    """Test split_train_validation function for model training."""
-
-    def test_split_train_validation_correct_sizes(self) -> None:
-        """Test that split returns correct array sizes (70/20/10)."""
-        # 100 data points → 70 train, 20 val, 10 buffer (discarded)
-        prices = np.arange(100, dtype=float) + 50000  # 50000-50099
-        train, val = split_train_validation(prices)
-
-        assert len(train) == 70
-        assert len(val) == 20
-
-    def test_split_train_validation_chronological_order(self) -> None:
-        """Test that chronological order is preserved in splits."""
-        prices = np.array(
-            [50000, 51000, 52000, 53000, 54000, 55000, 56000, 57000, 58000, 59000],
-            dtype=float,
-        )
-        train, val = split_train_validation(prices, train_pct=0.7, val_pct=0.2)
-
-        # Train: first 70% (7 items)
-        assert len(train) == 7
-        assert train[0] == 50000
-        assert train[-1] == 56000
-
-        # Val: next 20% (2 items)
-        assert len(val) == 2
-        assert val[0] == 57000
-        assert val[-1] == 58000
-
-    def test_split_train_validation_raises_on_invalid_percentages(self) -> None:
-        """Test that ValueError is raised if train_pct + val_pct > 1.0."""
-        prices = np.arange(100, dtype=float)
-
-        with pytest.raises(ValueError, match="must be <= 1.0"):
-            split_train_validation(prices, train_pct=0.8, val_pct=0.5)
-
-    def test_split_train_validation_raises_on_insufficient_data(self) -> None:
-        """Test that ValueError is raised if < 10 data points."""
-        prices = np.array([50000, 51000], dtype=float)  # Only 2 points
-
-        with pytest.raises(ValueError, match="Need at least 10 data points"):
-            split_train_validation(prices)
-
-    def test_split_train_validation_custom_percentages(self) -> None:
-        """Test split with custom train/val percentages."""
-        prices = np.arange(100, dtype=float)
-        train, val = split_train_validation(prices, train_pct=0.6, val_pct=0.3)
-
-        assert len(train) == 60
-        assert len(val) == 30  # Remaining 10% discarded
-
-    def test_split_train_validation_returns_numpy_arrays(self) -> None:
-        """Test that returned values are numpy arrays."""
-        prices = np.arange(100, dtype=float)
-        train, val = split_train_validation(prices)
-
-        assert isinstance(train, np.ndarray)
-        assert isinstance(val, np.ndarray)
-
-
-class TestCalculateMAPE:
-    """Test calculate_mape function for validation error calculation."""
-
-    def test_calculate_mape_correct_value(self) -> None:
-        """Test MAPE calculation with known values."""
-        y_true = np.array([50000, 51000, 52000], dtype=float)
-        y_pred = np.array([50500, 50800, 52100], dtype=float)
-
-        mape = calculate_mape(y_true, y_pred)
-
-        # Errors: |50000-50500|/50000 = 1%,
-        #         |51000-50800|/51000 = 0.39%,
-        #         |52000-52100|/52000 = 0.19%
-        # Mean: ~0.53% ... wait let me recalculate
-        # (500/50000 + 200/51000 + 100/52000) / 3 * 100
-        # = (0.01 + 0.00392 + 0.00192) / 3 * 100
-        # = 0.01584 / 3 * 100 = 0.528%
-        assert abs(mape - 0.528) < 0.01  # Allow small floating point error
-
-    def test_calculate_mape_handles_zeros(self) -> None:
-        """Test that MAPE raises error when y_true contains zeros."""
-        y_true = np.array([50000, 0, 52000], dtype=float)
-        y_pred = np.array([50500, 50800, 52100], dtype=float)
-
-        with pytest.raises(ValueError, match="y_true contains zeros"):
-            calculate_mape(y_true, y_pred)
-
-    def test_calculate_mape_perfect_prediction(self) -> None:
-        """Test MAPE with perfect predictions (error = 0)."""
-        y_true = np.array([50000, 51000, 52000], dtype=float)
-        y_pred = np.array([50000, 51000, 52000], dtype=float)
-
-        mape = calculate_mape(y_true, y_pred)
-
-        assert mape == 0.0
-
-    def test_calculate_mape_raises_on_length_mismatch(self) -> None:
-        """Test that ValueError is raised if array lengths differ."""
-        y_true = np.array([50000, 51000], dtype=float)
-        y_pred = np.array([50500, 50800, 52100], dtype=float)
-
-        with pytest.raises(ValueError, match="Arrays must have same length"):
-            calculate_mape(y_true, y_pred)
-
-    def test_calculate_mape_raises_on_empty_arrays(self) -> None:
-        """Test that ValueError is raised for empty arrays."""
-        y_true = np.array([], dtype=float)
-        y_pred = np.array([], dtype=float)
-
-        with pytest.raises(ValueError, match="Cannot calculate MAPE on empty"):
-            calculate_mape(y_true, y_pred)
-
-    def test_calculate_mape_returns_percentage(self) -> None:
-        """Test that MAPE is returned on 0-100 scale."""
-        y_true = np.array([50000, 50000], dtype=float)
-        y_pred = np.array([51000, 49000], dtype=float)
-
-        mape = calculate_mape(y_true, y_pred)
-
-        # Errors: 1000/50000 = 2%, 1000/50000 = 2%
-        # Mean: 2%
-        assert mape == 2.0
-        assert 0 <= mape <= 100  # Should be percentage
 
 
 # ============================================================================

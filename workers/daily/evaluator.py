@@ -12,8 +12,6 @@ This job:
 A prediction whose bar is not stored yet stays pending and is picked up by a
 later run, so a missed or late ingest never leaves it unevaluated for good.
 
-Supports multi-model predictions (evaluates predictions from all models).
-
 Entry point: python -m workers.daily.evaluator
 """
 
@@ -51,7 +49,7 @@ def find_unevaluated_predictions(
     """
     Find ALL predictions for the given date that haven't been evaluated yet.
 
-    Supports multi-model predictions (returns predictions from all models).
+    Several can share a date (one per model version), so this returns a list.
 
     Args:
         session: Database session
@@ -84,7 +82,7 @@ def find_unevaluated_prediction(
     """
     Find a prediction for the given date that hasn't been evaluated yet.
 
-    DEPRECATED: Use find_unevaluated_predictions() for multi-model support.
+    DEPRECATED: Use find_unevaluated_predictions(), which returns every one.
     This function returns only the first unevaluated prediction.
 
     Args:
@@ -384,8 +382,8 @@ def main(today: date | None = None) -> int:
     """
     Main entry point for the evaluator job.
 
-    Evaluates ALL pending daily predictions due up to ``today`` (supports
-    multi-model), each against the bar it predicted.
+    Evaluates ALL pending daily predictions due up to ``today``, each against
+    the bar it predicted.
 
     Args:
         today: Date the job runs on (defaults to the current date)

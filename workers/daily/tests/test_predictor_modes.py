@@ -1,4 +1,4 @@
-"""Tests for the single-model and multi-model paths of the predictor job."""
+"""Tests for the run bookkeeping of the predictor job: outcome, summary, exit code."""
 
 import logging
 from datetime import UTC, date, datetime
@@ -16,7 +16,6 @@ from workers.daily.predictor import (
     PredictionOutcome,
     _exit_code,
     _log_prediction_summary,
-    _predict_multi_model,
     _predict_single_model,
 )
 
@@ -26,16 +25,17 @@ NOW = datetime(2026, 1, 2, 0, 10, tzinfo=UTC)
 # The fakes below never touch the session, so a missing one stands in for it.
 NO_SESSION = cast(Session, None)
 
-type ModelPairs = list[tuple[Model, BaseModel]]
+
+def _model(name: str) -> Model:
+    return cast(Model, SimpleNamespace(name=name))
 
 
-def _models(*names: str) -> ModelPairs:
-    return cast(ModelPairs, [(SimpleNamespace(name=name), object()) for name in names])
+NO_INSTANCE = cast(BaseModel, object())
 
 
 @pytest.fixture
 def fake_predict_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace the per-model work: models named 'bad*' fail, 'skip*' are skipped."""
+    """Replace the per-model work: a model named 'bad*' fails."""
 
     def fake(
         session: Session,
@@ -62,7 +62,7 @@ class TestPredictSingleModel:
         outcome = PredictionOutcome()
 
         _predict_single_model(
-            NO_SESSION, _models("linear_v1"), TOMORROW, PRICE, outcome, NOW
+            NO_SESSION, _model("linear_v1"), NO_INSTANCE, TOMORROW, PRICE, outcome, NOW
         )
 
         assert outcome.generated == [("linear_v1", 51000.0)]
@@ -72,30 +72,15 @@ class TestPredictSingleModel:
         self, fake_predict_one: None, caplog: pytest.LogCaptureFixture
     ) -> None:
         outcome = PredictionOutcome()
-        models = _models("bad_v1")
 
         with (
             caplog.at_level(logging.ERROR),
             pytest.raises(ValueError, match="exploded"),
         ):
-            _predict_single_model(NO_SESSION, models, TOMORROW, PRICE, outcome, NOW)
+            _predict_single_model(
+                NO_SESSION, _model("bad_v1"), NO_INSTANCE, TOMORROW, PRICE, outcome, NOW
+            )
 
-        assert outcome.failed == [("bad_v1", "bad_v1 exploded")]
-        assert "Failed to generate prediction for bad_v1" in caplog.text
-
-
-class TestPredictMultiModel:
-    def test_failure_does_not_stop_the_other_models(
-        self, fake_predict_one: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        outcome = PredictionOutcome()
-        models = _models("linear_v1", "bad_v1", "skip_v1", "xgboost_v1")
-
-        with caplog.at_level(logging.ERROR):
-            _predict_multi_model(NO_SESSION, models, TOMORROW, PRICE, outcome, NOW)
-
-        assert outcome.generated == [("linear_v1", 51000.0), ("xgboost_v1", 51000.0)]
-        assert outcome.skipped == ["skip_v1"]
         assert outcome.failed == [("bad_v1", "bad_v1 exploded")]
         assert "Failed to generate prediction for bad_v1" in caplog.text
 

@@ -23,7 +23,7 @@ Predict 2024-06-11: train on every daily row dated 2024-06-10 or earlier
 | Training samples | `shared.features.build_training_set` (log returns, rolling volatility, log volume changes) |
 | Prediction features | `shared.features.build_prediction_features` |
 | Predicted price | `shared.features.price_from_return` (`last close * exp(predicted return)`) |
-| Model construction | `workers.daily.models.factory.build_model` (also used by `trainer.train_single_model`) |
+| Model construction | `workers.daily.models.factory.build_model` (the daily trainer builds its model with it too) |
 
 If the daily worker changes, the backtest changes with it.
 
@@ -375,7 +375,6 @@ A year of Linear predictions (retrain every day) takes about 10 s. If a run take
 ### Future Enhancements (US-021+)
 
 - [ ] Web dashboard for backtest visualization (US-021)
-- [ ] Multi-model comparison (US-023-026)
 - [ ] Multi-timeframe predictions (monthly)
 - [ ] Parameter optimization (grid search, Bayesian optimization)
 - [ ] Walk-forward optimization (optimize hyperparameters during backtest)

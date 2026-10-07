@@ -2,20 +2,15 @@
 Daily predictor job - predicts tomorrow's BTC price.
 
 This job:
-1. Loads the active ML model(s) from the database
+1. Loads the active ML model from the database
 2. Fetches the recent daily closes and volumes
 3. Builds the return features (shared.features) and predicts tomorrow's log return
 4. Stores the predicted price, ``last close * exp(predicted return)``, in the
    database for later evaluation
 
-Modes:
-- Single-model mode (default): Uses only the primary active model
-- Multi-model mode (--multi-model): Generates predictions from ALL active models
-
-Entry point: python -m daily.predictor [--multi-model]
+Entry point: python -m workers.daily.predictor
 """
 
-import argparse
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -50,25 +45,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def parse_args() -> argparse.Namespace:
-    """
-    Parse command-line arguments.
-
-    Returns:
-        Parsed arguments with multi_model flag
-    """
-    parser = argparse.ArgumentParser(
-        description="BTC Predictor - Generate price predictions for tomorrow"
-    )
-    parser.add_argument(
-        "--multi-model",
-        action="store_true",
-        help="Generate predictions from ALL active models "
-        "(default: single primary model)",
-    )
-    return parser.parse_args()
-
-
 def deserialize_model(model_record: Model) -> BaseModel:
     """
     Deserialize a model from its binary artifact.
@@ -94,72 +70,12 @@ def deserialize_model(model_record: Model) -> BaseModel:
         ) from e
 
 
-def get_active_models(
-    session: Session, multi_model: bool = False
-) -> list[tuple[Model, BaseModel]]:
-    """
-    Load active daily (timeframe='1d') model(s) from the database.
-
-    Scoped to timeframe='1d', the only timeframe the models table accepts.
-
-    Args:
-        session: Database session
-        multi_model: If True, load ALL active models. If False, load only primary model.
-
-    Returns:
-        List of tuples: (Model record, deserialized BaseModel instance)
-
-    Raises:
-        ValueError: If no active models found
-    """
-    stmt = select(Model).where(
-        Model.is_active == True,  # noqa: E712
-        Model.timeframe == "1d",
-    )
-
-    if multi_model:
-        # Fetch all active models
-        model_records = session.execute(stmt).scalars().all()
-        mode_str = "multi-model"
-    else:
-        # Fetch only the first active model (primary)
-        # Use limit(1) to handle case where multiple models are active
-        model_record = session.execute(stmt.limit(1)).scalar_one_or_none()
-        model_records = [model_record] if model_record else []
-        mode_str = "single-model"
-
-    if not model_records:
-        raise ValueError(f"No active models found in database ({mode_str} mode)")
-
-    # Deserialize all models
-    models = []
-    for model_record in model_records:
-        try:
-            model_instance = deserialize_model(model_record)
-            models.append((model_record, model_instance))
-            logger.info(
-                f"Loaded model: {model_record.name} v{model_record.version} "
-                f"(trained {model_record.trained_at})"
-            )
-        except RuntimeError as e:
-            # Log error but continue with other models in multi-model mode
-            logger.error(f"Failed to load model {model_record.name}: {e}")
-            if not multi_model:
-                # In single-model mode, fail immediately
-                raise
-
-    if not models:
-        raise ValueError(f"All active models failed to deserialize ({mode_str} mode)")
-
-    logger.info(f"Loaded {len(models)} active model(s) in {mode_str} mode")
-    return models
-
-
 def get_active_model(session: Session) -> tuple[Model, BaseModel]:
     """
-    Load the active model from the database (backward compatibility wrapper).
+    Load the active daily (timeframe='1d') model from the database.
 
-    DEPRECATED: Use get_active_models() instead.
+    Scoped to timeframe='1d', the only timeframe the models table accepts. If
+    several models are active, the first one is used.
 
     Args:
         session: Database session
@@ -171,8 +87,20 @@ def get_active_model(session: Session) -> tuple[Model, BaseModel]:
         ValueError: If no active model found
         RuntimeError: If deserialization fails
     """
-    models = get_active_models(session, multi_model=False)
-    return models[0]
+    stmt = select(Model).where(
+        Model.is_active == True,  # noqa: E712
+        Model.timeframe == "1d",
+    )
+    model_record = session.execute(stmt.limit(1)).scalar_one_or_none()
+    if model_record is None:
+        raise ValueError("No active model found in database")
+
+    model_instance = deserialize_model(model_record)
+    logger.info(
+        f"Loaded model: {model_record.name} v{model_record.version} "
+        f"(trained {model_record.trained_at})"
+    )
+    return model_record, model_instance
 
 
 def get_recent_series(
@@ -421,66 +349,33 @@ def _predict_one(
 
 def _predict_single_model(
     session: Session,
-    models: list[tuple[Model, BaseModel]],
+    model_record: Model,
+    model_instance: BaseModel,
     tomorrow: date,
     current_price: Decimal,
     outcome: PredictionOutcome,
     now: datetime,
 ) -> None:
     """
-    Single-model mode: predict with the primary model and fail immediately.
+    Predict with the active model and fail immediately.
 
     A failure is logged, recorded in ``outcome`` and re-raised so ``main``
     turns it into a non-zero exit code.
     """
-    for model_record, model_instance in models:
-        try:
-            _predict_one(
-                session,
-                model_record,
-                model_instance,
-                tomorrow,
-                current_price,
-                outcome,
-                now,
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate prediction for {model_record.name}: {e}"
-            )
-            outcome.failed.append((model_record.name, str(e)))
-            raise
-
-
-def _predict_multi_model(
-    session: Session,
-    models: list[tuple[Model, BaseModel]],
-    tomorrow: date,
-    current_price: Decimal,
-    outcome: PredictionOutcome,
-    now: datetime,
-) -> None:
-    """
-    Multi-model mode: predict with every active model, continuing after errors.
-
-    A failure is logged and recorded in ``outcome``; the other models still run.
-    """
-    for model_record, model_instance in models:
-        try:
-            _predict_one(
-                session,
-                model_record,
-                model_instance,
-                tomorrow,
-                current_price,
-                outcome,
-                now,
-            )
-        except Exception as e:
-            logger.exception(
-                f"Failed to generate prediction for {model_record.name}: {e}"
-            )
-            outcome.failed.append((model_record.name, str(e)))
+    try:
+        _predict_one(
+            session,
+            model_record,
+            model_instance,
+            tomorrow,
+            current_price,
+            outcome,
+            now,
+        )
+    except Exception as e:
+        logger.exception(f"Failed to generate prediction for {model_record.name}: {e}")
+        outcome.failed.append((model_record.name, str(e)))
+        raise
 
 
 def _log_prediction_summary(tomorrow: date, outcome: PredictionOutcome) -> None:
@@ -526,10 +421,6 @@ def main(session: Session | None = None, now: datetime | None = None) -> int:
     """
     Main entry point for the predictor job.
 
-    Supports two modes:
-    - Single-model (default): Predict with one primary model
-    - Multi-model (--multi-model): Predict with all active models
-
     Args:
         session: Optional database session (for testing). If None, creates new session.
         now: Optional clock (for testing). If None, the current UTC instant. The
@@ -538,11 +429,7 @@ def main(session: Session | None = None, now: datetime | None = None) -> int:
     Returns:
         Exit code (0 = success, 1 = failure)
     """
-    # Parse command-line arguments
-    args = parse_args()
-
-    mode_str = "multi-model" if args.multi_model else "single-model"
-    logger.info(f"Starting daily predictor job in {mode_str} mode")
+    logger.info("Starting daily predictor job")
 
     # Use provided session or create new one
     session_provided = session is not None
@@ -555,10 +442,9 @@ def main(session: Session | None = None, now: datetime | None = None) -> int:
         tomorrow = utc_today() + timedelta(days=1)
         logger.info(f"Predicting for date: {tomorrow}")
 
-        # Load active model(s) based on mode
-        models = get_active_models(session, multi_model=args.multi_model)
+        model_record, model_instance = get_active_model(session)
 
-        # Get current price once (same for all models)
+        # Get the current price
         current_price_stmt = (
             select(Price.close)
             .where(Price.symbol == DEFAULT_SYMBOL)
@@ -570,15 +456,15 @@ def main(session: Session | None = None, now: datetime | None = None) -> int:
 
         outcome = PredictionOutcome()
 
-        # Generate prediction for each active model
-        if args.multi_model:
-            _predict_multi_model(
-                session, models, tomorrow, current_price, outcome, run_at
-            )
-        else:
-            _predict_single_model(
-                session, models, tomorrow, current_price, outcome, run_at
-            )
+        _predict_single_model(
+            session,
+            model_record,
+            model_instance,
+            tomorrow,
+            current_price,
+            outcome,
+            run_at,
+        )
 
         _log_prediction_summary(tomorrow, outcome)
 

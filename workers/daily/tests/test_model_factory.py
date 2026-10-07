@@ -8,15 +8,13 @@ so a backtest builds exactly the models the daily worker builds.
 import subprocess
 import sys
 
-import numpy as np
 import pytest
 
 from shared.features import feature_count
-from workers.daily.models import BaseModel, LinearRegressionModel
+from workers.daily.models import LinearRegressionModel
 from workers.daily.models.factory import (
     MODEL_NAMES,
     build_model,
-    instantiate_model,
     model_class_for,
 )
 
@@ -50,38 +48,6 @@ def test_model_name_matching_is_exact_not_by_prefix() -> None:
     # production names carry a version ("linear_v1"); the factory takes the family
     with pytest.raises(ValueError, match="Unknown model"):
         build_model("linear_v1", 21, 43)
-
-
-def test_instantiate_model_matches_what_the_trainer_does_for_each_class() -> None:
-    class Plain(BaseModel):
-        def __init__(self, window_days: int, n_features: int) -> None:
-            self.window_days = window_days
-            self.n_features = n_features
-
-        # The stubs below only satisfy the abstract interface; they are never called.
-        def train(self, X: np.ndarray, y: np.ndarray) -> None:  # pragma: no cover
-            raise NotImplementedError
-
-        def predict(self, X: np.ndarray) -> float:  # pragma: no cover
-            raise NotImplementedError
-
-        def serialize(self) -> bytes:  # pragma: no cover
-            raise NotImplementedError
-
-        @classmethod
-        def deserialize(cls, data: bytes) -> BaseModel:  # pragma: no cover
-            raise NotImplementedError
-
-        @property
-        def is_trained(self) -> bool:  # pragma: no cover
-            raise NotImplementedError
-
-    plain = instantiate_model(Plain, 30, 61)
-    assert isinstance(plain, Plain)
-    assert (plain.window_days, plain.n_features) == (30, 61)
-    linear = instantiate_model(LinearRegressionModel, 30, 61)
-    assert isinstance(linear, LinearRegressionModel)
-    assert (linear.window_days, linear.n_features) == (30, 61)
 
 
 def test_linear_name_resolves_to_the_linear_class() -> None:

@@ -8,7 +8,6 @@ evaluator later scores it as a one-day move. The clock is frozen at 2026-10-04
 """
 
 import logging
-from argparse import Namespace
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -46,12 +45,7 @@ def _consecutive(last: date, count: int) -> list[date]:
     return [last - timedelta(days=count - 1 - i) for i in range(count)]
 
 
-@pytest.fixture
-def single_model_predictor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(predictor, "parse_args", lambda: Namespace(multi_model=False))
-
-
-@pytest.mark.usefixtures("mexico_city_at_0010_utc", "single_model_predictor")
+@pytest.mark.usefixtures("mexico_city_at_0010_utc")
 class TestDailyPredictorRefusesBadSeries:
     def test_latest_bar_two_days_ago_exits_1_and_stores_nothing(
         self,
@@ -97,21 +91,6 @@ class TestDailyPredictorRefusesBadSeries:
         assert saved.predicted_for == date(2026, 10, 5)
         assert saved.price_at_prediction == Decimal(50000 + YESTERDAY.toordinal())
 
-    def test_multi_model_mode_also_refuses_a_stale_series(
-        self,
-        db_session: Session,
-        sample_trained_model: Model,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            predictor, "parse_args", lambda: Namespace(multi_model=True)
-        )
-        _add_bars(db_session, _consecutive(YESTERDAY - timedelta(days=1), 31))
-
-        assert predictor.main(session=db_session) == 1
-
-        assert db_session.query(Prediction).count() == 0
-
 
 @pytest.mark.usefixtures("mexico_city_at_0010_utc")
 class TestDailyTrainerRefusesBadSeries:
@@ -147,16 +126,6 @@ class TestDailyTrainerRefusesBadSeries:
         assert trainer.main() == 0
 
         assert db_session.query(Model).count() == 1
-
-    def test_multi_model_training_refuses_a_stale_series(
-        self, db_session: Session
-    ) -> None:
-        _add_bars(db_session, _consecutive(YESTERDAY - timedelta(days=1), 150))
-
-        with pytest.raises(ValueError, match="latest bar is dated 2026-10-02"):
-            trainer.train_all_models(db_session)
-
-        assert db_session.query(Model).count() == 0
 
 
 @pytest.mark.usefixtures("mexico_city_at_0010_utc")
@@ -202,7 +171,7 @@ def test_the_daily_job_exits_1_and_skips_the_predictor_on_a_stale_series(
     assert db_session.query(Model).count() == 1  # only the pre-existing fixture model
 
 
-@pytest.mark.usefixtures("mexico_city_at_0010_utc", "single_model_predictor")
+@pytest.mark.usefixtures("mexico_city_at_0010_utc")
 class TestPredictorRefusesAnOldClose:
     """Gherkin (#175): the prediction is anchored to a close at most 2 hours old."""
 
@@ -245,22 +214,6 @@ class TestPredictorRefusesAnOldClose:
 
         now = datetime(2026, 10, 4, 7, 0, tzinfo=UTC)
         assert predictor.main(session=db_session, now=now) == 0
-
-    def test_multi_model_mode_also_refuses_an_old_close(
-        self,
-        db_session: Session,
-        sample_trained_model: Model,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            predictor, "parse_args", lambda: Namespace(multi_model=True)
-        )
-        _add_bars(db_session, _consecutive(YESTERDAY, 31))
-
-        now = datetime(2026, 10, 4, 7, 0, tzinfo=UTC)
-        assert predictor.main(session=db_session, now=now) == 1
-
-        assert db_session.query(Prediction).count() == 0
 
     def test_default_clock_is_the_utc_clock(
         self,

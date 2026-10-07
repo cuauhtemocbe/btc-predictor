@@ -40,7 +40,7 @@ class TestGetActiveModel:
 
     def test_no_active_model(self, db_session: Session) -> None:
         """Should raise ValueError when no active model exists."""
-        with pytest.raises(ValueError, match="No active models found"):
+        with pytest.raises(ValueError, match="No active model found"):
             predictor.get_active_model(db_session)
 
     def test_inactive_model_not_loaded(
@@ -51,7 +51,7 @@ class TestGetActiveModel:
         sample_trained_model.is_active = False
         db_session.commit()
 
-        with pytest.raises(ValueError, match="No active models found"):
+        with pytest.raises(ValueError, match="No active model found"):
             predictor.get_active_model(db_session)
 
 
@@ -272,15 +272,8 @@ class TestPredictorGherkinScenarios:
         count_before = db_session.query(Prediction).count()
         assert count_before == 0
 
-        # Mock parse_args to avoid pytest argument conflicts
-        from argparse import Namespace
-
-        def mock_parse_args() -> Namespace:
-            return Namespace(multi_model=False)
-
         # Mock SessionLocal to return our test session
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
         # Execute
         exit_code = predictor.main()
@@ -317,14 +310,8 @@ class TestPredictorGherkinScenarios:
         # Setup: Active model exists, only 10 prices (from fixtures)
         count_before = db_session.query(Prediction).count()
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
-
-        def mock_parse_args() -> Namespace:
-            return Namespace(multi_model=False)
-
+        # Mock SessionLocal to return our test session
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
         # Execute
         exit_code = predictor.main()
@@ -347,20 +334,14 @@ class TestPredictorGherkinScenarios:
 
         Given the models table has no record with is_active=True
         When I run the predictor main()
-        Then a ValueError is logged: "No active models found"
+        Then a ValueError is logged: "No active model found"
         And the job exits with code 1
         """
         # Setup: No active model (don't use sample_trained_model fixture)
         count_before = db_session.query(Prediction).count()
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
-
-        def mock_parse_args() -> Namespace:
-            return Namespace(multi_model=False)
-
+        # Mock SessionLocal to return our test session
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
         # Execute
         exit_code = predictor.main()
@@ -392,14 +373,8 @@ class TestPredictorGherkinScenarios:
         count_before = db_session.query(Prediction).count()
         assert count_before == 1  # The existing prediction
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
-
-        def mock_parse_args() -> Namespace:
-            return Namespace(multi_model=False)
-
+        # Mock SessionLocal to return our test session
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-        monkeypatch.setattr(predictor, "parse_args", mock_parse_args)
 
         # Execute
         exit_code = predictor.main()

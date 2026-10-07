@@ -9,7 +9,6 @@ shared/tests/test_features.py.
 """
 
 import math
-from argparse import Namespace
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
@@ -56,7 +55,6 @@ def use_session(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> Session
     """The trainer and predictor open their own session; hand them the test one."""
     monkeypatch.setattr(trainer, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(predictor, "parse_args", lambda: Namespace(multi_model=False))
     return db_session
 
 
@@ -92,14 +90,7 @@ class TestLinearModelTrainsOnReturns:
     def test_the_daily_cron_trains_only_the_linear_model(
         self, use_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The cron's trainer.main trains Linear Regression only, never through
-        the multi-model path of train_all_models."""
-
-        def forbidden(*_args: object, **_kwargs: object) -> None:
-            raise AssertionError("the daily cron must not train non-linear models")
-
-        monkeypatch.setattr(trainer, "train_all_models", forbidden)
-        monkeypatch.setattr(trainer, "model_registry", forbidden)
+        """The cron's trainer.main trains Linear Regression only."""
         _add_random_walk(use_session, 300)
 
         exit_code = trainer.main()

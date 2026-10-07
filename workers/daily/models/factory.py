@@ -1,8 +1,9 @@
 """
 Model construction shared by the daily trainer and the walk-forward backtest.
 
-One place knows how the model class is built (it takes the window and the feature
-count), so the backtest instantiates exactly the model the daily worker does.
+One place knows how the model is built (it takes the window and the feature count),
+so the backtest builds exactly the model the daily worker does. It stays with a
+single model because the backtest CLI takes its ``--model`` choices from it.
 """
 
 from workers.daily.models.base import BaseModel
@@ -23,24 +24,17 @@ def model_class_for(name: str) -> type[BaseModel]:
     raise ValueError(f"Unknown model '{name}'; valid models: {', '.join(MODEL_NAMES)}")
 
 
-def instantiate_model(
-    model_class: type[BaseModel],
-    window_days: int,
-    n_features: int,
-) -> BaseModel:
+def build_model(name: str, window_days: int, n_features: int) -> LinearRegressionModel:
     """
-    Build an untrained model the way the daily trainer does.
+    Build an untrained model by family name, the way the trainer and the backtest do.
 
     Args:
-        model_class: Class to instantiate.
+        name: Model family name (``linear``).
         window_days: Sliding-window size.
         n_features: Feature columns of the training matrix.
+
+    Raises:
+        ValueError: If ``name`` is not one of MODEL_NAMES.
     """
-    return model_class(  # type: ignore[call-arg]
-        window_days=window_days, n_features=n_features
-    )
-
-
-def build_model(name: str, window_days: int, n_features: int) -> BaseModel:
-    """Build an untrained model by family name; see ``instantiate_model``."""
-    return instantiate_model(model_class_for(name), window_days, n_features)
+    model_class_for(name)
+    return LinearRegressionModel(window_days=window_days, n_features=n_features)
