@@ -9,9 +9,8 @@ This job:
 5. Saves the trained model to the database
 6. Sets it as the active model (deactivates previous models)
 
-Training needs at least (window + 1) * 5 daily rows so the 70/20/10 split leaves
-the validation set enough samples; with fewer rows the job fails and reports the
-required and available counts.
+Training needs at least (window + 1) * 5 daily rows; with fewer rows the job fails
+and reports the required and available counts.
 
 Entry point: python -m workers.daily.trainer
 """
@@ -20,8 +19,6 @@ import logging
 import sys
 from datetime import UTC, date, datetime, timedelta
 
-import numpy as np
-import numpy.typing as npt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -36,9 +33,9 @@ from shared.features import (
     feature_count,
     require_fresh_series,
 )
-from shared.utils import calculate_mape, split_train_validation, utc_today
-from workers.daily.models import BaseModel, LinearRegressionModel
-from workers.daily.models.factory import instantiate_model
+from shared.utils import utc_today
+from workers.daily.models import LinearRegressionModel
+from workers.daily.models.factory import build_model
 
 # Configure logging
 logging.basicConfig(
@@ -52,8 +49,8 @@ def required_training_days(window_days: int) -> int:
     """
     Minimum number of daily rows needed to train.
 
-    The 70/20/10 split gives the validation set 20% of the rows, and it needs
-    at least window_days + 1 of them to build one sample: rows >= (window + 1) * 5.
+    The rule is ``(window + 1) * 5`` rows. It dates from the 70/20/10 train/validation
+    split (the 20% validation share needed window + 1 rows) and stays as the floor.
     """
     return (window_days + 1) * 5
 
@@ -217,9 +214,7 @@ def main() -> int:
 
         # Train model
         logger.info("Training LinearRegressionModel on log returns...")
-        model = LinearRegressionModel(
-            window_days=window_days, n_features=feature_count(window_days)
-        )
+        model = build_model("linear", window_days, feature_count(window_days))
         model.train(training_set.X, training_set.y)
 
         # Calculate training date range
@@ -249,317 +244,6 @@ def main() -> int:
         return 1
     finally:
         session.close()
-
-
-def train_single_model(
-    model_class: type[BaseModel],
-    model_name: str,
-    X_train: npt.NDArray[np.float64],
-    y_train: npt.NDArray[np.float64],
-    X_val: npt.NDArray[np.float64],
-    y_val: npt.NDArray[np.float64],
-    window_days: int,
-    base_close_val: npt.NDArray[np.float64] | None = None,
-) -> tuple[BaseModel, float] | None:
-    """
-    Train a single model with validation data and calculate validation error.
-
-    Args:
-        model_class: Model class to instantiate (e.g., LinearRegressionModel)
-        model_name: Model name (e.g., "linear")
-        X_train: Training features
-        y_train: Training targets
-        X_val: Validation features
-        y_val: Validation targets
-        window_days: Window size for model
-        base_close_val: Close of the day each validation sample was built at. When
-            given, y_val and the predictions are log returns and the error is the
-            MAPE of the prices they imply (base_close * exp(return)); when None,
-            the MAPE is computed on y_val directly.
-
-    Returns:
-        Tuple of (trained_model, validation_error_pct) or None if training fails
-
-    Example:
-        >>> model, error = train_single_model(
-        ...     LinearRegressionModel, "linear", X_train, y_train, X_val, y_val, 30
-        ... )
-        >>> print(f"Linear validation error: {error:.2f}%")
-    """
-    import time
-
-    logger.info(f"Training {model_name}Model...")
-    start_time = time.time()
-
-    try:
-        # Same construction the walk-forward backtest uses
-        model = instantiate_model(model_class, window_days, X_train.shape[1])
-
-        # Train model
-        model.train(X_train, y_train)
-
-        # Validate model - predict on validation set
-        predictions = [model.predict(X_val[i : i + 1]) for i in range(len(X_val))]
-        y_val_pred = np.array(predictions)
-
-        # Calculate MAPE validation error (on prices when targets are returns)
-        if base_close_val is None:
-            validation_error = calculate_mape(y_val, y_val_pred)
-        else:
-            validation_error = calculate_mape(
-                base_close_val * np.exp(y_val), base_close_val * np.exp(y_val_pred)
-            )
-
-        # Calculate training duration
-        duration = time.time() - start_time
-
-        logger.info(
-            f"✓ {model_name}Model completed in {duration:.1f}s, "
-            f"validation error: {validation_error:.2f}%"
-        )
-
-        return model, validation_error
-
-    except Exception as e:
-        logger.error(f"✗ {model_name}Model training failed: {e}")
-        return None
-
-
-def model_registry() -> dict[str, type[BaseModel]]:
-    """
-    Model classes ``train_all_models`` trains: the linear model, the only one (#184).
-
-    Only ``train_all_models`` uses this registry, and only
-    ``scripts/train_all_models.py`` (a manual run) calls that. The crons do not:
-    ``main()`` here trains the linear model alone.
-    """
-    return {"linear": LinearRegressionModel}
-
-
-def _train_candidate_models(
-    model_classes: dict[str, type[BaseModel]],
-    *,
-    X_train: npt.NDArray[np.float64],
-    y_train: npt.NDArray[np.float64],
-    x_val: npt.NDArray[np.float64],
-    y_val: npt.NDArray[np.float64],
-    window_days: int,
-    base_close_val: npt.NDArray[np.float64] | None,
-) -> list[tuple[str, BaseModel, float]]:
-    """
-    Train every candidate model and keep the ones that trained successfully.
-
-    A model that fails is skipped (``train_single_model`` logs the error), so
-    the result can be shorter than ``model_classes`` or empty.
-
-    Returns:
-        List of (model_name, trained_model, validation_error_pct) tuples
-    """
-    successful_models: list[tuple[str, BaseModel, float]] = []
-
-    for model_name, model_class in model_classes.items():
-        result = train_single_model(
-            model_class=model_class,
-            model_name=model_name,
-            X_train=X_train,
-            y_train=y_train,
-            X_val=x_val,
-            y_val=y_val,
-            window_days=window_days,
-            base_close_val=base_close_val,
-        )
-
-        if result is not None:
-            model_instance, validation_error = result
-            successful_models.append((model_name, model_instance, validation_error))
-
-    return successful_models
-
-
-def _next_version_number(session: Session, model_name: str) -> int:
-    """
-    Version number for the next saved model with this name.
-
-    Takes the latest saved model whose name starts with ``model_name`` and
-    increments its version (``"v3"`` -> 4). Starts at 1 when there is no
-    previous model or its version cannot be parsed.
-    """
-    stmt = (
-        select(Model)
-        .where(Model.name.like(f"{model_name}%"))
-        .order_by(Model.trained_at.desc())
-        .limit(1)
-    )
-    latest = session.execute(stmt).scalar_one_or_none()
-
-    if not (latest and latest.version):
-        return 1
-
-    try:
-        return int(latest.version.split("v")[-1]) + 1
-    except (ValueError, IndexError):
-        return 1
-
-
-def train_all_models(
-    session: Session,
-    window_days: int | None = None,
-    activate: bool = False,
-) -> list[Model]:
-    """
-    Train all available ML models with the same training data.
-
-    Uses every stored BTCUSDT daily row. The linear model is the only candidate.
-
-    This function:
-    1. Reads the window from settings.training_window_days (if not provided)
-    2. Fetches historical price data
-    3. Splits into train/validation sets (70/20/10)
-    4. Trains the candidate models (the linear model only)
-    5. Calculates validation error (MAPE) for each
-    6. Saves all models to database with is_active=False
-    7. Activates the model with lowest validation error, only if ``activate``
-
-    Args:
-        session: Database session
-        window_days: Size of sliding window (settings.training_window_days if None)
-        activate: Activate the best model. Off by default so a manual run cannot
-            replace the active model (the daily predictor uses it) by accident.
-
-    Returns:
-        List of created Model records
-
-    Raises:
-        ValueError: If insufficient data available
-    """
-    logger.info("Starting multi-model training...")
-
-    if window_days is None:
-        window_days = settings.training_window_days
-    logger.info(f"Training window: {window_days}d")
-
-    # Fetch training data
-    series = fetch_training_data(session, window_days)
-    require_fresh_series(series.dates, utc_today())
-
-    MODEL_CLASSES = model_registry()
-
-    # Split into train/validation (70/20/10)
-    logger.info("Splitting data: 70% train, 20% validation, 10% buffer")
-    closes = np.array([float(c) for c in series.closes])
-    volumes = np.array([float(v) for v in series.volumes])
-    train_closes, val_closes = split_train_validation(
-        closes, train_pct=0.7, val_pct=0.2
-    )
-    train_volumes, val_volumes = split_train_validation(
-        volumes, train_pct=0.7, val_pct=0.2
-    )
-
-    logger.info(
-        f"Train set: {len(train_closes)} days, Validation set: {len(val_closes)} days"
-    )
-
-    # Return features and next-day log return targets for each set
-    train_set = build_training_set(train_closes, train_volumes, window_days)
-    val_set = build_training_set(val_closes, val_volumes, window_days)
-    X_train, y_train = train_set.X, train_set.y
-    x_val, y_val = val_set.X, val_set.y
-
-    logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(x_val)}")
-
-    # Train all models
-    successful_models = _train_candidate_models(
-        MODEL_CLASSES,
-        X_train=X_train,
-        y_train=y_train,
-        x_val=x_val,
-        y_val=y_val,
-        window_days=window_days,
-        base_close_val=val_set.base_close,
-    )
-
-    if not successful_models:
-        raise ValueError("All models failed to train")
-
-    num_success = len(successful_models)
-    num_total = len(MODEL_CLASSES)
-    logger.info(f"Successfully trained {num_success}/{num_total} models")
-
-    # Calculate training date range
-    train_to = utc_today()
-    train_from = train_to - timedelta(days=len(series))
-
-    # Get next version number for each model
-    # Query max version for each model name
-    saved_models = []
-
-    for model_name, model_instance, validation_error in successful_models:
-        version_num = _next_version_number(session, model_name)
-
-        version = f"v{version_num}"
-        full_name = f"{model_name}_{version}"
-
-        # Serialize model
-        model_artifact = model_instance.serialize()
-
-        # Create model record (is_active=False initially)
-        model_record = Model(
-            name=full_name,
-            version=version,
-            params={
-                "window_days": window_days,
-                "horizon_days": 1,
-                "target": LOG_RETURN_TARGET,
-                "validation_error_pct": round(validation_error, 2),
-                "training_samples": len(X_train),
-                "validation_samples": len(x_val),
-            },
-            artifact=model_artifact,
-            trained_at=datetime.now(UTC),
-            train_from=train_from,
-            train_to=train_to,
-            timeframe="1d",
-            is_active=False,  # All start inactive
-        )
-
-        session.add(model_record)
-        saved_models.append((model_record, validation_error))
-
-    # Commit all models
-    session.commit()
-
-    # Refresh to get IDs
-    for model_record, _ in saved_models:
-        session.refresh(model_record)
-
-    logger.info(f"Saved {len(saved_models)} models to database")
-
-    # Find best model (lowest validation error)
-    best_model, best_error = min(saved_models, key=lambda x: x[1])
-
-    logger.info(
-        f"Best model: {best_model.name} with {best_error:.2f}% validation error"
-    )
-
-    if activate:
-        # Commits internally, scoped to its own timeframe
-        crud_activate_model(session, best_model.id)
-        logger.info(f"✓ Activated {best_model.name}")
-    else:
-        logger.info(
-            f"Not activating {best_model.name} (pass activate=True to activate it)"
-        )
-
-    # Log summary
-    logger.info("=" * 60)
-    logger.info("Multi-model training summary:")
-    for model_record, val_error in saved_models:
-        is_best = model_record.id == best_model.id
-        active_marker = "✓ ACTIVE" if activate and is_best else ""
-        logger.info(f"  - {model_record.name}: {val_error:.2f}% error {active_marker}")
-    logger.info("=" * 60)
-
-    return [m for m, _ in saved_models]
 
 
 if __name__ == "__main__":

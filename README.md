@@ -593,7 +593,7 @@ Este es un proyecto personal de aprendizaje, pero se aceptan sugerencias vía is
 - **Target:** retorno logarítmico del día siguiente
 - **Librería:** scikit-learn
 
-**Otros modelos:** XGBoost, LSTM y ARIMA se eliminaron en la issue [#184](https://github.com/cuauhtemocbe/btc-predictor/issues/184) (siguen en el historial de git). `BaseModel` abstract queda como la interfaz que usan el trainer y el predictor; cualquier modelo nuevo debe superar a la regresión lineal y a la regla de trading después de comisiones. `scripts/train_all_models.py` entrena y guarda el modelo lineal sin activarlo salvo que se pase `--activate`; sin él imprime el comando `activate_model.py`.
+**Otros modelos:** XGBoost, LSTM y ARIMA se eliminaron en la issue [#184](https://github.com/cuauhtemocbe/btc-predictor/issues/184) (siguen en el historial de git). `BaseModel` abstract queda como la interfaz que usan el trainer y el predictor; cualquier modelo nuevo debe superar a la regresión lineal y a la regla de trading después de comisiones. El trainer diario (`python -m workers.daily.trainer`) entrena y activa el modelo lineal; no hay modo multi-modelo ni selección del mejor de varios (se quitaron en #184, segundo paso).
 
 ### Estrategia PnL
 

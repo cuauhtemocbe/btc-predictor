@@ -108,7 +108,6 @@ markers = [
 "scripts/backtest_report.py" = 90
 "scripts/list_models.py" = 95
 "scripts/load_binance_history.py" = 90
-"scripts/train_all_models.py" = 95
 "shared/btc_shared/strategies.py" = 95
 "shared/shared/assets.py" = 95
 "shared/shared/baselines.py" = 95

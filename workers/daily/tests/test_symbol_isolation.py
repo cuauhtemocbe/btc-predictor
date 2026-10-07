@@ -7,7 +7,6 @@ feature vectors twice as long as the model expected ("X must have 21 features,
 got 42") and used the gold price as the "current BTC price".
 """
 
-from argparse import Namespace
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
@@ -113,9 +112,6 @@ class TestPredictorSymbolIsolation:
         db_session.commit()
 
         monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-        monkeypatch.setattr(
-            predictor, "parse_args", lambda: Namespace(multi_model=False)
-        )
 
         assert predictor.main() == 0
 

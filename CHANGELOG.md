@@ -104,8 +104,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/backtest.py` accepts only `linear` (anything else exits 2), and
   `deserialize_model` raises `RuntimeError` for a stored model that is not linear. All
   production models were `linear_v1`, so no data migration is needed. The code stays in
-  git history. `train_all_models` now trains the linear model alone; its removal and
-  that of the multi-model mode are the second step of the issue.
+  git history.
+- With one model, the machinery that chose among several (#184, step 2; supersedes
+  #159): `train_all_models`, `scripts/train_all_models.py`, `split_train_validation`,
+  `calculate_mape`, `model_registry`, `train_single_model`, the multi-model prediction
+  mode (`--multi-model`, `get_active_models`, `_predict_multi_model`) and its US-025
+  tests. The predictor loads the one active `1d` model (`get_active_model`) and no
+  longer parses command-line arguments, so a leftover `--multi-model` in a start
+  command is ignored. `build_model` stays in `workers/daily/models/factory.py` because
+  the backtest CLI takes its `--model` choices from it. The database schema is
+  unchanged, so it still allows several model families.
 
 - The weekly worker (`workers/weekly/`, `railway.weekly.toml`), the `weekly-predictor`
   Railway service, the Weekly dashboard tab and the `1w` timeframe (#183). At 52

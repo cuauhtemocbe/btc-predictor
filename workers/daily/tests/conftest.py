@@ -239,42 +239,6 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
     return model_record
 
 
-@pytest.fixture
-def sample_second_linear_model(
-    db_session: Session, cached_linear_artifact: bytes
-) -> Model:
-    """
-    Function-scoped second linear model ("linear_b_v1") using the cached artifact.
-
-    Stands in for another model family in the multi-model tests (#184): the
-    family is the name without its ``_v<N>`` suffix, so "linear_b" can be active
-    next to "linear" (one active version per family).
-
-    Uses pre-trained model artifact (cached at module scope) to avoid
-    redundant training. Each test gets a fresh DB record.
-
-    Returns:
-        Model record with is_active=False (default for multi-model tests)
-    """
-    # Use cached artifact (NO re-training!)
-    model_record = Model(
-        name="linear_b_v1",
-        version="1.0.0",
-        params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
-        artifact=cached_linear_artifact,  # Use cached bytes
-        trained_at=datetime.now(UTC),
-        train_from=utc_today() - timedelta(days=60),
-        train_to=utc_today() - timedelta(days=1),
-        is_active=False,  # Inactive by default (tests will activate as needed)
-    )
-
-    db_session.add(model_record)
-    db_session.commit()
-    db_session.refresh(model_record)
-
-    return model_record
-
-
 @pytest.fixture(scope="module")
 def cached_price_data_31_days() -> list[BarRow]:
     """

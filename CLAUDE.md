@@ -39,9 +39,10 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 - UNIQUE constraints prevent duplicates on retries
 - Safe to re-run jobs without data corruption
 
-### 3. Abstract BaseModel for ML Extensibility
-- All ML models inherit from `BaseModel` abstract class
-- A new model needs no infrastructure change; `LinearRegressionModel` is the only one and the benchmark any new model must beat
+### 3. Abstract BaseModel as the Model Interface
+- All ML models inherit from `BaseModel`; the trainer, the predictor and the backtest only use that interface
+- `LinearRegressionModel` is the only model and the benchmark any new model must beat. The daily job trains one model and the predictor uses the one active `1d` model; there is no multi-model mode, best-of-several selection or validation-MAPE ranking (removed in #184)
+- Models are built through `workers.daily.models.factory.build_model`, the same call the daily trainer and the backtest make
 
 ### 4. Two-Phase Prediction Lifecycle
 - **Phase 1:** Predictor inserts prediction with `actual_price=NULL`

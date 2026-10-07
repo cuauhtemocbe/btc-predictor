@@ -63,7 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("=" * 90)
             print("No models found in database.")
             print("=" * 90)
-            print("Run 'python scripts/train_all_models.py' to train models.")
+            print("Run 'python -m workers.daily.trainer' to train a model.")
             return 0
 
         # Display table header

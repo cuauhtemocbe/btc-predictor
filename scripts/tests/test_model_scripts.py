@@ -4,7 +4,6 @@ Tests for the operational model CLIs (#160).
 Covers:
 - scripts/activate_model.py: argument parsing, activation, error exit codes
 - scripts/list_models.py: table output, active marker, no-active warning
-- scripts/train_all_models.py: exit codes and opt-in activation (--activate)
 """
 
 from collections.abc import Callable
@@ -14,8 +13,8 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session
 
-from scripts import activate_model, list_models, train_all_models
-from shared.db.crud import get_active_model, get_all_models
+from scripts import activate_model, list_models
+from shared.db.crud import get_all_models
 from shared.db.models import Model
 
 
@@ -160,7 +159,9 @@ class TestListModels:
 
         assert list_models.main([]) == 0
 
-        assert "No models found in database." in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "No models found in database." in out
+        assert "python -m workers.daily.trainer" in out
 
     def test_rows_show_active_marker_and_validation_error(
         self,
@@ -222,104 +223,5 @@ class TestListModels:
 
         with caplog.at_level("ERROR"):
             assert list_models.main([]) == 1
-
-        assert "UNEXPECTED ERROR: database down" in caplog.text
-
-
-class TestTrainAllModels:
-    """The trainer itself is covered in workers/daily/tests; these are the CLI."""
-
-    @pytest.fixture
-    def calls(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        patch_session: Callable[[Any], None],
-    ) -> list[bool]:
-        """Replace the trainer with a fake and return the ``activate`` values seen."""
-        patch_session(train_all_models)
-        seen: list[bool] = []
-
-        def fake_train(
-            session: Session, window_days: int | None = None, activate: bool = False
-        ) -> list[Model]:
-            seen.append(activate)
-            worse = _save_model(
-                session, "xgboost_v1", params={"validation_error_pct": 3.0}
-            )
-            best = _save_model(
-                session, "linear_v1", params={"validation_error_pct": 1.0}
-            )
-            if activate:
-                best.is_active = True
-                session.commit()
-            return [worse, best]
-
-        monkeypatch.setattr(train_all_models, "train_all_models", fake_train)
-        return seen
-
-    def test_default_run_does_not_activate_and_prints_command(
-        self,
-        db_session: Session,
-        calls: list[bool],
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        previous = _save_model(db_session, "linear_v0", active=True)
-
-        with caplog.at_level("INFO"):
-            assert train_all_models.main([]) == 0
-
-        assert calls == [False]
-        assert _active_ids(db_session) == [previous.id]
-        best = next(m for m in get_all_models(db_session) if m.name == "linear_v1")
-        assert f"activate_model.py --model-id={best.id}" in caplog.text
-
-    def test_activate_flag_is_passed_to_the_trainer(
-        self,
-        db_session: Session,
-        calls: list[bool],
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        with caplog.at_level("INFO"):
-            assert train_all_models.main(["--activate"]) == 0
-
-        assert calls == [True]
-        active = get_active_model(db_session)
-        assert active is not None
-        assert active.name == "linear_v1"
-        assert "activate_model.py" not in caplog.text
-
-    def test_insufficient_data_returns_1(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        patch_session: Callable[[Any], None],
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        patch_session(train_all_models)
-
-        def too_few(session: Session, **kwargs: Any) -> list[Model]:
-            raise ValueError("need 110 daily rows, have 29")
-
-        monkeypatch.setattr(train_all_models, "train_all_models", too_few)
-
-        with caplog.at_level("ERROR"):
-            assert train_all_models.main([]) == 1
-
-        assert "VALIDATION ERROR: need 110 daily rows, have 29" in caplog.text
-
-    def test_unexpected_exception_returns_1(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        patch_session: Callable[[Any], None],
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        patch_session(train_all_models)
-
-        def boom(session: Session, **kwargs: Any) -> list[Model]:
-            raise RuntimeError("database down")
-
-        monkeypatch.setattr(train_all_models, "train_all_models", boom)
-
-        with caplog.at_level("ERROR"):
-            assert train_all_models.main([]) == 1
 
         assert "UNEXPECTED ERROR: database down" in caplog.text
