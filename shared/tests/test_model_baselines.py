@@ -4,6 +4,7 @@ Baselines of stored models and the symbol filter of the shared metric queries (#
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from sqlalchemy.orm import Session
@@ -18,7 +19,6 @@ from shared.model_baselines import (
     NOT_BEATING,
     baseline_for_predictions,
     daily_closes,
-    get_model_baseline,
     verdict,
 )
 from shared.utils import get_all_models_metrics
@@ -99,6 +99,12 @@ def _evaluate(
     db.flush()
 
 
+def _baseline(db: Session, symbol: str) -> dict[str, Any] | None:
+    """Baselines over the evaluated daily predictions of ``symbol``'s models."""
+    predictions = get_evaluated_predictions(db, timeframe="1d", symbol=symbol)
+    return baseline_for_predictions(db, symbol, predictions)
+
+
 def _report(edge: float | None, significant: bool | None) -> BaselineReport:
     return BaselineReport(
         n_days=10,
@@ -144,7 +150,7 @@ def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session) 
     _prices(db_session, "BTCUSDT", closes)
     _evaluate(db_session, model, closes, [i % 2 == 1 for i in range(2, 12)])
 
-    baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
+    baseline = _baseline(db_session, "BTCUSDT")
 
     assert baseline is not None
     assert baseline["n_days"] == 10
@@ -153,25 +159,6 @@ def test_baseline_covers_exactly_the_models_evaluated_days(db_session: Session) 
     assert baseline["persistence_n_days"] == 10
     assert baseline["edge"] == pytest.approx(0.5)
     assert baseline["verdict"] == BEATS
-
-
-def test_baseline_respects_the_date_filters(db_session: Session) -> None:
-    closes = [100.0 + i for i in range(12)]
-    model = _model(db_session, "BTCUSDT")
-    _prices(db_session, "BTCUSDT", closes)
-    _evaluate(db_session, model, closes, [True] * 10)
-
-    baseline = get_model_baseline(
-        db_session,
-        model.id,
-        "BTCUSDT",
-        start_date=FIRST_DAY + timedelta(days=4),
-        end_date=FIRST_DAY + timedelta(days=7),
-        timeframe="1d",
-    )
-
-    assert baseline is not None
-    assert baseline["n_days"] == 4
 
 
 def test_persistence_skips_days_without_a_stored_previous_close(
@@ -183,7 +170,7 @@ def test_persistence_skips_days_without_a_stored_previous_close(
     _evaluate(db_session, model, closes, [True] * 10)
     _prices(db_session, "BTCUSDT", closes[5:], start_index=5)  # last 7 closes only
 
-    baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
+    baseline = _baseline(db_session, "BTCUSDT")
 
     assert baseline is not None
     assert baseline["n_days"] == 10
@@ -199,32 +186,10 @@ def test_previous_close_comes_from_the_models_own_symbol(db_session: Session) ->
     _prices(db_session, "PAXGUSDT", gold_closes)
     _evaluate(db_session, model, btc_closes, [True] * 4)
 
-    baseline = get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d")
+    baseline = _baseline(db_session, "BTCUSDT")
 
     assert baseline is not None
     assert baseline["persistence_accuracy"] == 1.0
-
-
-@pytest.mark.parametrize("timeframe", ["1w", "1h", None])
-def test_baseline_is_unavailable_outside_the_daily_timeframe(
-    db_session: Session, timeframe: str | None
-) -> None:
-    closes = [100.0 + i for i in range(8)]
-    model = _model(db_session, "BTCUSDT")
-    _prices(db_session, "BTCUSDT", closes)
-    _evaluate(db_session, model, closes, [True] * 6)
-
-    assert (
-        get_model_baseline(db_session, model.id, "BTCUSDT", timeframe=timeframe) is None
-    )
-
-
-def test_baseline_is_none_for_a_model_without_evaluated_predictions(
-    db_session: Session,
-) -> None:
-    model = _model(db_session, "BTCUSDT")
-
-    assert get_model_baseline(db_session, model.id, "BTCUSDT", timeframe="1d") is None
 
 
 def test_daily_closes_takes_the_latest_row_of_each_day(db_session: Session) -> None:

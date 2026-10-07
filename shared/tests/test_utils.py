@@ -17,20 +17,12 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction
 from shared.utils import (
-    calculate_accuracy,
-    calculate_max_drawdown_pct,
-    calculate_model_mape,
     calculate_pnl,
     calculate_pnl_long_short,
     calculate_pnl_realistic,
     calculate_pnl_threshold,
-    calculate_sharpe_ratio,
-    calculate_total_pnl,
-    calculate_win_rate,
     get_all_models_metrics,
-    get_cumulative_pnl,
     get_family_cumulative_pnl,
-    get_model_returns,
     utc_now,
     utc_today,
 )
@@ -441,511 +433,9 @@ class TestCalculatePnlRealistic:
 # ============================================================================
 
 
-class TestCalculateAccuracy:
-    """Test calculate_accuracy function for model comparison dashboard."""
-
-    def test_accuracy_with_all_correct_predictions(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test 100% accuracy when all predictions are correct."""
-        model = sample_model(name="linear_v1")
-
-        # Create 3 correct predictions
-        for i in range(3):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 10 + i),
-                direction_correct=True,
-            )
-
-        accuracy = calculate_accuracy(db_session, model.id)
-
-        assert accuracy == 1.0  # 100%
-
-    def test_accuracy_with_mixed_predictions(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test accuracy calculation with mix of correct/incorrect predictions."""
-        model = sample_model(name="lstm_v1")
-
-        # Create 5 predictions: 3 correct, 2 incorrect
-        for i in range(3):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                direction_correct=True,
-            )
-        for i in range(2):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 4 + i),
-                direction_correct=False,
-            )
-
-        accuracy = calculate_accuracy(db_session, model.id)
-
-        assert accuracy == 0.6  # 60% (3/5)
-
-    def test_accuracy_returns_none_for_no_evaluated_predictions(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        sample_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test that None is returned when no evaluated predictions exist."""
-        model = sample_model(name="xgboost_v1")
-
-        # Create unevaluated predictions (actual_price = NULL)
-        sample_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
-        sample_prediction(model_id=model.id, predicted_for=date(2024, 5, 2))
-
-        accuracy = calculate_accuracy(db_session, model.id)
-
-        assert accuracy is None
-
-    def test_accuracy_with_date_filter(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test accuracy calculation with date range filter."""
-        model = sample_model(name="arima_v1")
-
-        # Predictions outside range
-        evaluated_prediction(
-            model_id=model.id, predicted_for=date(2024, 4, 28), direction_correct=False
-        )
-        evaluated_prediction(
-            model_id=model.id, predicted_for=date(2024, 4, 29), direction_correct=False
-        )
-
-        # Predictions inside range (May 1-10): 2 correct
-        for i in range(2):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                direction_correct=True,
-            )
-
-        # Predictions outside range
-        evaluated_prediction(
-            model_id=model.id, predicted_for=date(2024, 5, 15), direction_correct=False
-        )
-
-        accuracy = calculate_accuracy(
-            db_session,
-            model.id,
-            start_date=date(2024, 5, 1),
-            end_date=date(2024, 5, 10),
-        )
-
-        assert accuracy == 1.0  # 100% for May 1-10 only
-
-
-class TestCalculateModelMape:
-    """Test calculate_model_mape function."""
-
-    def test_mape_calculation_from_database(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test MAPE calculation from database predictions."""
-        model = sample_model(name="linear_v1")
-
-        # Create predictions with known errors
-        # Error %: 2%, 1.5%, 3%
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            predicted_price=Decimal("67000"),
-            actual_price=Decimal("68000"),  # error: 1000/68000 = 1.47%
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            predicted_price=Decimal("68000"),
-            actual_price=Decimal("67000"),  # error: 1000/67000 = 1.49%
-        )
-
-        mape = calculate_model_mape(db_session, model.id)
-
-        # Expected: (1.47 + 1.49) / 2 ≈ 1.48%
-        assert mape is not None
-        assert 1.4 < mape < 1.6
-
-    def test_mape_returns_none_for_no_predictions(
-        self, db_session: Session, sample_model: Callable[..., Model]
-    ) -> None:
-        """Test that None is returned when no predictions exist."""
-        model = sample_model(name="lstm_v1")
-
-        mape = calculate_model_mape(db_session, model.id)
-
-        assert mape is None
-
-
-class TestCalculateTotalPnl:
-    """Test calculate_total_pnl function."""
-
-    def test_total_pnl_sums_all_predictions(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test total PnL calculation sums all predictions."""
-        model = sample_model(name="xgboost_v1")
-
-        # Create predictions with different PnLs
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("-50.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 3),
-            pnl_simulated=Decimal("200.00"),
-        )
-
-        total_pnl = calculate_total_pnl(db_session, model.id)
-
-        assert total_pnl == 250.0  # 100 - 50 + 200
-
-    def test_total_pnl_returns_none_for_no_predictions(
-        self, db_session: Session, sample_model: Callable[..., Model]
-    ) -> None:
-        """Test that None is returned when no predictions exist."""
-        model = sample_model(name="arima_v1")
-
-        total_pnl = calculate_total_pnl(db_session, model.id)
-
-        assert total_pnl is None
-
-    def test_total_pnl_with_date_filter(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test total PnL with date range filter."""
-        model = sample_model(name="linear_v1")
-
-        # Outside range
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 4, 30),
-            pnl_simulated=Decimal("1000.00"),
-        )
-
-        # Inside range
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("50.00"),
-        )
-
-        # Outside range
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 10),
-            pnl_simulated=Decimal("2000.00"),
-        )
-
-        total_pnl = calculate_total_pnl(
-            db_session, model.id, start_date=date(2024, 5, 1), end_date=date(2024, 5, 5)
-        )
-
-        assert total_pnl == 150.0  # Only May 1-5
-
-
-class TestCalculateWinRate:
-    """Test calculate_win_rate function."""
-
-    def test_win_rate_calculation(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test win rate calculation: % of positive PnL predictions."""
-        model = sample_model(name="lstm_v1")
-
-        # Create 5 predictions: 3 wins, 2 losses
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("50.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 3),
-            pnl_simulated=Decimal("-30.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 4),
-            pnl_simulated=Decimal("150.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 5),
-            pnl_simulated=Decimal("-20.00"),
-        )
-
-        win_rate = calculate_win_rate(db_session, model.id)
-
-        assert win_rate == 0.6  # 60% (3/5)
-
-    def test_win_rate_with_zero_pnl(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test that zero PnL counts as a loss."""
-        model = sample_model(name="xgboost_v1")
-
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("0.00"),  # No trade
-        )
-
-        win_rate = calculate_win_rate(db_session, model.id)
-
-        assert win_rate == 0.5  # 50% (1 win, 1 zero)
-
-
-class TestCalculateSharpeRatio:
-    """Test calculate_sharpe_ratio function."""
-
-    def test_sharpe_ratio_calculation(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test Sharpe ratio calculation with multiple predictions."""
-        model = sample_model(name="arima_v1")
-
-        # Create predictions with varying returns
-        for i, pnl in enumerate([100, -50, 150, 80, -30]):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                price_at_prediction=Decimal("67000.00"),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        sharpe = calculate_sharpe_ratio(db_session, model.id)
-
-        # Should return a numeric value (can be positive or negative)
-        assert sharpe is not None
-        assert isinstance(sharpe, float)
-
-    def test_sharpe_ratio_returns_none_for_insufficient_data(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test that None is returned when < 2 predictions."""
-        model = sample_model(name="linear_v1")
-
-        # Only 1 prediction
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-
-        sharpe = calculate_sharpe_ratio(db_session, model.id)
-
-        assert sharpe is None  # Need at least 2 for stdev
-
-
-class TestCalculateMaxDrawdownPct:
-    """Test calculate_max_drawdown_pct function (compounded equity curve, #177)."""
-
-    def test_max_drawdown_pct_is_minus_20_for_plus_10_minus_20_plus_5(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Returns of +10%, -20% and +5% (price 100) give a -20% max drawdown."""
-        model = sample_model(name="lstm_v1")
-        for i, pnl in enumerate([10, -20, 5]):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                price_at_prediction=Decimal("100.00"),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        max_dd = calculate_max_drawdown_pct(db_session, model.id)
-
-        assert max_dd == pytest.approx(-20.0)
-
-    def test_max_drawdown_pct_one_day_of_minus_5000_at_100000_is_minus_5_pct(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """The dollar curve read this as -50% of a 10,000 capital; it is -5%."""
-        model = sample_model(name="linear_v1")
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            price_at_prediction=Decimal("100000.00"),
-            pnl_simulated=Decimal("-5000.00"),
-        )
-
-        assert calculate_max_drawdown_pct(db_session, model.id) == pytest.approx(-5.0)
-
-    def test_max_drawdown_pct_compounds_the_returns_in_date_order(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Rows are read oldest first whatever the insertion order: +10%, -10%, -10%."""
-        model = sample_model(name="linear_v1")
-        for day, pnl in [(3, -10), (1, 10), (2, -10)]:
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, day),
-                price_at_prediction=Decimal("100.00"),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        assert calculate_max_drawdown_pct(db_session, model.id) == pytest.approx(-19.0)
-
-    def test_max_drawdown_pct_returns_none_for_no_predictions(
-        self, db_session: Session, sample_model: Callable[..., Model]
-    ) -> None:
-        """Test that None is returned when no predictions exist."""
-        model = sample_model(name="xgboost_v1")
-
-        assert calculate_max_drawdown_pct(db_session, model.id) is None
-
-
-class TestModelReturns:
-    """get_model_returns: pnl / price_at_prediction, oldest first (#177)."""
-
-    def test_skips_predictions_without_a_positive_price(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """A zero price has no return; the row is skipped, not counted as 0."""
-        model = sample_model(name="linear_v1")
-        for day, price, pnl in [
-            (1, "100.00", "10"),
-            (2, "0.00", "5"),
-            (3, "200.00", "-20"),
-        ]:
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, day),
-                price_at_prediction=Decimal(price),
-                pnl_simulated=Decimal(pnl),
-            )
-
-        returns = get_model_returns(db_session, model.id)
-
-        assert returns == pytest.approx([0.10, -0.10])
-
-    def test_uses_the_requested_pnl_column(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Rows whose chosen pnl column is NULL are skipped."""
-        model = sample_model(name="linear_v1")
-        evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, 1))
-
-        assert get_model_returns(db_session, model.id, pnl_column="pnl_threshold") == []
-
-
-class TestGetCumulativePnl:
-    """Test get_cumulative_pnl function."""
-
-    def test_cumulative_pnl_time_series(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """Test cumulative PnL time series generation."""
-        model = sample_model(name="linear_v1")
-
-        # Create predictions
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 1),
-            pnl_simulated=Decimal("100.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 2),
-            pnl_simulated=Decimal("-50.00"),
-        )
-        evaluated_prediction(
-            model_id=model.id,
-            predicted_for=date(2024, 5, 3),
-            pnl_simulated=Decimal("200.00"),
-        )
-
-        cumulative = get_cumulative_pnl(db_session, model.id)
-
-        assert len(cumulative) == 3
-        assert cumulative[0] == {"date": "2024-05-01", "cumulative_pnl": 100.0}
-        assert cumulative[1] == {"date": "2024-05-02", "cumulative_pnl": 50.0}
-        assert cumulative[2] == {"date": "2024-05-03", "cumulative_pnl": 250.0}
-
-    def test_cumulative_pnl_returns_empty_list_for_no_predictions(
-        self, db_session: Session, sample_model: Callable[..., Model]
-    ) -> None:
-        """Test that empty list is returned when no predictions exist."""
-        model = sample_model(name="arima_v1")
-
-        cumulative = get_cumulative_pnl(db_session, model.id)
-
-        assert cumulative == []
+def _family_row(db: Session, model: Model, **filters: Any) -> dict[str, Any]:
+    """The ``get_all_models_metrics`` row of the family ``model`` belongs to."""
+    return next(m for m in get_all_models_metrics(db, **filters) if m["id"] == model.id)
 
 
 class TestGetAllModelsMetrics:
@@ -1020,32 +510,6 @@ class TestGetAllModelsMetrics:
         assert metrics[0]["predictions_count"] == 0
         assert metrics[0]["accuracy"] is None
         assert metrics[0]["total_pnl"] is None
-
-
-class TestPerModelMetricsHonorFilters:
-    """The single-model metric functions keep their date and timeframe filters."""
-
-    def test_each_function_reads_only_the_filtered_days(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        model = sample_model(name="linear_v1")
-        for day in (1, 2, 3):
-            evaluated_prediction(model_id=model.id, predicted_for=date(2024, 5, day))
-        window: dict[str, Any] = {
-            "start_date": date(2024, 5, 2),
-            "end_date": date(2024, 5, 2),
-            "timeframe": "1d",
-        }
-
-        assert calculate_model_mape(db_session, model.id, **window) is not None
-        assert calculate_win_rate(db_session, model.id, **window) == 1.0
-        assert len(get_model_returns(db_session, model.id, **window)) == 1
-        assert get_cumulative_pnl(db_session, model.id, **window) == [
-            {"date": "2024-05-02", "cumulative_pnl": 500.0}
-        ]
 
 
 class TestFamilyAggregation:
@@ -1241,12 +705,16 @@ class TestMetricsForTheDailyTimeframe:
         sample_model: Callable[..., Model],
         evaluated_prediction: Callable[..., Prediction],
     ) -> None:
-        """Accuracy, total PnL and win rate for timeframe "1d"."""
+        """Accuracy, total PnL, win rate, Sharpe and drawdown for timeframe "1d"."""
         model = self._seed_daily(sample_model, evaluated_prediction)
 
-        assert calculate_accuracy(db_session, model.id, timeframe="1d") == 0.75
-        assert calculate_total_pnl(db_session, model.id, timeframe="1d") == 250.0
-        assert calculate_win_rate(db_session, model.id, timeframe="1d") == 0.75
+        row = _family_row(db_session, model, timeframe="1d")
+
+        assert row["accuracy"] == 0.75
+        assert row["total_pnl"] == 250.0
+        assert row["win_rate"] == 0.75
+        assert row["sharpe_ratio"] is not None
+        assert row["max_drawdown_pct"] is not None
 
     def test_missing_timeframe_gives_the_same_figures(
         self,
@@ -1257,40 +725,12 @@ class TestMetricsForTheDailyTimeframe:
         """Without a timeframe filter the daily figures are unchanged."""
         model = self._seed_daily(sample_model, evaluated_prediction)
 
-        assert calculate_total_pnl(db_session, model.id) == 250.0
+        daily = _family_row(db_session, model, timeframe="1d")
+        unfiltered = _family_row(db_session, model)
 
-    def test_cumulative_pnl_sharpe_and_drawdown_accept_the_daily_timeframe(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """The series, Sharpe ratio and drawdown take the same filter."""
-        model = self._seed_daily(sample_model, evaluated_prediction)
-
-        series = get_cumulative_pnl(db_session, model.id, timeframe="1d")
-
-        assert len(series) == 4
-        assert series[-1]["cumulative_pnl"] == 250.0
-        assert calculate_sharpe_ratio(db_session, model.id, timeframe="1d") is not None
-        assert (
-            calculate_max_drawdown_pct(db_session, model.id, timeframe="1d") is not None
-        )
-
-    def test_get_all_models_metrics_accepts_the_daily_timeframe(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        """get_all_models_metrics() threads timeframe through every metric."""
-        model = self._seed_daily(sample_model, evaluated_prediction)
-
-        metrics = get_all_models_metrics(db_session, timeframe="1d")
-
-        row = next(m for m in metrics if m["id"] == model.id)
-        assert row["predictions_count"] == 4
-        assert row["total_pnl"] == 250.0
+        assert unfiltered["total_pnl"] == 250.0
+        for key in ("accuracy", "win_rate", "sharpe_ratio", "max_drawdown_pct"):
+            assert unfiltered[key] == daily[key]
 
 
 class TestReturnBasedMetrics:
@@ -1320,7 +760,9 @@ class TestReturnBasedMetrics:
             statistics.fmean(returns) / statistics.stdev(returns) * math.sqrt(365)
         )
 
-        assert calculate_sharpe_ratio(db_session, model.id) == pytest.approx(expected)
+        assert _family_row(db_session, model)["sharpe_ratio"] == pytest.approx(
+            expected, abs=0.01
+        )
 
     def test_sharpe_ratio_does_not_depend_on_the_price_level(
         self,
@@ -1329,8 +771,8 @@ class TestReturnBasedMetrics:
         evaluated_prediction: Callable[..., Prediction],
     ) -> None:
         """The same percentage moves at BTC = 10,000 and 500,000 give one Sharpe."""
-        low = sample_model(name="linear_v1")
-        high = sample_model(name="linear_v2")
+        low = sample_model(name="linear_v1")  # one family per model
+        high = sample_model(name="ridge_v1")
         for i, ret in enumerate([0.01, -0.02, 0.03, 0.005, -0.01]):
             for model, price in ((low, 10_000), (high, 500_000)):
                 evaluated_prediction(
@@ -1340,8 +782,10 @@ class TestReturnBasedMetrics:
                     pnl_simulated=Decimal(str(round(ret * price, 2))),
                 )
 
-        assert calculate_sharpe_ratio(db_session, low.id) == pytest.approx(
-            calculate_sharpe_ratio(db_session, high.id)
+        low_sharpe = _family_row(db_session, low)["sharpe_ratio"]
+        assert low_sharpe is not None
+        assert low_sharpe == pytest.approx(
+            _family_row(db_session, high)["sharpe_ratio"]
         )
 
     def test_sharpe_ratio_is_none_when_the_returns_do_not_vary(
@@ -1358,25 +802,7 @@ class TestReturnBasedMetrics:
                 pnl_simulated=Decimal("0.00"),
             )
 
-        assert calculate_sharpe_ratio(db_session, model.id) is None
-
-    def test_sharpe_ratio_subtracts_the_risk_free_rate(
-        self,
-        db_session: Session,
-        sample_model: Callable[..., Model],
-        evaluated_prediction: Callable[..., Prediction],
-    ) -> None:
-        model = sample_model(name="linear_v1")
-        for i, pnl in enumerate([100, -50, 150, 80, -30]):
-            evaluated_prediction(
-                model_id=model.id,
-                predicted_for=date(2024, 5, 1 + i),
-                pnl_simulated=Decimal(str(pnl)),
-            )
-
-        assert calculate_sharpe_ratio(
-            db_session, model.id, risk_free_rate=0.05
-        ) != pytest.approx(calculate_sharpe_ratio(db_session, model.id))
+        assert _family_row(db_session, model)["sharpe_ratio"] is None
 
     def test_get_all_models_metrics_exposes_return_based_fields_only(
         self,
@@ -1387,7 +813,7 @@ class TestReturnBasedMetrics:
         """
         Given a model with returns of +10%, -10% and -10%
         Then max_drawdown_pct is the compounded -19%, the dollar max_drawdown
-        figure is gone, and sharpe_ratio matches calculate_sharpe_ratio
+        figure is gone
         """
         model = sample_model(name="linear_v1")
         for i, pnl in enumerate([10, -10, -10]):
@@ -1403,9 +829,6 @@ class TestReturnBasedMetrics:
 
         assert row["max_drawdown_pct"] == pytest.approx(-19.0)
         assert "max_drawdown" not in row
-        assert row["sharpe_ratio"] == pytest.approx(
-            calculate_sharpe_ratio(db_session, model.id), abs=0.01
-        )
 
     def test_get_all_models_metrics_has_no_return_metrics_without_predictions(
         self, db_session: Session, sample_model: Callable[..., Model]

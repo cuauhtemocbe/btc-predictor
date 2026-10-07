@@ -12,7 +12,7 @@ Plus comprehensive tests for:
 - PnL simulation integration
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -173,94 +173,6 @@ class TestCalculateMetrics:
 
         with pytest.raises(ValueError, match="actual_price cannot be zero"):
             evaluator.calculate_metrics(prediction, actual_price)
-
-
-class TestFindUnevaluatedPrediction:
-    """Test the find_unevaluated_prediction() function."""
-
-    def test_find_unevaluated_prediction(
-        self, db_session: Session, sample_unevaluated_prediction_for_today: Prediction
-    ) -> None:
-        """Should find prediction with actual_price=NULL."""
-        today = utc_today()
-
-        prediction = evaluator.find_unevaluated_prediction(db_session, today)
-
-        assert prediction is not None
-        assert prediction.id == sample_unevaluated_prediction_for_today.id
-        assert prediction.actual_price is None
-
-    def test_no_unevaluated_predictions(
-        self, db_session: Session, sample_evaluated_prediction_for_today: Prediction
-    ) -> None:
-        """Should return None when all predictions are evaluated."""
-        today = utc_today()
-
-        prediction = evaluator.find_unevaluated_prediction(db_session, today)
-
-        assert prediction is None
-
-    def test_no_predictions_for_date(self, db_session: Session) -> None:
-        """Should return None when no predictions exist for the date."""
-        today = utc_today()
-
-        prediction = evaluator.find_unevaluated_prediction(db_session, today)
-
-        assert prediction is None
-
-    def test_multiple_predictions_returns_first_by_model_id(
-        self, db_session: Session, sample_trained_model: Model
-    ) -> None:
-        """
-        Should return first prediction ordered by model_id.
-
-        When multiple models predict for the same day.
-        """
-        today = utc_today()
-
-        # Create a second model with higher ID
-        model2 = Model(
-            name="linear_v2",
-            version="1.0.0",
-            is_active=False,
-            trained_at=datetime.now(UTC),
-            train_from=today - timedelta(days=90),
-            train_to=today - timedelta(days=1),
-            params={"window_days": 30},
-            artifact=b"model2_artifact",
-        )
-        db_session.add(model2)
-        db_session.commit()
-
-        # Create two unevaluated predictions for today from different models
-        prediction1 = Prediction(
-            model_id=sample_trained_model.id,  # Lower model_id
-            predicted_for=today,
-            timeframe="1d",
-            predicted_at=datetime.now(UTC) - timedelta(hours=2),
-            price_at_prediction=Decimal("66000.00"),
-            predicted_price=Decimal("67000.00"),
-            actual_price=None,
-        )
-        prediction2 = Prediction(
-            model_id=model2.id,  # Higher model_id
-            predicted_for=today,
-            timeframe="1d",
-            predicted_at=datetime.now(UTC),
-            price_at_prediction=Decimal("66500.00"),
-            predicted_price=Decimal("67500.00"),
-            actual_price=None,
-        )
-
-        db_session.add_all([prediction1, prediction2])
-        db_session.commit()
-
-        result = evaluator.find_unevaluated_prediction(db_session, today)
-
-        # Should return prediction with lowest model_id (consistent ordering)
-        assert result is not None
-        assert result.model_id == sample_trained_model.id
-        assert result.predicted_price == Decimal("67000.00")
 
 
 class TestFetchActualPrice:
