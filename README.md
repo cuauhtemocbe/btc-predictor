@@ -237,7 +237,7 @@ GitHub Actions ejecuta la misma validación dentro de Docker en cada push y pull
 - Cobertura mínima por módulo crítico (`[tool.coverage_thresholds]` en `pyproject.toml`)
 - Reporte de cobertura como artefacto del workflow
 
-El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
+El workflow semanal de calidad ejecuta mutation testing con Cosmic Ray (máximo 45 minutos) y sube el artefacto `mutation-report`; si se agota el tiempo, el reporte es parcial e indica cuántos mutantes se completaron. Los despliegues a Railway continúan gestionados por la integración nativa de Railway con GitHub; no se duplican mediante otro workflow ni requieren secretos Railway en GitHub Actions.
 
 La protección de `main` y la exigencia de checks obligatorios se configura por separado en la issue [#49](https://github.com/cuauhtemocbe/btc-predictor/issues/49).
 
