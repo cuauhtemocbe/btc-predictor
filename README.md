@@ -168,7 +168,7 @@ Los tests usan bases de datos propias (`btcpredictor_test`, `btcpredictor_test_g
 
 ### CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`, en cada pull request y en cada push a `main`) corre en Docker: Ruff (lint y formato), mypy estricto sobre `shared`, `workers`, `api` y `scripts` con sus tests, pytest con cobertura y la cobertura mínima por módulo (`[tool.coverage_thresholds]` en `pyproject.toml`). Un workflow semanal (`quality.yml`) corre mutation testing con Cosmic Ray, con un máximo de 45 minutos, y sube el artefacto `mutation-report`. Railway despliega con su integración nativa con GitHub. Las protecciones de `main` están en [CLAUDE.md](CLAUDE.md).
+GitHub Actions (`.github/workflows/ci.yml`, en cada pull request y en cada push a `main`) corre en Docker: Ruff (lint y formato), mypy estricto sobre `shared`, `workers`, `api` y `scripts` con sus tests, pytest con cobertura y la cobertura mínima por módulo (`[tool.coverage_thresholds]` en `pyproject.toml`). El workflow `quality.yml` corre mutation testing con Cosmic Ray solo a demanda (pestaña Actions, Run workflow), con un máximo de 45 minutos, y sube el artefacto `mutation-report`. Railway despliega con su integración nativa con GitHub. Las protecciones de `main` están en [CLAUDE.md](CLAUDE.md).
 
 ### Carga de historial de precios (#101)
 

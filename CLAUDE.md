@@ -100,7 +100,7 @@ Per-module coverage minimums live in `[tool.coverage_thresholds]` of `pyproject.
 
 ### Mutation Testing (Advanced Quality Check)
 
-Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85%, not measured yet. The weekly `Scheduled Quality` workflow runs `cosmic-ray exec` for at most 45 minutes and uploads `mutation-report` (report plus `session.sqlite`) even when it runs out of time; a partial report states how many jobs completed (#192).
+Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85%, not measured yet. It runs on demand, never on a schedule: the `Mutation Testing` workflow (Actions tab, Run workflow) runs `cosmic-ray exec` for at most 45 minutes and uploads `mutation-report` (report plus `session.sqlite`) even when it runs out of time; a partial report states how many jobs completed (#192).
 
 ---
 
