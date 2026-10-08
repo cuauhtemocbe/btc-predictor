@@ -53,6 +53,8 @@ cosmic-ray = "^8.3"
 asyncpg = ">=0.30,<0.32"
 pytest-xdist = "^3.8.0"
 mypy = ">=1.14,<3.0"
+# api/tests parse the dashboard HTML (was only in api-service/pyproject.toml).
+beautifulsoup4 = "^4.12"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

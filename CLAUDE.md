@@ -79,6 +79,7 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 ### 8. Docker Image Hardening
 
 - The production `Dockerfile` pins the base image by `sha256` digest so builds are reproducible. `Dockerfile.dev` keeps the floating `python:3.13-slim` tag on purpose: dev images should track patch releases.
+- `Dockerfile.dev` installs only the root `poetry.lock` (`--with api,fetch,ml,dev`), the same lock production installs, with no second install from `api-service/pyproject.toml` (it has no lock). `scripts/tests/test_dev_image_lock.py` fails the `Docker quality gate` when the image runs a version the lock does not pin (#213).
 - The `api` stage has a `HEALTHCHECK` on `GET /health` using stdlib `urllib` (the slim image ships neither `curl` nor `wget`). The `fetch` and `ml-worker` stages have none on purpose: they are one-shot cron jobs.
 
 ---
