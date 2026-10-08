@@ -4,6 +4,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # SQLAlchemy 2.1 defaults to psycopg v3 and we ship psycopg2: the app
+      # fails to boot. Lift this together with the driver.
+      - dependency-name: "sqlalchemy"
+        versions: [">=2.1"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
@@ -12,6 +17,11 @@ updates:
     directory: "/shared"
     schedule:
       interval: "weekly"
+    ignore:
+      # SQLAlchemy 2.1 defaults to psycopg v3 and we ship psycopg2: the app
+      # fails to boot. Lift this together with the driver.
+      - dependency-name: "sqlalchemy"
+        versions: [">=2.1"]
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]

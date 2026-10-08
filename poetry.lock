@@ -2547,7 +2547,7 @@ develop = true
 alembic = "^1.13"
 psycopg2-binary = "^2.9"
 pydantic-settings = "^2.15"
-sqlalchemy = "^2.0"
+sqlalchemy = ">=2.0,<2.1"
 
 [package.source]
 type = "directory"
@@ -3210,4 +3210,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "1891bf77a46b358de3e6f69f2a9cbb26794dd90c7d3b318d214173c7bf393a82"
+content-hash = "cc5400746271dfcc2a794401635cd6c46c2f9aa21b022d58e0d5edeaeca799f5"
