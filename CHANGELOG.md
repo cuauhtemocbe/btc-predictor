@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Mutation testing no longer runs weekly: `quality.yml` (now named "Mutation Testing") has only the `workflow_dispatch` trigger, so it runs on demand (#192).
 - **Displayed risk numbers change** (#177). Max drawdown, the Sharpe ratio and the
   equity curve are now derived from returns, `pnl / price_at_prediction`, compounded
   from 1.0 and recomputed on read; the stored `pnl_*` columns and the schema do not

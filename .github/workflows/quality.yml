@@ -1,15 +1,13 @@
-name: Scheduled Quality
+name: Mutation Testing
 
 on:
-  schedule:
-    - cron: '0 7 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: scheduled-quality
+  group: mutation-testing
   cancel-in-progress: false
 
 jobs:
