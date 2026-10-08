@@ -393,8 +393,7 @@ def test_active_version_constraint_allows_different_name(
 ) -> None:
     """
     The partial unique index only blocks duplicates of the SAME
-    (name, timeframe). A different name (multi-model mode) must be allowed
-    active at the same time.
+    (name, timeframe). A different name must be allowed active at the same time.
     """
     linear_1d = Model(
         name="linear_v1",

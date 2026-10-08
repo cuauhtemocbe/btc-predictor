@@ -1,18 +1,12 @@
-"""
-Daily trainer job - trains ML model on historical BTC price data.
+"""Daily trainer job: trains the linear model on the stored BTCUSDT daily bars.
 
-This job:
-1. Reads the sliding-window size from settings.training_window_days
-2. Fetches every stored daily BTCUSDT close price
-3. Builds return-based features (shared.features) and the next-day log return target
-4. Trains the model on log returns, not on price levels
-5. Saves the trained model to the database
-6. Sets it as the active model (deactivates previous models)
+Builds the return features and the next-day log-return target (``shared.features``)
+over every stored daily row, fits ``linear_v1`` with the window
+``settings.training_window_days``, saves it and makes it the active model. Fails
+when fewer than ``required_training_days`` rows are stored or the series is stale
+or gapped (#174).
 
-Training needs at least (window + 1) * 5 daily rows; with fewer rows the job fails
-and reports the required and available counts.
-
-Entry point: python -m workers.daily.trainer
+Entry point: ``python -m workers.daily.trainer``, also run by ``workers.daily``.
 """
 
 import logging
@@ -37,7 +31,6 @@ from shared.utils import utc_today
 from workers.daily.models import LinearRegressionModel
 from workers.daily.models.factory import build_model
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,11 +39,9 @@ logger = logging.getLogger(__name__)
 
 
 def required_training_days(window_days: int) -> int:
-    """
-    Minimum number of daily rows needed to train.
+    """Minimum daily rows to train: ``(window + 1) * 5``.
 
-    The rule is ``(window + 1) * 5`` rows. It dates from the 70/20/10 train/validation
-    split (the 20% validation share needed window + 1 rows) and stays as the floor.
+    The floor dates from the 70/20/10 train/validation split and was kept.
     """
     return (window_days + 1) * 5
 
@@ -60,24 +51,13 @@ def fetch_training_data(
     window_days: int,
     symbol: str = DEFAULT_SYMBOL,
 ) -> DailySeries:
-    """
-    Fetch every stored DAILY close price and volume of one symbol for training.
+    """Fetch every stored daily close and volume of ``symbol``, oldest to newest.
 
-    Uses date aggregation to get exactly one row per day (not per hour/4h).
-    Takes the latest row (its close and volume) for each day.
-
-    Args:
-        session: Database session
-        window_days: Size of sliding window for features
-        symbol: Asset whose prices are read (default BTCUSDT)
-
-    Returns:
-        Daily closes and volumes (oldest to newest)
+    Takes the latest stored row of each day.
 
     Raises:
-        ValueError: If fewer rows are stored than required_training_days()
+        ValueError: If fewer than ``required_training_days`` rows are stored.
     """
-    # Subquery: Get the latest timestamp for each day
     latest_per_day = (
         select(
             func.date_trunc("day", Price.timestamp).label("day"),
@@ -88,7 +68,6 @@ def fetch_training_data(
         .subquery()
     )
 
-    # Main query: Join to get the close price for the latest timestamp each day
     stmt = (
         select(latest_per_day.c.day, Price.close, Price.volume)
         .join(
@@ -129,28 +108,22 @@ def save_model(
     train_to: date,
     window_days: int,
 ) -> Model:
-    """
-    Save trained model to the database.
+    """Save the trained model as the active one and return its record.
+
+    The record is inserted inactive and then activated through ``crud.activate_model``,
+    which deactivates the other active version in one transaction, guarded by
+    ``ix_models_one_active_version_per_name_timeframe``.
 
     Args:
-        session: Database session
-        model_instance: Trained model instance
-        model_name: Model name (e.g., "linear_v1")
-        version: Model version (e.g., "1.0.0")
-        train_from: Start date of training data
-        train_to: End date of training data
-        window_days: Size of sliding window used
-
-    Returns:
-        Created Model record
+        model_name: Name such as ``linear_v1``.
+        version: Version string.
+        train_from: First date of the training data.
+        train_to: Last date of the training data.
+        window_days: Window stored in ``params``.
     """
-    # Serialize model
     model_artifact = model_instance.serialize()
 
-    # Create model record inactive first, then activate it atomically via
     # crud.activate_model() -- the single mechanism that deactivates any
-    # other active "1d" model and activates this one in one transaction,
-    # guarded by ix_models_one_active_per_timeframe.
     model_record = Model(
         name=model_name,
         version=version,
@@ -182,13 +155,10 @@ def save_model(
 
 
 def main() -> int:
-    """
-    Main entry point for the trainer job.
-
-    Dynamically adapts training strategy based on available historical data.
+    """Run the trainer job.
 
     Returns:
-        Exit code (0 = success, 1 = failure)
+        Exit code, 0 on success and 1 on failure.
     """
     logger.info("Starting daily trainer job")
 
@@ -198,31 +168,24 @@ def main() -> int:
         window_days = settings.training_window_days
         logger.info(f"Training window: {window_days}d")
 
-        # Configuration
         model_name = "linear_v1"
         version = datetime.now(UTC).strftime("%Y.%m.%d.%H%M%S")  # Timestamp version
 
-        # Fetch training data
         series = fetch_training_data(session, window_days)
         require_fresh_series(series.dates, utc_today())
 
-        # Return features and next-day log return target
         training_set = build_training_set(
             series.closes, series.volumes, window_days, horizon_days=1
         )
         logger.info(f"Created {len(training_set.y)} training samples")
 
-        # Train model
         logger.info("Training LinearRegressionModel on log returns...")
         model = build_model("linear", window_days, feature_count(window_days))
         model.train(training_set.X, training_set.y)
 
-        # Calculate training date range
-        # One row per day, so the series length is the day range
         train_to = utc_today()
         train_from = train_to - timedelta(days=len(series))
 
-        # Save model
         save_model(
             session=session,
             model_instance=model,

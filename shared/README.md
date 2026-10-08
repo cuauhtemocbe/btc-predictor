@@ -1,91 +1,19 @@
-# BTC Shared Package
+# shared
 
-Shared package with database configuration and utilities for BTC Predictor services.
+Poetry package that `api-service` and `workers` depend on (`shared = {path = "../shared", develop = true}`): configuration, database access, the return features, the baselines and the helpers every service reuses. It keeps one copy of the database setup and of the code that production and the backtest both run.
 
-## Overview
-
-This package provides centralized configuration and database connectivity for all BTC Predictor services (api, fetch_price, daily). It ensures consistent database connections and configuration across the application.
-
-## Installation
-
-This package is part of a Poetry workspace. Other services depend on it using:
-
-```toml
-[tool.poetry.dependencies]
-shared = {path = "../shared", develop = true}
-```
-
-## Usage
-
-### Configuration
+| Module | What it holds |
+|--------|---------------|
+| `shared/config.py` | `Settings` (pydantic-settings): `DATABASE_URL`, `TRAINING_WINDOW_DAYS`, `max_bar_age_hours` |
+| `shared/db/` | SQLAlchemy models, engine and `SessionLocal`/`get_db`, CRUD |
+| `shared/features.py` | Return features and targets, freshness guards |
+| `shared/baselines.py` | always-up, persistence, buy-and-hold and the p-value |
+| `shared/binance_vision.py` | Daily history and bars from Binance |
+| `shared/utils.py` | `utc_today`, PnL strategies, per-family model metrics |
+| `alembic/` | Database migrations ([CLAUDE.md](CLAUDE.md)) |
 
 ```python
-from shared.config import Settings
-
-settings = Settings()
-print(settings.database_url)  # Loaded from DATABASE_URL env var
+from shared.db.database import SessionLocal, get_db  # get_db is the FastAPI dependency
 ```
 
-### Database Connection
-
-```python
-from shared.db.database import engine, SessionLocal, get_db
-
-# Direct session usage
-session = SessionLocal()
-try:
-    # Use session
-    result = session.execute("SELECT 1")
-finally:
-    session.close()
-
-# FastAPI dependency injection
-from fastapi import Depends
-
-
-@app.get("/")
-def endpoint(db: Session = Depends(get_db)):
-    # db session automatically managed
-    return {"status": "ok"}
-```
-
-## Environment Variables
-
-Required:
-- `DATABASE_URL`: PostgreSQL connection string (e.g., `postgresql://user:pass@localhost/btcdb`)
-
-## Development
-
-```bash
-# Install dependencies
-cd shared
-poetry install
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=shared --cov-report=term-missing
-```
-
-## Project Structure
-
-```
-shared/
-├── pyproject.toml          # Poetry package definition
-├── README.md               # This file
-├── shared/
-│   ├── __init__.py        # Package exports
-│   ├── config.py          # Settings (pydantic-settings)
-│   └── db/
-│       ├── __init__.py    # DB package exports
-│       └── database.py    # Engine, SessionLocal, get_db()
-└── tests/
-    ├── conftest.py        # Test fixtures
-    ├── test_config.py     # Config tests
-    └── test_database.py   # Database tests
-```
-
-## License
-
-MIT
+Tests: `docker compose exec api pytest shared/tests/` (never on the host). Licence: MIT.
