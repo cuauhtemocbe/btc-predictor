@@ -18,31 +18,22 @@ from shared.returns import (
 def calculate_strategy_metrics(
     predictions: list[Prediction], strategy_key: str
 ) -> dict[str, Any]:
-    """
-    Calculate aggregate performance metrics for a given PnL strategy.
+    """Aggregate metrics of one PnL strategy.
 
     Dollar figures (total, average win and loss) come from the stored ``pnl_*``
     column. Risk figures come from returns, ``pnl / price_at_prediction``, compounded
     from 1.0 and recomputed on read (#177). A prediction whose price is not positive
-    has no return: it counts in the dollar figures and the trade count, not in the
-    risk figures.
+    counts in the dollar figures and the trade count, not in the risk figures.
 
     Args:
-        predictions: List of Prediction objects with evaluated PnL values
-        strategy_key: One of 'pnl_simulated', 'pnl_long_short',
-            'pnl_threshold', 'pnl_realistic'
+        predictions: Predictions with evaluated PnL values.
+        strategy_key: ``pnl_simulated``, ``pnl_long_short``, ``pnl_threshold`` or
+            ``pnl_realistic``.
 
     Returns:
-        Dictionary with metrics:
-        - total_pnl: Sum of all PnL values
-        - win_rate: Percentage of winning trades (0-1)
-        - worst_trade_pct: Worst single-day return, in percent
-        - max_drawdown_pct: Largest fall of the compounded equity curve, in percent
-        - avg_win: Average of positive PnL values
-        - avg_loss: Average of negative PnL values
-        - sharpe_ratio: Annualized Sharpe ratio of the daily returns (risk-free
-          rate = 0); 0.0 with fewer than 2 returns or no variance
-        - trade_count: Number of trades
+        ``total_pnl``, ``win_rate`` (0-1), ``worst_trade_pct``, ``max_drawdown_pct``,
+        ``avg_win``, ``avg_loss``, ``sharpe_ratio`` (annualized, risk-free rate 0; 0.0
+        with fewer than 2 returns or no variance) and ``trade_count``.
     """
     # Evaluated predictions of this strategy, oldest first so the equity curve is in
     # time order; Decimal is converted to float for numpy.
@@ -101,18 +92,10 @@ def calculate_strategy_metrics(
 def calculate_cumulative_pnl(
     predictions: list[Prediction], strategy_key: str
 ) -> list[dict[str, Any]]:
-    """
-    Calculate cumulative PnL over time for a given strategy.
-
-    Args:
-        predictions: List of Prediction objects with evaluated PnL values
-        strategy_key: One of 'pnl_simulated', 'pnl_long_short',
-            'pnl_threshold', 'pnl_realistic'
+    """Running sum of the strategy PnL by prediction date.
 
     Returns:
-        List of dicts with:
-        - date: Prediction date (ISO format)
-        - cumulative_pnl: Running sum of PnL up to that date
+        Dicts with ``date`` (ISO) and ``cumulative_pnl``.
     """
     # Filter and sort predictions by date
     evaluated_preds = [
@@ -144,18 +127,13 @@ def get_all_strategies_metrics(
     symbol: str | None = None,
     source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
-    """
-    Calculate metrics for all 4 PnL strategies.
+    """Metrics of the four PnL strategies, one dict per strategy with its name.
 
     Args:
-        db: Database session
-        timeframe: Optional timeframe filter ('1d'). If None,
-            every timeframe is mixed together in one series.
-        symbol: Optional asset filter, matched on the predicting model's symbol.
+        db: Database session.
+        timeframe: Optional filter; ``None`` mixes every timeframe in one series.
+        symbol: Optional filter on the predicting model's symbol.
         source: ``live``, ``replay`` or ``all`` (default), by the predicting model.
-
-    Returns:
-        List of dicts, one per strategy with name and metrics
     """
     strategies = [
         {"name": "simple", "key": "pnl_simulated", "color": "blue"},

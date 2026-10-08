@@ -1,17 +1,7 @@
-"""
-API router for model comparison dashboard (US-026).
+"""Model comparison (US-026): ``GET /models`` and ``GET /api/models/metrics``.
 
-Provides endpoints for:
-- GET /models - HTML dashboard with model comparison table and chart
-- GET /api/models/metrics - JSON API for model metrics
-
-Models are compared by:
-- Accuracy (% direction correct)
-- MAPE (Mean Absolute Percentage Error)
-- Total PnL
-- Win Rate
-- Sharpe Ratio
-- Max drawdown (of the compounded equity curve, in %)
+A model here is a family, compared by accuracy, MAPE, total PnL, win rate, Sharpe
+ratio and max drawdown of the compounded equity curve.
 """
 
 from datetime import date
@@ -59,22 +49,17 @@ async def models_dashboard(
     source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """
-    Render model comparison dashboard with metrics table and cumulative PnL chart.
+    """Render the comparison table and the cumulative PnL chart.
 
     Args:
-        request: FastAPI request object
-        start_date: Optional start date for filtering metrics
-        end_date: Optional end date for filtering metrics
-        timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
-            metrics of different timeframes are never silently combined
-        symbol: Asset to show (default BTCUSDT); only its models are compared
-        source: ``live``, ``replay`` or ``all`` (default); simulated models are
-            marked either way
-        db: Database session
-
-    Returns:
-        HTML template with model comparison table and chart
+        request: FastAPI request.
+        start_date: Optional lower bound on ``predicted_for``.
+        end_date: Optional upper bound.
+        timeframe: Defaults to ``DEFAULT_TIMEFRAME`` so timeframes are never combined.
+        symbol: Asset shown, default BTCUSDT; only its models are compared.
+        source: ``live``, ``replay`` or ``all`` (default); simulated models are marked
+            either way.
+        db: Database session.
     """
     # Get metrics for all model families
     models_metrics = get_all_models_metrics(
@@ -128,58 +113,24 @@ async def models_metrics_api(
     source: SourceQuery = PredictionSource.ALL,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """
-    Get model performance metrics as JSON.
+    """Model metrics as JSON, one row per family (#178).
 
-    This endpoint returns metrics for all models, useful for AJAX requests
-    or mobile clients. A "model" is a family (``linear`` for ``linear_v1``,
-    ``linear_v2``, ...): one row per (symbol, family, timeframe), computed over
-    the predictions of every version (#178).
+    A model is a family (``linear`` for ``linear_v1``, ``linear_v2``, ...): one row per
+    (symbol, family, timeframe) over the predictions of every version.
 
     Args:
-        start_date: Optional start date for filtering metrics
-        end_date: Optional end date for filtering metrics
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Timeframe to aggregate (default: DEFAULT_TIMEFRAME), so
-            metrics of different timeframes are never silently combined
-        symbol: Asset to show (default BTCUSDT); only its models are returned
-        source: ``live``, ``replay`` or ``all`` (default); only the versions
-            of that source count in each family; ``is_replay`` is true when
-            every version of the family is simulated
-        db: Database session
+        start_date: Optional lower bound on ``predicted_for``.
+        end_date: Optional upper bound.
+        pnl_column: PnL column to use.
+        timeframe: Defaults to ``DEFAULT_TIMEFRAME`` so timeframes are never combined.
+        symbol: Asset shown, default BTCUSDT.
+        source: ``live``, ``replay`` or ``all`` (default); only versions of that source
+            count; ``is_replay`` is true when every version of the family is simulated.
+        db: Database session.
 
     Returns:
-        JSON with structure:
-        {
-            "models": [
-                {
-                    "id": 40,
-                    "name": "linear",
-                    "version": "2024-05-18-001",
-                    "is_active": true,
-                    "trained_at": "2024-05-18T10:00:00",
-                    "versions_count": 40,
-                    "first_train_to": "2024-04-09",
-                    "last_train_to": "2024-05-17",
-                    "predictions_count": 30,
-                    "accuracy": 0.65,
-                    "avg_error_pct": 2.5,
-                    "total_pnl": 1200.50,
-                    "win_rate": 0.60,
-                    "sharpe_ratio": 1.25,
-                    "max_drawdown_pct": -4.50,
-                    "is_replay": false
-                },
-                ...
-            ],
-            "daily_pnl": {
-                "linear": [
-                    {"date": "2024-05-01", "cumulative_pnl": 100.0},
-                    ...
-                ],
-                ...
-            }
-        }
+        ``models``, the rows of ``get_all_models_metrics``, and ``daily_pnl``, the
+        cumulative PnL series per family name.
     """
     # Get metrics for all model families
     models_metrics = get_all_models_metrics(

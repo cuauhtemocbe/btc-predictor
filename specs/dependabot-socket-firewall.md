@@ -51,11 +51,7 @@ Single job `socket-check`: checkout → `setup-python` 3.13 → export locks →
 
 ## Testing Strategy
 
-CI workflow YAML, no application code; the acceptance scenarios cannot be exercised without a real Dependabot PR (only `dependabot[bot]` triggers the job).
-
-- Static: `actionlint` and YAML parse (both clean).
-- Export: `poetry export` with the pinned versions in `python:3.13-slim` succeeds for the root lock; exported requirements contain `main` + `api`/`fetch`/`ml`/`dev` packages (fastapi, tensorflow-cpu, xgboost, pytest, ruff, mypy, cosmic-ray) and `pip install --dry-run -r` resolves them on Python 3.13.
-- Acceptance (from the issue): blocked package → PR closed with comment; clean install → PR stays open; human PR → job skipped by the actor guard. Observed on the first real Dependabot PR after merge (Definition of Done).
+CI workflow YAML, no application code; the acceptance scenarios need a real Dependabot PR, since only `dependabot[bot]` triggers the job. Verified statically (`actionlint`, YAML parse) and by running `poetry export` with the pinned versions in `python:3.13-slim` for the root lock, then `pip install --dry-run -r` on Python 3.13. Acceptance (from the issue): a blocked package closes the PR with a comment; a clean install leaves it open; a human PR skips the job.
 
 ## Boundaries & Constraints
 
@@ -67,7 +63,7 @@ CI workflow YAML, no application code; the acceptance scenarios cannot be exerci
 
 ### Known risks
 - **Closes on any install failure**, not only firewall blocks (network, PyPI outage, wheel that fails to build). `sfw` writes a JSON report with a `blocked` field that could distinguish them, but its schema was not validated against a real block. Accepted trade-off, same as the reference.
-- **`shared/poetry.lock` is stale on `main`**: it lacks `alembic` and `mako`, added to `shared/pyproject.toml` later. Poetry 2.4.1 refuses to export it ("pyproject.toml changed significantly since poetry.lock was last generated"), so until `poetry lock` is run in `shared/`, Dependabot PRs touching `shared/` get a red job and are **not** checked (not closed). The export step fails loudly instead of checking a lock that silently omits packages.
+- **`shared/poetry.lock` was stale when this was written** (it lacked `alembic` and `mako`; today it lists `alembic`). Poetry 2.4.1 refuses to export it ("pyproject.toml changed significantly since poetry.lock was last generated"), so until `poetry lock` is run in `shared/`, Dependabot PRs touching `shared/` get a red job and are **not** checked (not closed). The export step fails loudly instead of checking a lock that silently omits packages.
 
 ## Success Criteria
 

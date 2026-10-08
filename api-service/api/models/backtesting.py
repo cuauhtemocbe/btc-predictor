@@ -47,49 +47,7 @@ class DailyPnlPoint(BaseModel):
 
 
 class BacktestMetricsResponse(BaseModel):
-    """
-    Complete backtesting results with metadata, strategy metrics, and daily PnL.
-
-    Used by GET /api/backtesting/metrics endpoint.
-
-    Example JSON:
-    ```json
-    {
-        "metadata": {
-            "backtest_run_id": "abc-123-...",
-            "start_date": "2024-05-01",
-            "end_date": "2024-05-30",
-            "total_days": 30,
-            "model_name": "linear_v1"
-        },
-        "strategies": [
-            {
-                "name": "simple",
-                "display_name": "Simple",
-                "color": "blue",
-                "total_pnl": 1200.50,
-                "win_rate": 0.63,
-                "max_drawdown_pct": -4.50,
-                "best_day": 320.00,
-                "worst_day": -450.00,
-                "sharpe_ratio": 1.25,
-                "trade_count": 30
-            },
-            ...
-        ],
-        "daily_pnl": [
-            {
-                "date": "2024-05-01",
-                "simple": 100.0,
-                "long_short": 120.0,
-                "threshold": 90.0,
-                "realistic": 85.0
-            },
-            ...
-        ]
-    }
-    ```
-    """
+    """Backtest metadata, strategy metrics and daily PnL."""
 
     metadata: BacktestMetadata = Field(description="Backtest run metadata")
     strategies: list[BacktestStrategyMetrics] = Field(
