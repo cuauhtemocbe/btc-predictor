@@ -307,14 +307,28 @@ def test_production_dockerfile_base_pinned_by_digest() -> None:
     ), "Production Dockerfile base stage must be pinned by a sha256 digest"
 
 
-def test_api_service_caps_sqlalchemy_below_2_1() -> None:
-    # api-service has no lock, so a clean dev build re-resolves it. SQLAlchemy
-    # 2.1 defaults to psycopg v3 (we ship psycopg2) and the API fails to boot.
-    pyproject = tomllib.loads(
-        (REPO_ROOT / "api-service" / "pyproject.toml").read_text()
-    )
+@pytest.mark.parametrize(
+    "pyproject_path",
+    ["pyproject.toml", "shared/pyproject.toml", "api-service/pyproject.toml"],
+)
+def test_sqlalchemy_is_capped_below_2_1(pyproject_path: str) -> None:
+    # SQLAlchemy 2.1 defaults postgresql:// to psycopg v3 and we ship psycopg2,
+    # so the app fails to boot. The root lock is what production installs and
+    # the CI gate does not test it, so every manifest carries the cap.
+    pyproject = tomllib.loads((REPO_ROOT / pyproject_path).read_text())
 
     assert pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"] == ">=2.0,<2.1"
+
+
+def test_dependabot_does_not_propose_sqlalchemy_2_1() -> None:
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+
+    pip_updates = [u for u in config["updates"] if u["package-ecosystem"] == "pip"]
+    assert {u["directory"] for u in pip_updates} == {"/", "/shared"}
+    for update in pip_updates:
+        assert {"dependency-name": "sqlalchemy", "versions": [">=2.1"]} in update[
+            "ignore"
+        ]
 
 
 def test_dev_dockerfile_keeps_floating_tag() -> None:
