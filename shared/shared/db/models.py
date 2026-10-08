@@ -1,15 +1,9 @@
-"""
-SQLAlchemy models for BTC Predictor.
+"""SQLAlchemy tables: prices, models, predictions and backtest results."""
 
-Models:
-- Price: Historical OHLCV price data, one series per asset symbol
-- Model: Trained ML models with versioning
-- Prediction: Daily price predictions with evaluation metrics
-- BacktestResult: Walk-forward backtesting simulation results
-"""
-
+import re
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -34,6 +28,43 @@ from sqlalchemy.types import NUMERIC
 # Asset every row belongs to unless told otherwise (the original BTC pipeline).
 DEFAULT_SYMBOL = "BTCUSDT"
 
+# Trailing "_v<N>" the trainers append to a model name ("linear_v2"). It stays
+# "[0-9]", not "\d", on purpose: Python's "\d" also matches non-ASCII digits and
+# PostgreSQL's depends on the locale, so the two sides could disagree, and the
+# index of migration d5a1c7e93b20 is built with "[0-9]".
+VERSION_SUFFIX_PATTERN = r"_v[0-9]+$"  # NOSONAR python:S6353 (reason above)
+
+
+# The same rule as model_family(), as a SQL expression on the ``name`` column.
+MODEL_FAMILY_SQL = f"regexp_replace(name, '{VERSION_SUFFIX_PATTERN}', '')"
+
+
+# Key of ``Model.params`` that ``scripts/simulate_history.py`` sets on every model
+# it trains to replay the days before go-live (#176). Live trainers never set it.
+REPLAY_PARAM = "simulated"
+
+
+class PredictionSource(StrEnum):
+    """Which predictions a query or page covers: live ones, replayed ones or both."""
+
+    LIVE = "live"
+    REPLAY = "replay"
+    ALL = "all"
+
+
+def is_replay_params(params: dict[str, Any] | None) -> bool:
+    """Whether a model's ``params`` mark it as trained by the history replay."""
+    return params is not None and params.get(REPLAY_PARAM) is True
+
+
+def model_family(name: str) -> str:
+    """Model name without its trailing version suffix: ``linear_v2`` -> ``linear``.
+
+    The family is the scope of the one-active-version rule: the trainers put the
+    version in the name, so every version of a model has its own name and one family.
+    """
+    return re.sub(VERSION_SUFFIX_PATTERN, "", name)
+
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
@@ -42,12 +73,9 @@ class Base(DeclarativeBase):
 
 
 class Price(Base):
-    """
-    Historical OHLCV (Open, High, Low, Close, Volume) price data per asset.
+    """Daily OHLCV bar of one asset, identified by ``symbol``.
 
-    Each row belongs to one asset, identified by ``symbol`` (e.g. 'BTCUSDT',
-    'PAXGUSDT'); a timestamp is unique per symbol, so several assets share the
-    table. Used for model training, evaluation, and historical analysis.
+    The timestamp is unique per symbol, so several assets share the table.
     """
 
     __tablename__ = "prices"
@@ -98,32 +126,25 @@ class Price(Base):
 
 
 class Model(Base):
-    """
-    Trained ML models with versioning and training metadata.
+    """Trained model with its serialized artifact, parameters and training period.
 
-    Stores serialized model artifacts (pickled scikit-learn models), training
-    parameters, and metadata. Supports model versioning and rollback.
-    Each model is trained for one asset (``symbol``); predictions get their
-    asset through ``model_id``. At most one active version per
-    (symbol, name, timeframe) is allowed at a time, enforced by the partial
-    unique index ix_models_one_active_version_per_name_timeframe -- not just
-    application logic. Different model names (e.g. "linear_v1" and
-    "xgboost_v1") can be active at the same time within the same timeframe;
-    that's what powers multi-model prediction mode (US-025). The same model
-    name can be trained once per asset.
+    Each model is trained for one asset (``symbol``); predictions get their asset
+    through ``model_id``. The partial unique index
+    ``ix_models_one_active_version_per_name_timeframe`` allows one active version per
+    (symbol, family, timeframe), so ``linear_v1`` and ``linear_v2`` (the family is the
+    name without ``_v<N>``, see ``model_family``) cannot both be active, whatever the
+    application code does. The same name can be trained once per asset.
     """
 
     __tablename__ = "models"
     __table_args__ = (
         UniqueConstraint("symbol", "name", "version", name="unique_model_version"),
         CheckConstraint("train_to >= train_from", name="valid_training_period"),
-        CheckConstraint(
-            "timeframe IN ('1h', '1d', '1w')", name="valid_model_timeframe_values"
-        ),
+        CheckConstraint("timeframe IN ('1d')", name="valid_model_timeframe_values"),
         Index(
             "ix_models_one_active_version_per_name_timeframe",
             "symbol",
-            "name",
+            text(MODEL_FAMILY_SQL),
             "timeframe",
             unique=True,
             postgresql_where=text("is_active = true"),
@@ -176,13 +197,18 @@ class Model(Base):
         nullable=False,
         default="1d",
         comment=(
-            "Prediction horizon this model was trained for: '1h' (hourly), "
-            "'1d' (daily), '1w' (weekly). At most one active version per "
-            "(name, timeframe) is allowed at a time (enforced by "
+            "Prediction horizon this model was trained for: '1d' (daily), "
+            "the only value allowed. At most one active version per "
+            "(symbol, family, timeframe) is allowed at a time (enforced by "
             "ix_models_one_active_version_per_name_timeframe); different "
-            "names can be active concurrently (multi-model mode)."
+            "families can be active concurrently (multi-model mode)."
         ),
     )
+
+    @property
+    def is_replay(self) -> bool:
+        """True when the model was trained by the history replay (simulated)."""
+        return is_replay_params(self.params)
 
     def __repr__(self) -> str:
         return (
@@ -194,18 +220,13 @@ class Model(Base):
 
 
 class Prediction(Base):
-    """
-    Daily Bitcoin price predictions with evaluation metrics.
+    """Daily price prediction with its evaluation, in two phases.
 
-    Two-phase lifecycle:
-    1. Insert: Predictor job creates record with predicted_price,
-       evaluation fields NULL
-    2. Update: Evaluator job fills actual_price, errors,
-       direction_correct, pnl_simulated
+    1. The predictor inserts it with ``predicted_price`` and the evaluation fields NULL.
+    2. The evaluator fills ``actual_price``, the errors, the direction and the PnLs.
 
-    Tracks model accuracy, error rates, and simulated trading profitability.
-
-    Supports multiple timeframes: 1d (daily), 1w (weekly).
+    Only ``1d`` is allowed; the column stays so the unique constraint and the queries
+    do not change.
     """
 
     __tablename__ = "predictions"
@@ -216,9 +237,7 @@ class Prediction(Base):
             "model_id",
             name="unique_prediction_per_model_timeframe",
         ),
-        CheckConstraint(
-            "timeframe IN ('1h', '1d', '1w')", name="valid_timeframe_values"
-        ),
+        CheckConstraint("timeframe IN ('1d')", name="valid_timeframe_values"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -232,13 +251,13 @@ class Prediction(Base):
         Date,
         nullable=False,
         index=True,
-        comment="Date being predicted (usually tomorrow for 1d, 7 days ahead for 1w)",
+        comment="Date being predicted (the day after the last closed bar)",
     )
     timeframe: Mapped[str] = mapped_column(
         String(2),
         nullable=False,
         default="1d",
-        comment="Prediction timeframe: '1h' (hourly), '1d' (daily), '1w' (weekly)",
+        comment="Prediction timeframe: '1d' (daily, the only value allowed)",
     )
     predicted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -300,7 +319,6 @@ class Prediction(Base):
         comment="PnL with trading fees (0.1%) and stop-loss (2% max loss)",
     )
 
-    # Relationship to Model
     model: Mapped["Model"] = relationship("Model")
 
     def __repr__(self) -> str:
@@ -313,17 +331,9 @@ class Prediction(Base):
 
 
 class BacktestResult(Base):
-    """
-    Walk-forward backtesting simulation results.
+    """One predicted day of a walk-forward backtest.
 
-    Stores historical backtest predictions where each day:
-    1. Model is trained on rolling window of past data
-    2. Next day's price is predicted
-    3. Actual price is fetched
-    4. All 4 PnL strategies are calculated
-
-    Each backtest run has a unique backtest_run_id (UUID) to distinguish
-    different simulation runs.
+    Rows of one run share ``backtest_run_id``; the four PnLs are stored per row.
     """
 
     __tablename__ = "backtest_results"

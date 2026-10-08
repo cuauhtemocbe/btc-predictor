@@ -17,7 +17,9 @@ Usage:
 
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 # Add parent directory to path to allow imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,20 +35,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def format_validation_error(params: dict) -> str:
+def format_validation_error(params: dict[str, Any]) -> str:
     """Format validation error from params dict."""
     if "validation_error_pct" in params:
         return f"{params['validation_error_pct']:.2f}%"
     return "N/A"
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """
     Main entry point for list models script.
+
+    Args:
+        argv: Command-line arguments; the script takes none, so they are ignored
 
     Returns:
         Exit code (0 = success, 1 = failure)
     """
+    del argv
     session = SessionLocal()
 
     try:
@@ -57,7 +63,7 @@ def main() -> int:
             print("=" * 90)
             print("No models found in database.")
             print("=" * 90)
-            print("Run 'python scripts/train_all_models.py' to train models.")
+            print("Run 'python -m workers.daily.trainer' to train a model.")
             return 0
 
         # Display table header

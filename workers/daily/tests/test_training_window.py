@@ -5,15 +5,17 @@ The trainers no longer pick a window from a phase table: the window comes from
 ``settings.training_window_days`` and every stored BTCUSDT daily row is used.
 """
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from shared.config import Settings, settings
 from shared.db.models import Model, Price
+from shared.utils import utc_today
 from workers.daily import trainer
 from workers.daily.models import LinearRegressionModel
 
@@ -24,7 +26,7 @@ PAXG = "PAXGUSDT"
 def _add_daily_rows(
     session: Session, symbol: str, days: int, close: Decimal = Decimal("60000")
 ) -> None:
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     session.add_all(
         Price(
             symbol=symbol,
@@ -114,9 +116,9 @@ class TestTrainsOnEveryBtcRow:
         seen: dict[str, tuple[int, int]] = {}
         original_train = LinearRegressionModel.train
 
-        def spy(self, X, y):  # noqa: ANN001, ANN202
+        def spy(self: LinearRegressionModel, X: np.ndarray, y: np.ndarray) -> None:
             seen["shape"] = X.shape
-            return original_train(self, X, y)
+            original_train(self, X, y)
 
         monkeypatch.setattr(LinearRegressionModel, "train", spy)
 
@@ -131,9 +133,6 @@ class TestMinimumRows:
     def test_required_rows_follow_the_70_20_10_split(self) -> None:
         assert trainer.required_training_days(21) == 110
         assert trainer.required_training_days(10) == 55
-
-    def test_a_longer_horizon_needs_extra_rows(self) -> None:
-        assert trainer.required_training_days(21, horizon_days=7) == 116
 
     def test_too_few_rows_names_required_and_available(
         self, db_session: Session

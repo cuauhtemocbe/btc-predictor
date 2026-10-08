@@ -4,10 +4,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.models.backtesting import (
@@ -16,10 +16,16 @@ from api.models.backtesting import (
     BacktestStrategyMetrics,
     DailyPnlPoint,
 )
+from api.symbols import DEFAULT_SYMBOL, SymbolQuery, asset_context
 from shared.db.database import get_db
 from shared.db.models import BacktestResult
+from shared.returns import max_drawdown_pct, returns_from_pnl, sharpe_ratio
 
 router = APIRouter(tags=["backtesting"])
+
+# Asset of a stored run. Runs saved before the backtest recorded ``symbol`` were
+# all BTCUSDT.
+RUN_SYMBOL = func.coalesce(BacktestResult.model_params["symbol"].astext, DEFAULT_SYMBOL)
 
 # Templates for HTML rendering
 templates_dir = Path(__file__).parent.parent / "templates"
@@ -29,66 +35,52 @@ templates = Jinja2Templates(directory=str(templates_dir))
 def calculate_backtest_strategy_metrics(
     results: list[BacktestResult], strategy_key: str
 ) -> dict[str, Any]:
-    """
-    Calculate aggregate performance metrics for a backtest strategy.
+    """Aggregate metrics of one strategy over the results of a backtest run.
+
+    Dollar figures come from the stored PnL column; the Sharpe ratio and max drawdown
+    come from returns, ``pnl / price_at_prediction``, compounded from 1.0 and
+    recomputed on read (#177).
 
     Args:
-        results: List of BacktestResult objects
-        strategy_key: One of 'pnl_simple', 'pnl_long_short',
-            'pnl_threshold', 'pnl_realistic'
+        results: Results ordered by ``predicted_for``.
+        strategy_key: ``pnl_simple``, ``pnl_long_short``, ``pnl_threshold``,
+        ``pnl_realistic``.
 
     Returns:
-        Dictionary with metrics:
-        - total_pnl: Sum of all PnL values
-        - win_rate: Percentage of winning trades (0-1)
-        - max_drawdown: Worst single loss
-        - best_day: Best single-day PnL
-        - worst_day: Worst single-day PnL
-        - sharpe_ratio: Risk-adjusted return metric
-        - trade_count: Number of trades
+        ``total_pnl``, ``win_rate`` (0-1), ``max_drawdown_pct``, ``best_day``,
+        ``worst_day``, ``sharpe_ratio`` (annualized; 0.0 with fewer than 2 returns or
+        no variance) and ``trade_count``.
     """
-    # Extract PnL values for this strategy (convert Decimal to float)
-    pnl_values = [
-        float(getattr(result, strategy_key))
-        for result in results
-        if getattr(result, strategy_key) is not None
-    ]
+    evaluated = [r for r in results if getattr(r, strategy_key) is not None]
+    pnl_values = [float(getattr(result, strategy_key)) for result in evaluated]
 
     # Handle zero trades case
     if not pnl_values:
         return {
             "total_pnl": 0.0,
             "win_rate": 0.0,
-            "max_drawdown": 0.0,
+            "max_drawdown_pct": 0.0,
             "best_day": 0.0,
             "worst_day": 0.0,
             "sharpe_ratio": 0.0,
             "trade_count": 0,
         }
 
-    # Calculate basic metrics
     total_pnl = sum(pnl_values)
     wins = [p for p in pnl_values if p > 0]
     trade_count = len(pnl_values)
 
-    win_rate = len(wins) / trade_count if trade_count > 0 else 0.0
-    max_drawdown = min(pnl_values)
-    best_day = max(pnl_values)
-    worst_day = min(pnl_values)
-
-    # Calculate Sharpe Ratio (simplified: mean / std_dev)
-    if trade_count >= 2 and np.std(pnl_values) > 0:
-        sharpe_ratio = float(np.mean(pnl_values) / np.std(pnl_values))
-    else:
-        sharpe_ratio = 0.0
+    returns = returns_from_pnl(
+        (getattr(r, strategy_key), r.price_at_prediction) for r in evaluated
+    )
 
     return {
         "total_pnl": round(total_pnl, 2),
-        "win_rate": round(win_rate, 4),
-        "max_drawdown": round(max_drawdown, 2),
-        "best_day": round(best_day, 2),
-        "worst_day": round(worst_day, 2),
-        "sharpe_ratio": round(sharpe_ratio, 2),
+        "win_rate": round(len(wins) / trade_count, 4),
+        "max_drawdown_pct": round(max_drawdown_pct(returns) or 0.0, 2),
+        "best_day": round(max(pnl_values), 2),
+        "worst_day": round(min(pnl_values), 2),
+        "sharpe_ratio": round(sharpe_ratio(returns) or 0.0, 2),
         "trade_count": trade_count,
     }
 
@@ -96,15 +88,7 @@ def calculate_backtest_strategy_metrics(
 def calculate_cumulative_pnl_backtest(
     results: list[BacktestResult],
 ) -> list[DailyPnlPoint]:
-    """
-    Calculate daily PnL values for all strategies.
-
-    Args:
-        results: List of BacktestResult objects sorted by predicted_for
-
-    Returns:
-        List of DailyPnlPoint with date and PnL for each strategy
-    """
+    """Daily PnL of every strategy, one ``DailyPnlPoint`` per result."""
     daily_points = []
 
     for result in results:
@@ -147,30 +131,26 @@ async def get_backtesting_metrics(
         description="Filter end date (inclusive)",
         alias="end",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> BacktestMetricsResponse:
-    """
-    Get backtesting metrics with strategy comparison and daily PnL.
+    """Metrics of the four strategies and the daily PnL of the latest backtest run.
 
-    Queries the most recent backtest run (by backtest_run_id with latest created_at)
-    and returns aggregated metrics for all 4 strategies plus daily PnL time series.
+    The latest run of ``symbol`` is the ``backtest_run_id`` created last.
 
     Args:
-        start_date: Optional start date filter (query param: ?start=2024-05-01)
-        end_date: Optional end date filter (query param: ?end=2024-05-30)
-        db: Database session (injected)
+        start_date: Query ``start``, optional lower bound.
+        end_date: Query ``end``, optional upper bound.
+        symbol: Asset whose latest run is shown, default BTCUSDT.
+        db: Database session (injected).
 
-    Returns:
-        BacktestMetricsResponse with metadata, strategy metrics, and daily PnL.
-        Returns 404 if no backtest results exist.
-
-    Examples:
-        - GET /api/backtesting/metrics
-        - GET /api/backtesting/metrics?start=2024-05-01&end=2024-05-30
+    Raises:
+        HTTPException: 404 if no backtest results exist.
     """
     # Find the most recent backtest_run_id
     latest_run_query = (
         db.query(BacktestResult.backtest_run_id)
+        .filter(RUN_SYMBOL == symbol)
         .order_by(BacktestResult.created_at.desc())
         .limit(1)
     )
@@ -180,7 +160,8 @@ async def get_backtesting_metrics(
         raise HTTPException(
             status_code=404,
             detail=(
-                "No backtest results found. Run scripts/backtest.py to generate data."
+                f"No backtest results found for {symbol}. "
+                "Run scripts/backtest.py to generate data."
             ),
         )
 
@@ -268,25 +249,19 @@ async def get_backtesting_dashboard(
         description="Filter end date (inclusive)",
         alias="end",
     ),
+    symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """
-    Render backtesting results dashboard with cumulative PnL chart and metrics table.
+    """Render the backtest dashboard: cumulative PnL chart and metrics table.
 
-    Args:
-        request: FastAPI request object
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        db: Database session (injected)
-
-    Returns:
-        HTML page with backtesting visualization
+    Args: same as ``get_backtesting_metrics``, plus the FastAPI ``request``.
     """
     # Try to fetch metrics data
     try:
         metrics_data = await get_backtesting_metrics(
             start_date=start_date,
             end_date=end_date,
+            symbol=symbol,
             db=db,
         )
         has_data = True
@@ -305,5 +280,6 @@ async def get_backtesting_dashboard(
             "metrics": metrics_data.model_dump() if metrics_data else None,
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
+            **asset_context(request, symbol),
         },
     )

@@ -7,15 +7,16 @@ feature vectors twice as long as the model expected ("X must have 21 features,
 got 42") and used the gold price as the "current BTC price".
 """
 
-from argparse import Namespace
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
+from scripts.backtest_engine import InsufficientHistoryError, load_daily_history
 from shared.db.models import Model, Prediction, Price
-from workers.backtest.main import calculate_adaptive_window
+from shared.utils import utc_today
+from workers.backtest.main import plan_range
 from workers.daily import evaluator, predictor
 from workers.daily.trainer import fetch_training_data
 
@@ -50,7 +51,7 @@ def _add_daily_series(
     Both symbols use identical timestamps on purpose: a join on timestamp
     alone would match both rows.
     """
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     for i in range(days):
         day = first_day + timedelta(days=i)
         _add_bar(
@@ -104,20 +105,15 @@ class TestPredictorSymbolIsolation:
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The newest row in the table is PAXG; the prediction must still be BTC."""
         _add_bar(db_session, PAXG, datetime.now(UTC), PAXG_CLOSE)
         db_session.commit()
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = lambda: Namespace(multi_model=False)
-        try:
-            assert predictor.main() == 0
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
+
+        assert predictor.main() == 0
 
         prediction = db_session.query(Prediction).one()
         assert prediction.price_at_prediction > 50000
@@ -125,17 +121,11 @@ class TestPredictorSymbolIsolation:
 
 class TestEvaluatorSymbolIsolation:
     def test_fetch_actual_price_ignores_other_symbol(self, db_session: Session) -> None:
-        """PAXG has the earliest candle after 07:00, BTC has a later one."""
-        today = date.today()
-        _add_bar(
-            db_session,
-            PAXG,
-            datetime.combine(today, time(7, 0), tzinfo=UTC),
-            PAXG_CLOSE,
-        )
-        _add_bar(
-            db_session, BTC, datetime.combine(today, time(8, 0), tzinfo=UTC), BTC_CLOSE
-        )
+        """Both symbols have a bar that settles today; each gets its own close."""
+        today = utc_today()
+        bar_open = datetime.combine(today - timedelta(days=1), time(0, 0), tzinfo=UTC)
+        _add_bar(db_session, PAXG, bar_open, PAXG_CLOSE)
+        _add_bar(db_session, BTC, bar_open, BTC_CLOSE)
         db_session.commit()
 
         assert evaluator.fetch_actual_price(db_session, today) == BTC_CLOSE
@@ -145,9 +135,12 @@ class TestEvaluatorSymbolIsolation:
 
 
 class TestBacktestWindowSymbolIsolation:
-    def test_adaptive_window_counts_only_btc_days(self, db_session: Session) -> None:
-        """80 BTC days would give a 30/30 window; 10 BTC + 70 PAXG must not."""
+    def test_planned_range_counts_only_btc_days(self, db_session: Session) -> None:
+        """300 BTC + PAXG days would plan a range; 10 BTC + 290 PAXG must not."""
         _add_daily_series(db_session, BTC, BTC_CLOSE, days=10)
-        _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=70)
+        _add_daily_series(db_session, PAXG, PAXG_CLOSE, days=290)
 
-        assert calculate_adaptive_window(db_session) is None
+        history = load_daily_history(db_session)
+
+        with pytest.raises(InsufficientHistoryError):
+            plan_range(history, 21)

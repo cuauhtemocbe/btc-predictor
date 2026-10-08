@@ -4,19 +4,12 @@
 
 **BTC Predictor** is a data science web application that predicts Bitcoin's price for the next day using machine learning models. It tracks predictions, calculates historical errors, and simulates profit/loss (PnL) based on predicted direction.
 
-**Status:** ✅ **All User Stories Complete** (US-001 to US-024 implemented and deployed to Railway)
-
 ---
 
 ## Tech Stack
 
-- **Language:** Python 3.13
-- **Framework:** FastAPI + Jinja2 (HTML templates)
-- **Database:** PostgreSQL + SQLAlchemy 2.0 + Alembic (migrations)
-- **ML:** scikit-learn (Linear Regression), pandas, numpy
-- **Data Source:** Binance via data.binance.vision (history + daily files) and `data-api.binance.vision` REST fallback; CoinGecko was removed in #102
-- **Deployment:** Railway (4 services: postgres, api, fetch-price cron, daily cron)
-- **Dependency Management:** Poetry (workspace with 3 packages: shared, api-service, workers)
+- **ML:** Linear Regression is the only model. XGBoost, LSTM and ARIMA were removed (#184); they stay in git history, and any model added later has to beat the linear model and the rule strategy after fees.
+- **Data:** Binance only, free, no API key (Design Decision 5). Assets: `BTCUSDT` and `PAXGUSDT` (gold proxy, Design Decision 6b).
 
 ---
 
@@ -25,23 +18,14 @@
 **For complete architecture details and implementation history, see:**
 - `docs/archive/specs/IMPLEMENTATION_HISTORY.md` — Full implementation journey, decisions, and lessons learned
 
-**Key structure:**
-
-```
-btc-predictor/
-├── shared/              # Common package (config, DB, utils)
-├── api-service/         # Web service (always on)
-└── workers/
-    ├── fetch_price/     # Hourly cron: fetch BTC prices
-    └── daily/           # Daily cron: evaluate → train → predict
-```
-
 **Railway Services:**
 - `postgres` — Shared database
 - `api` — Web service (FastAPI + dashboard)
-- `fetch-price` — Cron job daily at 6am UTC (`0 6 * * *`)
-- `daily` — Cron job daily at 7am UTC (`0 7 * * *`)
-- `weekly` — Cron job weekly on Mondays at 7am UTC (`0 7 * * 1`)
+- `fetch-price` — Cron job daily at 00:05 UTC (`5 0 * * *`)
+- `daily` — Cron job daily at 00:10 UTC (`10 0 * * *`)
+- `monthly-backtest` — Cron job on the 1st of each month at 00:00 UTC (`0 0 1 * *`)
+
+The start commands and schedules live in the Railway dashboard, not in `railway.*.toml` (see `RAILWAY_MULTISTAGE_CONFIG.md`).
 
 ---
 
@@ -55,56 +39,47 @@ btc-predictor/
 - UNIQUE constraints prevent duplicates on retries
 - Safe to re-run jobs without data corruption
 
-### 3. Abstract BaseModel for ML Extensibility
-- All ML models inherit from `BaseModel` abstract class
-- Easy to add LSTM, XGBoost, ARIMA without changing infrastructure
+### 3. Abstract BaseModel as the Model Interface
+- All ML models inherit from `BaseModel`; the trainer, the predictor and the backtest only use that interface
+- `LinearRegressionModel` is the only model and the benchmark any new model must beat. The daily job trains one model and the predictor uses the one active `1d` model; there is no multi-model mode, best-of-several selection or validation-MAPE ranking (removed in #184)
+- Models are built through `workers.daily.models.factory.build_model`, the same call the daily trainer and the backtest make
 
 ### 4. Two-Phase Prediction Lifecycle
 - **Phase 1:** Predictor inserts prediction with `actual_price=NULL`
 - **Phase 2:** Evaluator updates with actual price + errors + PnL next day
 
-### 5. Binance Vision Over CoinGecko (supersedes the earlier CoinGecko migration)
+### 5. Binance Vision as the Only Data Source
 
-- The daily job stores one closed UTC daily bar per symbol (file first, REST fallback); the sections below describing 4-hour CoinGecko candles are historical.
+- **Why:** the free `data.binance.vision` files give 9 years of daily bars with volume, free and without an API key. The previous data source capped history at 30 days and had no volume, so it was replaced (#102). The Binance REST API is geo-blocked from Railway (HTTP 451), so the REST fallback uses `data-api.binance.vision`.
+- **Stored data, history load and daily ingest:** see `workers/fetch_price/CLAUDE.md`.
+- **No intraday data is stored.** The spike on 1h data (#109, `docs/spikes/109-intraday-prediction.md`) found a ~1 pp direction edge worth ~2 bps per trade against 20 bps of fees, so intraday was dropped.
 
-### 5b. (historical) CoinGecko Over Binance
-- Migrated from Binance API due to HTTP 451 geo-blocking in Railway
-- CoinGecko free API with rate limit handling
+### 6. Daily Bars and Return-Based Features
 
-### 6. Daily Data Frequency with 4-Hour Aggregation
+- **Frequency:** the whole pipeline works on daily bars. There is no intraday aggregation.
+- **Features** (`shared/shared/features.py`): `W` lagged log returns, their standard deviation as volatility, and `W` log volume changes (`2W + 1` features). **Target:** next-day log return. The predicted price is `last close * exp(predicted return)`.
+- **Same code in production and backtest:** the daily trainer, the predictor and the walk-forward backtest all call `shared.features` and `workers.daily.models.factory`.
+- **Evaluator:** the predictor runs at 00:10 UTC on day D, ten minutes after the close of the bar opened on D-1, uses that close and predicts the bar opened on D, which closes at 00:00 UTC on D+1 (`predicted_for`). The evaluator settles it against that close once `fetch-price` has ingested it, and leaves it pending if the bar is missing (`fetch_actual_price` in `workers/daily/evaluator.py`).
+- **Stale or gapped data:** the predictors and trainers refuse a series whose last bar is not dated yesterday (UTC) or that skips a day, exit 1 and save nothing (`require_fresh_series`, #174).
+- **Price anchor is fresh:** the predictor exits 1 and saves nothing if the last closed bar is older than `max_bar_age_hours` (2, `shared/shared/config.py`), so a late run cannot record a price nobody could trade at (`require_recent_close`, #175). The evaluator and the trainer have no such guard.
+- **Days are UTC:** every job takes today from `shared.utils.utc_today()`, never from `date.today()`. `docker-compose.yml` sets `TZ=America/Mexico_City`, so the local date is a day behind UTC from 00:00 to 06:00 UTC (#173). Details and the test fixture: `workers/daily/CLAUDE.md`.
+- **Live and replay predictions:** `scripts/simulate_history.py` marks the models it trains with `params["simulated"] = true`. The API and the dashboard separate them with `source=live|replay|all` (`source_filter` in `shared/shared/db/crud.py`; default `all`), and the combined total is always labeled "live + replay" (#176).
+- **Baselines:** every reported accuracy or PnL sits next to *always-up*, *persistence* and *buy-and-hold*, with the sample size, the edge and a binomial p-value (`shared/shared/baselines.py`).
 
-- **Data Storage:** CoinGecko API returns 4-hour granularity for 1-30 day windows (~6 candles/day)
-- **Fetch Strategy:** Daily worker fetches last 24 hours at 6am UTC, inserts ~6 new candles
-- **Model Training:** Daily worker aggregates 4-hour data to daily using `DATE_TRUNC('day')`
-- **Evaluator:** Uses first candle at/after 7am UTC (typically the 8am candle)
-- **Rationale:**
-  - Provides flexibility to test models with different frequencies (daily, 8h, 4h)
-  - Daily frequency yields 65-66% ML accuracy vs 51-55% for hourly (research-backed)
-  - Lower transaction costs: ~20-30 trades/month vs 180+ for hourly
-  - Target users: part-time investors, not day traders
-- **CoinGecko Limitation:** Beyond 30-day windows, granularity degrades to daily/4-day spacing
+### 6b. PAXG as a Proxy for Gold
+
+- Binance has no XAU spot pair. Gold is shown through `PAXGUSDT`, the PAX Gold token (1 token = 1 troy ounce of London Good Delivery gold), which trades 24/7.
+- It is a proxy, not XAU spot: it can trade at a small premium or discount to gold and follows crypto-exchange liquidity and hours, not the LBMA fixing. Weekend moves have no gold-market counterpart.
+- The dashboard states this next to the data (`shared/shared/assets.py`, `Asset.note`). History starts in 2020-08, so there are fewer days than for BTC. The daily worker trains and predicts `BTCUSDT` only (`DEFAULT_SYMBOL`); PAXG is ingested and shown on the dashboard.
 
 ### 7. Fixed Training Window
 
-- The sliding-window size is `training_window_days` in `shared/shared/config.py` (default 21, override with the `TRAINING_WINDOW_DAYS` environment variable) and is stored in `models.params["window_days"]`.
-- The daily and weekly trainers use every stored `BTCUSDT` daily row and fail with the required and available row counts when there are fewer than `(window + 1) * 5` (plus `horizon - 1` for the weekly model): `required_training_days()` in `workers/daily/trainer.py`.
+- See `workers/daily/CLAUDE.md` (`training_window_days` in `shared/shared/config.py`, default 21).
 
 ### 8. Docker Image Hardening
 
-- **Production `Dockerfile`:** base image pinned by immutable `sha256` digest
-  (`python:3.13-slim@sha256:...`) so prod builds are byte-for-byte
-  reproducible and can't silently pick up an upstream base image change.
-- **`Dockerfile.dev`:** intentionally keeps the floating `python:3.13-slim`
-  tag — dev images rebuild often and should track the latest patch release
-  instead of requiring a manual digest bump for every security fix.
-- **API healthcheck:** the `api` stage of `Dockerfile` (and the `api`
-  service in `docker-compose.yml`) declare a `HEALTHCHECK` against the
-  existing `GET /health` endpoint (`api-service/api/main.py`), using
-  Python's stdlib `urllib` since the slim base image ships neither `curl`
-  nor `wget`.
-- **`fetch` and `ml-worker` stages:** intentionally have no `HEALTHCHECK` —
-  they're one-shot Railway cron jobs, not long-running processes, so there's
-  nothing for a container healthcheck to probe.
+- The production `Dockerfile` pins the base image by `sha256` digest so builds are reproducible. `Dockerfile.dev` keeps the floating `python:3.13-slim` tag on purpose: dev images should track patch releases.
+- The `api` stage has a `HEALTHCHECK` on `GET /health` using stdlib `urllib` (the slim image ships neither `curl` nor `wget`). The `fetch` and `ml-worker` stages have none on purpose: they are one-shot cron jobs.
 
 ---
 
@@ -119,230 +94,61 @@ This is **non-negotiable**:
 
 ### Test Commands (inside container)
 
-**IMPORTANT:** All test commands MUST be executed inside the `api` container.
+**IMPORTANT:** All test commands MUST be executed inside the `api` container (`docker compose exec api pytest ...`).
 
-```bash
-# Start services first (if not running)
-docker compose up -d
-
-# Run all tests
-docker compose exec api pytest
-
-# Run tests with coverage
-docker compose exec api pytest --cov --cov-report=term-missing
-
-# Run tests for specific package
-docker compose exec api pytest shared/tests/
-docker compose exec api pytest api-service/tests/
-docker compose exec api pytest workers/fetch_price/tests/
-docker compose exec api pytest workers/daily/tests/
-
-# Run specific test
-docker compose exec api pytest shared/tests/test_utils.py::test_calculate_pnl
-```
-
-**Current Coverage:** 95% across all packages
-
-### Test Performance
-
-**Execution Time:** ~94 seconds (1 min 34 seg) for 515 tests
-
-**Optimizations Applied** (May 2026):
-- ✅ **Cached model artifacts** (module-scoped): Linear, XGBoost, LSTM models train ONCE per test module instead of per test
-- ✅ **Cached price data** (module-scoped): Pre-calculated price datasets (180-720 records) generated once per module
-- ✅ **Pytest markers**: Registered `slow`, `integration`, `unit`, `db` for selective test execution
-
-**Performance History:**
-- Baseline (May 23, 2026): 127.74s (2 min 7 seg)
-- After optimization (May 24, 2026): 93.67s (1 min 33 seg)
-- **Improvement**: 26.7% faster ⚡
-
-**Commands:**
-```bash
-# Run all tests (optimized)
-docker compose exec api pytest
-
-# Run without slow tests (faster feedback)
-docker compose exec api pytest -m "not slow"
-```
+Per-module coverage minimums live in `[tool.coverage_thresholds]` of `pyproject.toml`; the rules for setting them are in `scripts/CLAUDE.md`.
 
 ### Mutation Testing (Advanced Quality Check)
 
-Mutation testing evaluates test **quality**, not just coverage. It introduces bugs (mutations) in code and checks if tests detect them.
-
-**Framework:** Cosmic Ray 8.3 (configured in `cosmic-ray.toml` and `pyproject.toml`)
-
-```bash
-# IMPORTANT: All commands run inside api container
-docker compose exec api <command>
-
-# Initialize mutation testing session
-cosmic-ray init cosmic-ray.toml session.sqlite
-
-# Execute mutation testing (run mutants against tests)
-cosmic-ray exec cosmic-ray.toml session.sqlite
-
-# Generate report
-cr-report session.sqlite
-
-# View detailed results
-cr-html session.sqlite > mutation-report.html
-
-# Continue interrupted session
-cosmic-ray exec cosmic-ray.toml session.sqlite --no-local-import
-
-# Baseline test (verify tests pass before mutating)
-cosmic-ray --verbosity=INFO baseline cosmic-ray.toml
-```
-
-**How it works:**
-1. Cosmic Ray changes code (e.g., `>` → `>=`, `True` → `False`, remove lines)
-2. Runs tests against each mutated version
-3. ✅ **Mutant killed** = Tests detected the bug (good)
-4. ❌ **Mutant survived** = Tests didn't detect the bug (bad - need more tests)
-
-**Metrics Goal:**
-- Coverage: >90% ✅
-- Mutation Score: >85% (target)
-
-**Latest Results:** 100% mutation score on `shared/db/crud.py` (274/274 mutants killed - see `mutation_testing_report.md`)
+Cosmic Ray (`cosmic-ray.toml`), run inside the `api` container, checks test quality beyond coverage. Target: mutation score > 85%, not measured yet. It runs on demand, never on a schedule: the `Mutation Testing` workflow (Actions tab, Run workflow) runs `cosmic-ray exec` for at most 45 minutes and uploads `mutation-report` (report plus `session.sqlite`) even when it runs out of time; a partial report states how many jobs completed (#192).
 
 ---
 
 ## Development Philosophy: Container-First
 
-**IMPORTANT:** All development and testing MUST be done inside Docker containers.
-
-### Why Containers?
-
-- **Consistency:** Same environment for all developers and CI/CD
-- **No "works on my machine":** Postgres version, Python version, dependencies are identical
-- **Production parity:** Development environment matches Railway deployment
-
-### DO NOT:
-❌ Install Python dependencies locally (`poetry install` on host)  
-❌ Run pytest on host machine  
-❌ Run migrations from host  
-❌ Install PostgreSQL on host
-
-### DO:
-✅ Execute all commands via `docker compose exec`  
-✅ Use volumes for code hot-reload  
-✅ Keep host machine clean (only Docker, IDE, git)
+**IMPORTANT:** All development and testing MUST be done inside Docker containers (`docker compose exec ...`): never `poetry install`, pytest, migrations or PostgreSQL on the host. See Anti-patterns below.
 
 ---
 
 ## Git Hooks (Pre-commit Framework)
 
-**IMPORTANT:** This project uses [pre-commit](https://pre-commit.com/) framework for git hooks.
-
-### First-time Setup (per developer)
-
-```bash
-# Install pre-commit (only once per machine)
-pip install pre-commit
-
-# Install git hooks (only once per repo clone)
-pre-commit install --install-hooks
-pre-commit install --hook-type pre-push
-```
-
-### What Gets Checked Automatically
-
-**Pre-commit** (runs on `git commit`):
-- ✅ Ruff lint (auto-fixes when possible)
-- ✅ Ruff format (code style)
-
-**Pre-push** (runs on `git push`):
-- ✅ Pytest with 90% coverage requirement
-- ✅ Auto-starts Docker Compose if needed
-
-### Manual Hook Execution
-
-```bash
-# Run all pre-commit hooks manually
-pre-commit run --all-files
-
-# Run only pre-push hooks (tests)
-pre-commit run --hook-stage push --all-files
-
-# Update hook versions
-pre-commit autoupdate
-```
-
-See `scripts/hooks/README.md` for full documentation.
+Hooks come from the pre-commit framework (`.pre-commit-config.yaml`). Once per clone: `pre-commit install --install-hooks && pre-commit install --hook-type pre-push`. Full documentation: `scripts/hooks/README.md`.
 
 ---
 
 ## Common Commands
 
-### Development (local) — ALL commands run in containers
-
-```bash
-# Start all services (postgres + api with hot-reload)
-docker compose up
-
-# Start services in background
-docker compose up -d
-
-# View logs
-docker compose logs -f api
-
-# Stop services
-docker compose down
-
-# Rebuild containers (after dependency changes)
-docker compose build
-```
-
 ### Testing (inside container)
 
 ```bash
-# Run all tests (inside api container)
-docker compose exec api pytest
-
-# Run tests with coverage
-docker compose exec api pytest --cov --cov-report=term-missing
+# Skip slow tests (faster feedback)
+docker compose exec api pytest -m "not slow"
 
 # Run tests in parallel with pytest-xdist. Each worker gets its own database
 # (btcpredictor_test_gw0, _gw1, ...); serial runs use btcpredictor_test.
 # The dev database (btcpredictor) is never touched by the suite.
-# ~40-50 s with 4 workers vs ~65 s serial. LSTM/XGBoost/ARIMA are imported
-# lazily, so workers only pay the TensorFlow import if a test needs it.
+# ~40-50 s with 4 workers vs ~65 s serial.
 # More workers than cores is slower (-n 8 took 80-100 s here).
 # Use COVERAGE_CORE=sysmon if you combine -n with --cov.
 docker compose exec api pytest -n 4 --dist loadscope
-
-# Run the LSTM/XGBoost/ARIMA tests disabled during the Linear-only reboot (#124).
-# Their modules are not even collected without this flag (they import TensorFlow).
-docker compose exec api pytest --run-non-linear
 ```
 
 ### Code Quality (inside container)
 
 ```bash
-# Lint
-docker compose exec api ruff check shared api-service workers
+# Lint (same scope as CI: every production package, scripts included)
+docker compose exec api ruff check shared api workers scripts
 
 # Format code
-docker compose exec api ruff format shared api-service workers
+docker compose exec api ruff format shared api workers scripts
+
+# Types: mypy --strict on shared, workers, api and scripts, test code included
+# (shared/tests, workers/*/tests, api/tests and scripts/tests; no test directory
+# is excluded and no relaxed override remains in pyproject.toml).
+docker compose exec api python -m mypy shared/shared shared/tests workers api scripts
 ```
 
-### Database Migrations (inside container)
-
-```bash
-# Run migrations
-docker compose exec api sh -c "cd shared && alembic upgrade head"
-
-# Create new migration
-docker compose exec api sh -c "cd shared && alembic revision --autogenerate -m 'description'"
-
-# Downgrade migration
-docker compose exec api sh -c "cd shared && alembic downgrade -1"
-
-# View migration history
-docker compose exec api sh -c "cd shared && alembic history"
-```
+Migration commands (`alembic upgrade head`, `revision --autogenerate`): see `shared/CLAUDE.md`.
 
 ### Manual Job Execution (inside container)
 
@@ -354,16 +160,6 @@ docker compose exec api python -m workers.fetch_price.main
 docker compose exec api python -m workers.daily
 ```
 
-### Shell Access (for debugging)
-
-```bash
-# Open shell inside api container
-docker compose exec api bash
-
-# Open PostgreSQL psql shell
-docker compose exec postgres psql -U btcpredictor -d btcpredictor
-```
-
 ### Railway Deploy
 
 ```bash
@@ -372,26 +168,24 @@ git push origin main
 
 # IMPORTANT: After pushing to main, ALWAYS run Railway deployment monitoring
 ./scripts/hooks/monitor-railway.sh
-
-# View logs
-railway logs --service api
-railway logs --service fetch-price
-railway logs --service daily
 ```
 
 ### Main Branch Protection
 
-The `main` branch is protected in GitHub with force-pushes and branch deletion
-disabled. `enforce_admins` is intentionally `false`, allowing the repository
-owner to push directly when necessary; this is an explicit solo-maintainer
-exception, not an omission. Pull-request and required status-check enforcement
-will be added when the repository adopts hosted CI checks that GitHub can
-require.
+The `main` branch is protected in GitHub: force-pushes and branch deletion are
+disabled, and a merge needs five status checks (`Docker quality gate`,
+`trivy-image`, `trivy-config`, `Socket Security: Project Report`, `Socket
+Security: Pull Request Alerts`) on a branch that is up to date with `main`
+(`strict`). No review is required. `enforce_admins` is intentionally `false`,
+allowing the repository owner to push directly when necessary; this is an
+explicit solo-maintainer exception, not an omission.
+
+- The checks start a few minutes after a PR opens and `Docker quality gate` takes about 5 minutes. Until they pass, `gh pr merge` fails with "the base branch policy prohibits the merge".
+- A PR that is behind `main` cannot merge. Update it with `gh api -X PUT repos/cuauhtemocbe/btc-predictor/pulls/<n>/update-branch` (this `gh` has no `pr update-branch`); that restarts the checks.
+- `gh pr edit` fails on the deprecated Projects (classic) GraphQL error. Edit a PR body with `gh api -X PATCH repos/cuauhtemocbe/btc-predictor/pulls/<n> -f body=...`.
 
 **Claude Code Automation:**
-- After successfully pushing to `main` branch, ALWAYS execute `./scripts/hooks/monitor-railway.sh`
-- This monitors Railway deployment status and reports any issues
-- Git does not support post-push hooks natively, so this must be done explicitly
+- Git does not support post-push hooks natively, so the monitor in *Railway Deploy* must be run explicitly after every push to `main`
 
 ---
 
@@ -399,53 +193,22 @@ require.
 
 ❌ **DON'T** run pytest or any commands directly on host (always use `docker compose exec`)  
 ❌ **DON'T** install Python dependencies on host machine  
-❌ **DON'T** duplicate database connection logic (use `shared/btc_shared/db/database.py`)  
-❌ **DON'T** hardcode configuration (use `pydantic-settings` in `shared/btc_shared/config.py`)  
+❌ **DON'T** duplicate database connection logic (use `shared/shared/db/database.py`)  
+❌ **DON'T** hardcode configuration (use `pydantic-settings` in `shared/shared/config.py`)  
 ❌ **DON'T** commit `.env` file (use `.env.example` as template)  
 ❌ **DON'T** bypass UNIQUE constraints (they're for idempotency)  
+❌ **DON'T** call `date.today()` in production code (use `shared.utils.utc_today()`)  
 ❌ **DON'T** skip tests ("I'll add them later" never happens)
-
-✅ **DO** execute ALL commands inside Docker containers  
-✅ **DO** write tests for every Gherkin scenario  
-✅ **DO** use Alembic for all schema changes  
-✅ **DO** keep services decoupled (communicate via DB only)  
-✅ **DO** log important events (predictions, errors, model training)  
-✅ **DO** validate inputs (Pydantic models for API, assertions in ML code)
-
----
-
-## Project Context Links
-
-- **GitHub Repository:** https://github.com/cuauhtemocbe/btc-predictor
-- **Project Board:** https://github.com/users/cuauhtemocbe/projects/1/views/1
-- **Implementation History:** `docs/archive/specs/IMPLEMENTATION_HISTORY.md`
-- **User Stories:** GitHub Issues #2 to #17 (all closed ✅)
-- **License:** [MIT](LICENSE)
-- **Changelog:** [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format)
-
----
-
-## Owner
-
-**Name:** Cuauhtémoc (cuauhtemocbe)  
-**Email:** cuauhtemocbe@gmail.com  
-**GitHub:** https://github.com/cuauhtemocbe  
-**Timezone:** America/Mexico_City
 
 ---
 
 ## Notes for Future Sessions
 
 - User prefers Spanish for communication (but code/docs in English is OK)
+- Timezone: America/Mexico_City
 - User follows agile methodology with User Stories
-- All 16 User Stories (US-001 to US-016) are complete and deployed to Railway
-- User is comfortable with command-line tools (gh, docker, poetry)
-- User has engram memory plugin active (save important decisions to engram)
 
 ### Engram Memory
 
 - **Project name:** `btc-predictor`, pinned in `.engram/config.json` (committed) so memory writes always target this project, whatever the cwd.
-- **Setup:** the `engram@engram` Claude Code plugin plus the `engram` binary (v2.2.0), with the MCP server registered globally as `engram mcp --tools=agent`. Nothing repo-specific to install.
-- **Recovery:** after a context reset or compaction, call `mem_context` before continuing.
-- **Save proactively** with `mem_save` after decisions, bug fixes, discoveries and established patterns; call `mem_session_summary` before closing a session.
 - **Diagnostics:** `engram doctor` (read-only) if memory behaves oddly.

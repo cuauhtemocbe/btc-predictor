@@ -12,22 +12,23 @@ repos:
       - id: ruff
         name: Lint with ruff
         args: [--fix, --no-cache]
-        files: ^(shared|api-service|workers)/
+        files: ^(shared|api-service|workers|scripts)/
       - id: ruff-format
         name: Format with ruff
         args: [--no-cache]
-        files: ^(shared|api-service|workers)/
+        files: ^(shared|api-service|workers|scripts)/
 
-  # mypy --strict on shared/ (runs in Docker, needs project's real
-  # dependencies/stubs — not the isolated venv the mirrors-mypy hook uses)
+  # mypy --strict on shared, workers, api and scripts (runs in Docker, needs
+  # project's real dependencies/stubs — not the isolated venv the mirrors-mypy
+  # hook uses). Same command as CI; see scripts/hooks/run-mypy.sh.
   - repo: local
     hooks:
       - id: mypy-docker
-        name: Type-check shared/ with mypy --strict
+        name: Type-check with mypy --strict
         entry: scripts/hooks/run-mypy.sh
         language: system
         pass_filenames: false
-        files: ^shared/
+        files: ^(shared|api-service|workers|scripts)/
 
   # Pytest with Docker (runs on pre-push)
   - repo: local

@@ -9,6 +9,7 @@ metrics). Rows stored before the column existed stay NULL ("unsplit").
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -16,8 +17,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from shared.config import settings
 from shared.db.models import BacktestResult
@@ -42,20 +44,22 @@ def _result(evaluation_slice: str | None = None) -> BacktestResult:
 
 class TestEvaluationSliceColumn:
     @pytest.mark.parametrize("value", ["validation", "test", None])
-    def test_accepts_validation_test_and_unsplit(self, db_session, value):
+    def test_accepts_validation_test_and_unsplit(
+        self, db_session: Session, value: str | None
+    ) -> None:
         db_session.add(_result(value))
         db_session.commit()
 
         assert db_session.query(BacktestResult).one().evaluation_slice == value
 
-    def test_defaults_to_unsplit(self, db_session):
+    def test_defaults_to_unsplit(self, db_session: Session) -> None:
         db_session.add(_result())
         db_session.commit()
 
         assert db_session.query(BacktestResult).one().evaluation_slice is None
 
     @pytest.mark.parametrize("value", ["train", "TEST", ""])
-    def test_rejects_any_other_value(self, db_session, value):
+    def test_rejects_any_other_value(self, db_session: Session, value: str) -> None:
         db_session.add(_result(value))
 
         with pytest.raises(IntegrityError):
@@ -76,7 +80,7 @@ def _alembic(database_url: str, *args: str) -> None:
 
 
 @pytest.fixture
-def migration_db():
+def migration_db() -> Iterator[tuple[str, Engine]]:
     """A scratch database emptied by schema reset (no slow DROP DATABASE)."""
     url = make_url(settings.database_url)
     url = url.set(database=f"{url.database}_migration")
@@ -96,7 +100,7 @@ INSERT_LEGACY_ROW = text(
 )
 
 
-def _columns(engine) -> set[str]:
+def _columns(engine: Engine) -> set[str]:
     with engine.connect() as connection:
         return set(
             connection.execute(
@@ -111,8 +115,8 @@ def _columns(engine) -> set[str]:
 @pytest.mark.slow
 class TestMigration:
     def test_upgrade_keeps_legacy_rows_unsplit_and_enforces_the_check(
-        self, migration_db
-    ):
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
         url, engine = migration_db
         _alembic(url, "upgrade", REVISION_BEFORE)
         with engine.begin() as connection:
@@ -129,12 +133,14 @@ class TestMigration:
                 .all()
             )
         assert slices == [None]
-        with pytest.raises(IntegrityError), engine.begin() as connection:
-            connection.execute(
-                text("UPDATE backtest_results SET evaluation_slice = 'train'")
-            )
+        set_train_slice = text("UPDATE backtest_results SET evaluation_slice = 'train'")
+        transaction = engine.begin()
+        with pytest.raises(IntegrityError), transaction as connection:
+            connection.execute(set_train_slice)
 
-    def test_downgrade_drops_the_column_and_upgrade_restores_it(self, migration_db):
+    def test_downgrade_drops_the_column_and_upgrade_restores_it(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
         url, engine = migration_db
         _alembic(url, "upgrade", "head")
         assert "evaluation_slice" in _columns(engine)

@@ -15,7 +15,7 @@ import pytest
 
 SCRIPT = Path(__file__).parents[1] / "hooks" / "monitor-railway.sh"
 
-SERVICES = ["btc-predictor", "weekly-predictor", "daily", "fetch-price"]
+SERVICES = ["btc-predictor", "daily", "fetch-price"]
 
 
 def block(
@@ -30,13 +30,12 @@ def block(
 
 
 def snapshot(
-    status: str = "● Online", suffix: str = "a", statuses: dict | None = None
+    status: str = "● Online", suffix: str = "a", statuses: dict[str, str] | None = None
 ) -> str:
     """A full listing where each service has a different number of optional fields."""
     statuses = statuses or {}
     extras = {
         "btc-predictor": ("url:           https://btc.example.app",),
-        "weekly-predictor": ("replicas:      0/1 running",),
         "daily": (
             "url:           https://daily.example.app",
             "replicas:      0/1 running",
@@ -48,12 +47,16 @@ def snapshot(
         body += block(
             name, statuses.get(name, status), f"{name}-{suffix}", extras[name]
         )
-    body += "Postgres (linked)\n    status:        ● Online\n    image:         postgres:18\n\n"
+    body += (
+        "Postgres (linked)\n"
+        "    status:        ● Online\n"
+        "    image:         postgres:18\n\n"
+    )
     return body
 
 
 @pytest.fixture
-def railway_stub(tmp_path):
+def railway_stub(tmp_path: Path) -> SimpleNamespace:
     """Install a stub `railway` on PATH.
 
     Returns a namespace with `load(*snapshots)` to queue listings and
@@ -75,7 +78,8 @@ def railway_stub(tmp_path):
                     n=$(cat "$state/calls" 2>/dev/null || echo 0)
                     echo $((n + 1)) > "$state/calls"
                     file="$state/snapshot_$n"
-                    [[ -f "$file" ]] || file=$(ls "$state"/snapshot_* | sort -V | tail -1)
+                    [[ -f "$file" ]] ||
+                        file=$(ls "$state"/snapshot_* | sort -V | tail -1)
                     cat "$file"
                     ;;
                 "status "*|"logs "*) ;;
@@ -100,7 +104,9 @@ def railway_stub(tmp_path):
     )
 
 
-def run_monitor(environment: dict, *args: str) -> subprocess.CompletedProcess:
+def run_monitor(
+    environment: dict[str, str], *args: str
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(SCRIPT), *args],
         env=environment,
@@ -134,22 +140,22 @@ class TestDeploymentIdParsing:
     """Scenario: Deployment ID is parsed correctly regardless of optional fields."""
 
     @pytest.mark.parametrize("service", SERVICES)
-    def test_extracts_the_deployment_id_of_every_service(self, service):
+    def test_extracts_the_deployment_id_of_every_service(self, service: str) -> None:
         assert source_field(service, "deployment ID", snapshot()) == f"{service}-a"
 
-    def test_does_not_leak_fields_from_a_neighbouring_service(self):
+    def test_does_not_leak_fields_from_a_neighbouring_service(self) -> None:
         # fetch-price has no optional lines; the next block must not be read
         listing = snapshot(suffix="x")
 
         assert source_field("fetch-price", "deployment ID", listing) == "fetch-price-x"
 
-    def test_status_is_read_from_the_same_block(self):
+    def test_status_is_read_from_the_same_block(self) -> None:
         listing = snapshot(statuses={"daily": "● Building"})
 
         assert source_field("daily", "status", listing) == "● Building"
         assert source_field("btc-predictor", "status", listing) == "● Online"
 
-    def test_service_name_must_match_the_whole_line(self):
+    def test_service_name_must_match_the_whole_line(self) -> None:
         # "daily" must not match a service called "daily-extra"
         listing = block("daily-extra", "● Online", "wrong-id") + block(
             "daily", "● Online", "right-id"
@@ -157,16 +163,18 @@ class TestDeploymentIdParsing:
 
         assert source_field("daily", "deployment ID", listing) == "right-id"
 
-    def test_missing_service_yields_an_empty_value(self):
+    def test_missing_service_yields_an_empty_value(self) -> None:
         assert source_field("no-such-service", "deployment ID", snapshot()) == ""
 
-    def test_missing_field_yields_an_empty_value(self):
+    def test_missing_field_yields_an_empty_value(self) -> None:
         assert source_field("daily", "no such label", snapshot()) == ""
 
 
 @pytest.mark.integration
 class TestMonitorExitBehaviour:
-    def test_reports_success_well_before_the_timeout(self, railway_stub):
+    def test_reports_success_well_before_the_timeout(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
         # Initial snapshot, then a deploy in flight, then all online with new ids
         railway_stub.load(
             snapshot(suffix="old"),
@@ -180,7 +188,9 @@ class TestMonitorExitBehaviour:
         assert "All services deployed successfully" in result.stdout
         assert "timeout" not in result.stdout.lower()
 
-    def test_reports_failure_on_a_genuine_timeout(self, railway_stub):
+    def test_reports_failure_on_a_genuine_timeout(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
         # Deployment ids never change: nothing was ever redeployed
         railway_stub.load(snapshot(suffix="same"))
 
@@ -190,7 +200,9 @@ class TestMonitorExitBehaviour:
         assert "Deployment timeout after 6s" in result.stdout
         assert "deployed successfully" not in result.stdout
 
-    def test_still_building_at_the_deadline_is_a_timeout(self, railway_stub):
+    def test_still_building_at_the_deadline_is_a_timeout(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
         railway_stub.load(
             snapshot(suffix="old"), snapshot(status="● Building", suffix="new")
         )
@@ -200,7 +212,9 @@ class TestMonitorExitBehaviour:
         assert result.returncode == 1
         assert "Deployment timeout" in result.stdout
 
-    def test_a_failed_deployment_fails_immediately(self, railway_stub):
+    def test_a_failed_deployment_fails_immediately(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
         railway_stub.load(
             snapshot(suffix="old"),
             snapshot(suffix="new", statuses={"daily": "● Failed"}),
@@ -212,7 +226,7 @@ class TestMonitorExitBehaviour:
         assert "daily deployment failed" in result.stdout
         assert "deployed successfully" not in result.stdout
 
-    def test_silent_flag_suppresses_output(self, railway_stub):
+    def test_silent_flag_suppresses_output(self, railway_stub: SimpleNamespace) -> None:
         railway_stub.load(snapshot(suffix="old"), snapshot(suffix="new"))
 
         result = run_monitor(railway_stub.environment, "--silent")
@@ -220,7 +234,7 @@ class TestMonitorExitBehaviour:
         assert result.returncode == 0
         assert result.stdout == ""
 
-    def test_missing_cli_exits_with_code_2(self, tmp_path):
+    def test_missing_cli_exits_with_code_2(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty"
         empty.mkdir()
 

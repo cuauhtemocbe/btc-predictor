@@ -23,7 +23,7 @@ uvicorn = {extras = ["standard"], version = ">=0.34,<0.54"}
 starlette = ">=0.49.1"
 jinja2 = "^3.1.0"
 httpx = "^0.28.1"
-numpy = "^2.0.0"  # Required by shared/btc_shared/strategies.py
+numpy = "^2.0.0"  # Required by shared/shared/strategies.py
 
 [tool.poetry.group.fetch]
 optional = true
@@ -39,12 +39,9 @@ optional = true
 [tool.poetry.group.ml.dependencies]
 scikit-learn = "^1.5.0"
 numpy = "^2.0.0"
-tensorflow-cpu = ">=2.13.0"
-xgboost = ">=2.0.0"
-statsmodels = ">=0.14.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3.0"
+pytest = ">=8.3,<10.0"
 httpx = "^0.28.0"
 pytest-asyncio = ">=0.25,<1.5"
 pytest-cov = ">=6,<8"
@@ -64,9 +61,9 @@ pythonpath = "."
 testpaths = [
     "shared/tests",
     "api/tests",
+    "workers/backtest/tests",
     "workers/daily/tests",
     "workers/fetch_price/tests",
-    "workers/weekly/tests",
     "scripts/tests"
 ]
 addopts = "--cov-fail-under=90"
@@ -77,42 +74,93 @@ markers = [
     "integration: marks tests that require full DB setup",
     "unit: marks tests that use mocks/stubs only",
     "db: marks tests that use database fixtures",
-    "non_linear: LSTM/XGBoost/ARIMA tests, skipped during the Linear-only reboot (see #124)",
     "asyncio: marks async tests (automatically detected)"
 ]
 
-[tool.coverage.run]
-# Test modules skipped during the Linear-only reboot (#124) are not code under
-# test: their unexecuted bodies would only drag the 90% gate down. Remove these
-# entries as each suite is re-enabled.
-omit = [
-    "*/tests/test_lstm_model.py",
-    "*/tests/test_xgboost_model.py",
-    "*/tests/test_arima_model.py",
-    "*/tests/test_all_models.py",
-]
+[tool.coverage_thresholds]
+# Minimum line coverage, in percent, for each critical module. Checked by
+# `scripts/check_coverage_thresholds.py` against the coverage.xml of the full
+# pytest run (CI "Docker quality gate", `make validate`, pre-push hook), on top
+# of the global `--cov-fail-under` above. A module listed here that is missing
+# from the report fails the gate too (no test imports it, or it was renamed).
+#
+# Keys are repo-relative paths. How a value is chosen: measure the module, then
+# take the largest multiple of 5 that is at least 2 points below the measured
+# coverage. To raise a threshold after adding tests, re-measure with
+#   docker compose exec api pytest --cov --cov-report=xml:/tmp/coverage.xml
+# and apply the same rule. Never lower one to make a failing run pass: add the
+# missing tests or explain the drop in the PR.
+#
+# Not listed, on purpose: `__init__.py` files without logic and test code.
+"api-service/api/main.py" = 95
+"api-service/api/models/backtesting.py" = 95
+"api-service/api/models/predictions.py" = 95
+"api-service/api/models/responses.py" = 95
+"api-service/api/routers/backtesting.py" = 95
+"api-service/api/routers/models.py" = 95
+"api-service/api/routers/predictions.py" = 95
+"api-service/api/routers/prices.py" = 95
+"api-service/api/routers/routes.py" = 95
+"api-service/api/symbols.py" = 95
+"scripts/activate_model.py" = 95
+"scripts/backtest.py" = 95
+"scripts/backtest_engine.py" = 95
+"scripts/backtest_report.py" = 90
+"scripts/list_models.py" = 95
+"scripts/load_binance_history.py" = 90
+"shared/shared/assets.py" = 95
+"shared/shared/baselines.py" = 95
+"shared/shared/binance_vision.py" = 95
+"shared/shared/config.py" = 95
+"shared/shared/db/crud.py" = 95
+"shared/shared/db/database.py" = 95
+"shared/shared/db/models.py" = 95
+"shared/shared/features.py" = 90
+"shared/shared/model_baselines.py" = 95
+"shared/shared/strategies.py" = 95
+"shared/shared/utils.py" = 95
+"workers/backtest/main.py" = 90
+"workers/daily/__main__.py" = 90
+"workers/daily/evaluator.py" = 90
+"workers/daily/models/__init__.py" = 85
+"workers/daily/models/base.py" = 70
+"workers/daily/models/factory.py" = 95
+"workers/daily/models/linear.py" = 95
+"workers/daily/predictor.py" = 90
+"workers/daily/trainer.py" = 90
+"workers/fetch_price/main.py" = 90
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
 plugins = ["pydantic.mypy"]
-# explicit_package_bases + mypy_path lets mypy name shared/btc_shared/* as
-# "btc_shared.*" and shared/tests/* as "tests.*" without adding __init__.py
+# explicit_package_bases + mypy_path lets mypy name shared/shared/* as
+# "shared.*" and shared/tests/* as "tests.*" without adding __init__.py
 # files there (which would break pytest test collection for sibling
 # "tests" dirs elsewhere in the monorepo, e.g. workers/daily/tests).
-mypy_path = "shared"
+# api/tests is itself a base so its files are top-level modules ("conftest",
+# "test_main", ...) and do not clash with shared/tests ("Duplicate module named
+# tests.conftest"). The api tests import each other by those top-level names
+# (soup_helpers), which is also how pytest imports them.
+mypy_path = "shared:api:api/tests"
 explicit_package_bases = true
-files = ["shared/shared", "shared/btc_shared", "shared/tests"]
-exclude = ["shared/alembic/", "shared/\\.venv/", "shared/poetry\\.lock"]
+files = [
+    "shared/shared",
+    "shared/tests",
+    "workers",
+    "api",
+    "scripts",
+]
+exclude = [
+    "shared/alembic/",
+    "shared/\\.venv/",
+    "shared/poetry\\.lock",
+]
 
 [[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-strict_optional = false
-implicit_optional = true
-disable_error_code = ["method-assign"]
+# These libraries ship neither stubs nor a py.typed marker.
+module = ["sklearn.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88
@@ -126,7 +174,7 @@ select = ["E", "F", "I", "UP"]
 # host (repo root has "api-service/") and the dev container (Dockerfile.dev
 # mounts it as "/app/api"), sorting "api.*" imports differently depending
 # on where ruff runs from. Pin it explicitly so lint is deterministic.
-known-first-party = ["api", "shared", "btc_shared", "workers"]
+known-first-party = ["api", "shared", "workers"]
 
 [tool.cosmic-ray]
 module-path = "."

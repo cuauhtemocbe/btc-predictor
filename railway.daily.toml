@@ -5,4 +5,4 @@ dockerfilePath = "Dockerfile.ml"
 [deploy]
 startCommand = "python -m workers.daily"
 restartPolicyType = "never"
-cronSchedule = "0 7 * * *"
+cronSchedule = "10 0 * * *"

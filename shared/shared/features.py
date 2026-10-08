@@ -1,8 +1,8 @@
 """
-Return-based features and targets for next-day (or next-week) prediction.
+Return-based features and targets for next-day prediction.
 
-The single builder used by the daily and weekly trainers, the daily and weekly
-predictors, and the backtest (#106). Models are trained on log returns, not on
+The single builder used by the daily trainer, the daily predictor
+and the backtest (#106). Models are trained on log returns, not on
 price levels, and the predicted price is ``last close * exp(predicted return)``.
 
 For the day at index ``t`` of a daily series, with window ``W``, the features are
@@ -20,6 +20,7 @@ rows ``t - W .. t``, so they carry no future data.
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -52,13 +53,80 @@ class FeatureSet:
 
 @dataclass(frozen=True)
 class DailySeries:
-    """Daily closes and volumes of one symbol, oldest to newest, same length."""
+    """Bar dates, closes and volumes of one symbol, oldest to newest, same length."""
 
+    dates: list[date]
     closes: list[Decimal]
     volumes: list[Decimal]
 
     def __len__(self) -> int:
         return len(self.closes)
+
+
+def require_recent_close(last_bar: date, now: datetime, max_age: timedelta) -> None:
+    """
+    Refuse to predict from a bar that closed too long ago (#175).
+
+    The bar dated ``last_bar`` closes at 00:00 UTC of the next day, and the
+    prediction is anchored to that close. The pnl columns assume a position
+    opened at that price, so the job has to run right after it.
+
+    Args:
+        last_bar: Date (UTC day) of the last stored bar
+        now: The instant the job runs at, timezone-aware
+        max_age: Oldest acceptable time since the bar's close
+
+    Raises:
+        ValueError: If the bar closed more than ``max_age`` before ``now``.
+    """
+    closed_at = datetime.combine(last_bar + timedelta(days=1), time.min, tzinfo=UTC)
+    age = now - closed_at
+    if age > max_age:
+        raise ValueError(
+            f"Last bar ({last_bar}) closed at {closed_at:%Y-%m-%d %H:%M} UTC, "
+            f"{age} ago; the maximum age is {max_age}, so the price the "
+            "prediction is anchored to is stale"
+        )
+
+
+def require_fresh_series(dates: Sequence[date], today: date) -> None:
+    """
+    Refuse a series that is stale or has gaps, before features are built from it.
+
+    A prediction made at 00:10 UTC on ``today`` needs the bar of ``today - 1`` as
+    its last bar, and one bar per day before it. Otherwise a return silently
+    spans several days and is scored as a one-day move (#174).
+
+    Production entry points call this (predictors and trainers); the backtest
+    builds its windows from history with its own clock and does not.
+
+    Args:
+        dates: Bar dates (UTC days), oldest to newest
+        today: The UTC day the job runs on
+
+    Raises:
+        ValueError: If the series is empty, its last bar is not dated
+            ``today - 1``, or a day is missing between its first and last bar;
+            the message names the missing dates.
+    """
+    expected_last = today - timedelta(days=1)
+    if not dates:
+        raise ValueError(f"No stored bars: expected one dated {expected_last}")
+
+    present = set(dates)
+    first, last = dates[0], max(dates)
+    span_end = max(last, expected_last)
+    missing = [
+        first + timedelta(days=offset)
+        for offset in range((span_end - first).days + 1)
+        if first + timedelta(days=offset) not in present
+    ]
+    if last != expected_last or missing:
+        listed = ", ".join(d.isoformat() for d in missing) or "none"
+        raise ValueError(
+            f"Stale or incomplete series: latest bar is dated {last}, expected "
+            f"{expected_last}; missing bar date(s): {listed}"
+        )
 
 
 def feature_count(window_days: int) -> int:
@@ -151,9 +219,8 @@ def build_training_set(
         closes: Daily close prices, oldest to newest
         volumes: Daily volumes, same length as ``closes``
         window_days: Days of returns and volume changes per sample
-        horizon_days: Days ahead of the target: 1 for the daily worker, 7 for the
-            weekly worker. The target is the sum of the next ``horizon_days``
-            daily log returns.
+        horizon_days: Days ahead of the target: 1 for the daily worker.
+            The target is the sum of the next ``horizon_days`` daily log returns.
 
     Returns:
         FeatureSet with ``len(closes) - window_days - horizon_days`` samples

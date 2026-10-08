@@ -1,50 +1,42 @@
-"""
-Utility functions for BTC Predictor.
+"""Day boundary, simulated-PnL strategies and per-family model metrics."""
 
-Functions:
-- calculate_pnl: Calculate simulated profit/loss from prediction strategy
-- calculate_pnl_long_short: Calculate PnL with long/short symmetric strategy
-- calculate_pnl_threshold: Calculate PnL with threshold filter
-- calculate_pnl_realistic: Calculate PnL with trading fees and stop-loss
-- split_train_validation: Split time series data into train/validation sets
-- calculate_mape: Calculate Mean Absolute Percentage Error
-
-Model Metrics Functions (for dashboard):
-- calculate_accuracy: Calculate % of correct direction predictions for a model
-- calculate_model_mape: Calculate MAPE from database predictions for a model
-- calculate_total_pnl: Calculate total PnL for a model
-- calculate_win_rate: Calculate % of positive PnL predictions for a model
-- calculate_sharpe_ratio: Calculate Sharpe ratio, normalized by DEFAULT_CAPITAL
-- calculate_max_drawdown: Calculate maximum drawdown for a model, in dollars
-- calculate_max_drawdown_pct: Same, as a % of a capital-based equity curve
-- get_cumulative_pnl: Get daily cumulative PnL time series for a model
-- get_all_models_metrics: Get metrics for all models in one call
-"""
-
-from datetime import date
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
 import numpy as np
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, select
+from sqlalchemy.orm import Session, defer
 
-# Prediction.timeframe values, and the one used when a caller doesn't name
-# one explicitly. Applied consistently across every metric function below
-# and every API endpoint that doesn't require an explicit timeframe query
-# param -- see issue #67.
-SUPPORTED_TIMEFRAMES = ("1h", "1d", "1w")
+from shared.db.crud import source_filter
+from shared.db.models import Model, Prediction, PredictionSource, model_family
+from shared.model_baselines import BASELINE_TIMEFRAME, baseline_for_predictions
+from shared.returns import max_drawdown_pct, returns_from_pnl, sharpe_ratio
+
+# Prediction.timeframe values and the default for callers that name none (#67).
+SUPPORTED_TIMEFRAMES = ("1d",)
 DEFAULT_TIMEFRAME = "1d"
 
-# Reference capital (in USDT) that risk-adjusted metrics (Sharpe ratio,
-# percentage drawdown) are normalized against. The stored pnl_* columns
-# stay as raw dollar deltas on an effective 1-BTC position -- changing
-# that would silently rescale every future prediction's stored PnL
-# relative to historical rows already in the database. Normalizing only
-# the *derived*, recomputed-on-read metrics below avoids that, while
-# still making returns/drawdown comparable across different BTC price
-# regimes instead of scaling with the trade's spot price -- see issue #72.
-DEFAULT_CAPITAL = 10_000.0
+
+def utc_now() -> datetime:
+    """Return the current instant as a timezone-aware UTC datetime.
+
+    The clock the freshness guard of the predictor reads (#175); tests freeze it
+    by patching ``datetime`` in this module.
+    """
+    return datetime.now(UTC)
+
+
+def utc_today() -> date:
+    """Return today's calendar date in UTC, whatever the process time zone is.
+
+    Daily bars open at 00:00 UTC, so every job defines "today" in UTC.
+    The container's local date follows its ``TZ`` (America/Mexico_City, UTC-6) and
+    is a day behind UTC for part of the day (#173).
+    """
+    return utc_now().date()
 
 
 def calculate_pnl(
@@ -52,40 +44,16 @@ def calculate_pnl(
     price_at_prediction: Decimal,
     actual_price: Decimal,
 ) -> Decimal:
-    """
-    Calculate simulated profit/loss (PnL) from a prediction-based trading strategy.
-
-    Strategy:
-    - If predicted_price > price_at_prediction (predicted UP):
-      → Go long 1 BTC at price_at_prediction
-      → PnL = actual_price - price_at_prediction
-    - Else (predicted DOWN or flat):
-      → Stay in cash (no trade)
-      → PnL = 0
+    """Long-only PnL in USDT of 1 unit: long if predicted UP, else cash (PnL 0).
 
     Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-
-    Returns:
-        Simulated PnL in USDT (positive = profit, negative = loss, 0 = no trade)
-
-    Examples:
-        >>> calculate_pnl(Decimal("67000"), Decimal("66000"), Decimal("67500"))
-        Decimal('1500.00')  # Predicted UP, actual UP → profit
-
-        >>> calculate_pnl(Decimal("67000"), Decimal("66000"), Decimal("65000"))
-        Decimal('-1000.00')  # Predicted UP, actual DOWN → loss
-
-        >>> calculate_pnl(Decimal("65000"), Decimal("66000"), Decimal("64000"))
-        Decimal('0.00')  # Predicted DOWN → no trade
+        predicted_price: Predicted price.
+        price_at_prediction: Price when the prediction was made (the entry).
+        actual_price: Price at evaluation time (the exit).
     """
-    # If predicted UP (prediction higher than current), go long
     if predicted_price > price_at_prediction:
         pnl = actual_price - price_at_prediction
     else:
-        # Predicted DOWN or flat → stay in cash
         pnl = Decimal("0.00")
 
     return pnl
@@ -96,32 +64,13 @@ def calculate_pnl_long_short(
     price_at_prediction: Decimal,
     actual_price: Decimal,
 ) -> Decimal:
-    """
-    Calculate PnL from long/short symmetric trading strategy.
+    """Long/short PnL in USDT of 1 unit: long if predicted UP, else short.
 
-    Strategy:
-    - If predicted_price > price_at_prediction (predicted UP):
-      → Go long 1 BTC at price_at_prediction
-      → PnL = actual_price - price_at_prediction
-    - Else (predicted DOWN):
-      → Go short 1 BTC at price_at_prediction
-      → PnL = price_at_prediction - actual_price
-
-    This strategy profits from correct predictions in BOTH directions.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-
-    Returns:
-        PnL in USDT (positive = profit, negative = loss)
+    Args: same as ``calculate_pnl``.
     """
     if predicted_price > price_at_prediction:
-        # Long position
         pnl = actual_price - price_at_prediction
     else:
-        # Short position
         pnl = price_at_prediction - actual_price
 
     return pnl
@@ -133,35 +82,18 @@ def calculate_pnl_threshold(
     actual_price: Decimal,
     threshold: Decimal = Decimal("1.0"),
 ) -> Decimal:
+    """Long/short PnL, but 0 when the predicted change is under ``threshold`` %.
+
+    Args: same as ``calculate_pnl``, plus ``threshold``, the minimum absolute
+        predicted change in percent that triggers a trade.
     """
-    Calculate PnL with threshold filter: only trade if predicted change > threshold %.
-
-    Strategy:
-    - Calculate predicted change percentage
-    - If abs(change) < threshold → no trade, PnL = 0
-    - Else → apply long/short symmetric strategy
-
-    This avoids trading on weak signals and reduces transaction costs.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-        threshold: Minimum predicted change % to trigger trade (default 1.0%)
-
-    Returns:
-        PnL in USDT (positive = profit, negative = loss, 0 = no trade)
-    """
-    # Calculate predicted change percentage
     change_pct = abs(
         (predicted_price - price_at_prediction) / price_at_prediction * 100
     )
 
-    # If change below threshold, no trade
     if change_pct < threshold:
         return Decimal("0.00")
 
-    # Otherwise, use long/short symmetric strategy
     return calculate_pnl_long_short(predicted_price, price_at_prediction, actual_price)
 
 
@@ -172,689 +104,186 @@ def calculate_pnl_realistic(
     fee_pct: Decimal = Decimal("0.1"),
     stop_loss_pct: Decimal = Decimal("2.0"),
 ) -> Decimal:
+    """Long/short PnL after fees, with the gross loss capped by a stop-loss.
+
+    Fees are ``fee_pct`` of ``price_at_prediction`` on entry and on exit; the
+    gross loss is capped at ``stop_loss_pct`` of ``price_at_prediction``.
+
+    Args: same as ``calculate_pnl``, plus ``fee_pct`` (per trade, percent) and
+        ``stop_loss_pct`` (percent).
     """
-    Calculate PnL with realistic trading conditions: fees and stop-loss.
-
-    Strategy:
-    - Apply long/short symmetric strategy
-    - Deduct trading fees: fee_pct * price_at_prediction * 2 (entry + exit)
-    - Apply stop-loss: cap loss at stop_loss_pct * price_at_prediction
-
-    This simulates real trading with transaction costs and risk management.
-
-    Args:
-        predicted_price: The predicted BTC price
-        price_at_prediction: BTC price when prediction was made
-        actual_price: Actual BTC price at evaluation time
-        fee_pct: Trading fee percentage per trade (default 0.1%)
-        stop_loss_pct: Maximum loss percentage before stop-loss triggers (default 2%)
-
-    Returns:
-        PnL in USDT after fees and stop-loss (positive = profit, negative = loss)
-    """
-    # Calculate gross PnL using long/short symmetric strategy
     gross_pnl = calculate_pnl_long_short(
         predicted_price, price_at_prediction, actual_price
     )
 
-    # Calculate trading fees (entry + exit = 2 trades)
     fees = price_at_prediction * (fee_pct / 100) * 2
 
-    # Calculate maximum loss (stop-loss limit)
     max_loss = price_at_prediction * (stop_loss_pct / 100)
 
-    # Apply stop-loss: cap gross loss at max_loss
     if gross_pnl < -max_loss:
         gross_pnl = -max_loss
 
-    # Net PnL after fees
     net_pnl = gross_pnl - fees
 
     return net_pnl
 
 
-def split_train_validation(
-    prices: np.ndarray,
-    train_pct: float = 0.7,
-    val_pct: float = 0.2,
-) -> tuple[np.ndarray, np.ndarray]:
+def _round_or_none(value: float | None, digits: int) -> float | None:
+    """Round ``value`` to ``digits`` decimals, keeping ``None`` as ``None``."""
+    return round(value, digits) if value is not None else None
+
+
+@dataclass
+class _Family:
+    """Versions of one model family for one asset and timeframe, and their days."""
+
+    symbol: str
+    name: str
+    timeframe: str
+    models: list[Model] = field(default_factory=list)
+    predictions: list[Prediction] = field(default_factory=list)
+
+    @property
+    def representative(self) -> Model:
+        """The active version, else the newest one (by ``trained_at``, then id)."""
+        active = [m for m in self.models if m.is_active]
+        return max(active or self.models, key=lambda m: (m.trained_at, m.id))
+
+
+def _model_conditions(
+    symbol: str | None, source: PredictionSource
+) -> list[ColumnElement[bool]]:
+    """WHERE conditions on ``models`` selecting one asset (if given) and source."""
+    conditions = [source_filter(source)]
+    if symbol:
+        conditions.append(Model.symbol == symbol)
+    return conditions
+
+
+def _load_families(
+    db: Session,
+    start_date: date | None,
+    end_date: date | None,
+    timeframe: str | None,
+    symbol: str | None,
+    source: PredictionSource,
+) -> list[_Family]:
+    """Group the models by (symbol, family, timeframe) with their evaluated predictions.
+
+    Two queries however many model rows exist: the trainer saves one per day
+    (#178). Families are ordered by symbol and name; predictions by
+    ``predicted_for`` then id, across every version of the family.
     """
-    Split time series price data into training and validation sets.
 
-    Uses 70% for training, 20% for validation, and discards remaining 10%
-    (buffer for time series continuity).
+    families: dict[tuple[str, str, str], _Family] = {}
+    family_of_model: dict[int, _Family] = {}
+    conditions = _model_conditions(symbol, source)
+    models_query = select(Model).options(defer(Model.artifact)).where(*conditions)
+    for model in db.execute(models_query).scalars():
+        name = model_family(model.name)
+        key = (model.symbol, name, model.timeframe)
+        family = families.setdefault(key, _Family(model.symbol, name, model.timeframe))
+        family.models.append(model)
+        family_of_model[model.id] = family
 
-    Args:
-        prices: 1D array of historical prices (chronological order)
-        train_pct: Percentage of data for training (default 0.7 = 70%)
-        val_pct: Percentage of data for validation (default 0.2 = 20%)
-
-    Returns:
-        Tuple of (train_data, val_data) as numpy arrays
-
-    Raises:
-        ValueError: If train_pct + val_pct > 1.0 or if not enough data
-
-    Examples:
-        >>> prices = np.array([50000, 51000, 52000, ..., 67000])  # 100 days
-        >>> train, val = split_train_validation(prices)
-        >>> len(train)  # 70 days
-        70
-        >>> len(val)  # 20 days
-        20
-    """
-    if train_pct + val_pct > 1.0:
-        raise ValueError(
-            f"train_pct ({train_pct}) + val_pct ({val_pct}) must be <= 1.0"
+    if family_of_model:
+        query = (
+            select(Prediction)
+            .join(Model, Prediction.model_id == Model.id)
+            .where(Prediction.actual_price.isnot(None))
+            .where(*conditions)
+            .order_by(Prediction.predicted_for, Prediction.id)
         )
+        if start_date:
+            query = query.where(Prediction.predicted_for >= start_date)
+        if end_date:
+            query = query.where(Prediction.predicted_for <= end_date)
+        if timeframe:
+            query = query.where(Prediction.timeframe == timeframe)
+        for prediction in db.execute(query).scalars():
+            family_of_model[prediction.model_id].predictions.append(prediction)
 
-    n = len(prices)
-    if n < 10:
-        raise ValueError(f"Need at least 10 data points, got {n}")
-
-    # Calculate split indices
-    train_size = int(n * train_pct)
-    val_size = int(n * val_pct)
-
-    if train_size < 1 or val_size < 1:
-        raise ValueError(
-            f"Not enough data: train_size={train_size}, val_size={val_size}"
-        )
-
-    # Split chronologically
-    train_data = prices[:train_size]
-    val_data = prices[train_size : train_size + val_size]
-    # Buffer (remaining 10%) is discarded
-
-    return train_data, val_data
+    return [families[key] for key in sorted(families)]
 
 
-def calculate_mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def _family_metrics(
+    predictions: Sequence[Prediction], pnl_column: str
+) -> dict[str, float | None]:
+    """Unrounded metrics over the evaluated predictions of one family.
+
+    ``predictions`` must be in ``predicted_for`` order: Sharpe ratio and drawdown
+    run over the whole history of the family. Every metric is None without predictions.
     """
-    Calculate Mean Absolute Percentage Error (MAPE).
-
-    MAPE = mean(|y_true - y_pred| / |y_true|) * 100
-
-    Args:
-        y_true: Array of true values
-        y_pred: Array of predicted values
-
-    Returns:
-        MAPE as percentage (0-100 scale)
-
-    Raises:
-        ValueError: If arrays have different lengths or contain zeros
-
-    Examples:
-        >>> y_true = np.array([50000, 51000, 52000])
-        >>> y_pred = np.array([50500, 50800, 52100])
-        >>> calculate_mape(y_true, y_pred)
-        1.05  # ~1% average error
-    """
-    if len(y_true) != len(y_pred):
-        raise ValueError(
-            f"Arrays must have same length: {len(y_true)} != {len(y_pred)}"
-        )
-
-    if len(y_true) == 0:
-        raise ValueError("Cannot calculate MAPE on empty arrays")
-
-    # Avoid division by zero
-    if np.any(y_true == 0):
-        raise ValueError("y_true contains zeros, cannot calculate MAPE")
-
-    # Calculate absolute percentage errors
-    abs_errors = np.abs((y_true - y_pred) / y_true)
-
-    # Return mean as percentage
-    mape = float(np.mean(abs_errors) * 100)
-
-    return mape
-
-
-# ============================================================================
-# Model Metrics Functions for Dashboard
-# ============================================================================
-
-
-def calculate_accuracy(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    timeframe: str | None = None,
-) -> float | None:
-    """
-    Calculate prediction accuracy for a model (% of correct direction predictions).
-
-    Accuracy = COUNT(*) WHERE direction_correct = true / COUNT(*)
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate accuracy for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            predictions across every timeframe are mixed together --
-            callers that want daily/weekly separated must pass this
-            explicitly (see DEFAULT_TIMEFRAME for the API-level default).
-
-    Returns:
-        Accuracy as decimal (0.0-1.0), or None if no evaluated predictions
-
-    Examples:
-        >>> calculate_accuracy(db, model_id=1, timeframe="1d")
-        0.65  # 65% accuracy
-    """
-    from shared.db.models import Prediction
-
-    # Base query: only evaluated predictions (actual_price IS NOT NULL)
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
+    pnls = [getattr(p, pnl_column) for p in predictions]
+    valid_pnls = [float(pnl) for pnl in pnls if pnl is not None]
+    errors = [
+        abs(float((p.actual_price - p.predicted_price) / p.actual_price))
+        for p in predictions
+        if p.actual_price
+    ]
+    returns = returns_from_pnl(
+        (pnl, p.price_at_prediction) for pnl, p in zip(pnls, predictions, strict=True)
     )
-
-    # Apply date filters if provided
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Count total and correct predictions
-    total_count = query.count()
-    if total_count == 0:
-        return None
-
-    correct_count = query.filter(Prediction.direction_correct.is_(True)).count()
-
-    accuracy = correct_count / total_count
-    return accuracy
+    count = len(predictions)
+    return {
+        "accuracy": (
+            sum(p.direction_correct is True for p in predictions) / count
+            if count
+            else None
+        ),
+        "mape": float(np.mean(errors)) * 100 if errors else None,
+        "total_pnl": sum(valid_pnls) if valid_pnls else None,
+        "win_rate": (
+            sum(pnl is not None and pnl > 0 for pnl in pnls) / count if count else None
+        ),
+        "sharpe": sharpe_ratio(returns),
+        "max_dd_pct": max_drawdown_pct(returns),
+    }
 
 
-def calculate_model_mape(
+def _round_model_metrics(metrics: dict[str, float | None]) -> dict[str, float | None]:
+    """Round raw model metrics to the precision exposed by the API."""
+    return {
+        "accuracy": _round_or_none(metrics["accuracy"], 4),
+        "avg_error_pct": _round_or_none(metrics["mape"], 2),
+        "total_pnl": _round_or_none(metrics["total_pnl"], 2),
+        "win_rate": _round_or_none(metrics["win_rate"], 4),
+        "sharpe_ratio": _round_or_none(metrics["sharpe"], 2),
+        "max_drawdown_pct": _round_or_none(metrics["max_dd_pct"], 2),
+    }
+
+
+def get_family_cumulative_pnl(
     db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    timeframe: str | None = None,
-) -> float | None:
-    """
-    Calculate Mean Absolute Percentage Error (MAPE) for a model from database.
-
-    MAPE = AVG(ABS((actual_price - predicted_price) / actual_price)) * 100
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate MAPE for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together.
-
-    Returns:
-        MAPE as percentage (0-100 scale), or None if no evaluated predictions
-
-    Examples:
-        >>> calculate_model_mape(db, model_id=1, timeframe="1d")
-        2.5  # 2.5% average error
-    """
-    from shared.db.models import Prediction
-
-    # Base query: only evaluated predictions
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Get all predictions
-    predictions = query.all()
-    if not predictions:
-        return None
-
-    # Calculate MAPE manually
-    errors = []
-    for pred in predictions:
-        if pred.actual_price and pred.actual_price != 0:
-            error = abs((pred.actual_price - pred.predicted_price) / pred.actual_price)
-            errors.append(float(error))
-
-    if not errors:
-        return None
-
-    mape = np.mean(errors) * 100
-    return float(mape)
-
-
-def calculate_total_pnl(
-    db: Session,
-    model_id: int,
     start_date: date | None = None,
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
     timeframe: str | None = None,
-) -> float | None:
+    symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
+) -> dict[str, list[dict[str, Any]]]:
+    """Cumulative PnL series per model family, keyed by family name.
+
+    Same filters and days as ``get_all_models_metrics``; each series covers all
+    versions of the family in ``predicted_for`` order, in two queries. Without
+    ``symbol``, two assets sharing a family name collapse into one key, so callers
+    pass one.
     """
-    Calculate total PnL for a model (sum of all PnL values).
-
-    Total PnL = SUM(pnl_simulated)
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate total PnL for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to sum (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together.
-
-    Returns:
-        Total PnL in USDT, or None if no evaluated predictions
-
-    Examples:
-        >>> calculate_total_pnl(db, model_id=1, timeframe="1d")
-        1200.50  # Total profit of $1,200.50
-    """
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(func.sum(getattr(Prediction, pnl_column))).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Execute query
-    result = query.scalar()
-    if result is None:
-        return None
-
-    return float(result)
-
-
-def calculate_win_rate(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    pnl_column: str = "pnl_simulated",
-    timeframe: str | None = None,
-) -> float | None:
-    """
-    Calculate win rate for a model (% of predictions with positive PnL).
-
-    Win Rate = COUNT(*) WHERE pnl > 0 / COUNT(*)
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate win rate for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together.
-
-    Returns:
-        Win rate as decimal (0.0-1.0), or None if no evaluated predictions
-
-    Examples:
-        >>> calculate_win_rate(db, model_id=1, timeframe="1d")
-        0.60  # 60% win rate
-    """
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Count total and winning predictions
-    total_count = query.count()
-    if total_count == 0:
-        return None
-
-    win_count = query.filter(getattr(Prediction, pnl_column) > 0).count()
-
-    win_rate = win_count / total_count
-    return win_rate
-
-
-def calculate_sharpe_ratio(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    pnl_column: str = "pnl_simulated",
-    risk_free_rate: float = 0.0,
-    timeframe: str | None = None,
-    capital: float = DEFAULT_CAPITAL,
-) -> float | None:
-    """
-    Calculate annualized Sharpe ratio for a model.
-
-    Sharpe Ratio = (MEAN(daily_returns) - risk_free_rate)
-                   / STDEV(daily_returns) * sqrt(365)
-
-    Daily returns = pnl / capital
-
-    Returns are normalized by a fixed reference capital, not by each
-    trade's own price_at_prediction -- normalizing by spot price means
-    the same dollar PnL produces a smaller "return" as BTC's price rises
-    over time, distorting comparisons across trades made months apart
-    (issue #72).
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate Sharpe ratio for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        risk_free_rate: Annual risk-free rate (default: 0.0)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together -- combining daily and
-            weekly returns would distort both the mean and the stdev.
-        capital: Reference capital each pnl value is normalized against
-            (default: DEFAULT_CAPITAL). Must be positive.
-
-    Returns:
-        Annualized Sharpe ratio, or None if insufficient data
-
-    Raises:
-        ValueError: If capital is zero or negative
-
-    Examples:
-        >>> calculate_sharpe_ratio(db, model_id=1, timeframe="1d")
-        1.25  # Sharpe ratio of 1.25
-    """
-    if capital <= 0:
-        raise ValueError(f"capital must be positive, got {capital}")
-
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Get all predictions
-    predictions = query.order_by(Prediction.predicted_for).all()
-    if len(predictions) < 2:
-        return None  # Need at least 2 data points for stdev
-
-    # Calculate returns, normalized by the reference capital
-    returns = []
-    for pred in predictions:
-        pnl = getattr(pred, pnl_column)
-        if pnl is not None:
-            returns.append(float(pnl) / capital)
-
-    if len(returns) < 2:
-        return None
-
-    # Calculate Sharpe ratio
-    mean_return = np.mean(returns)
-    std_return = np.std(returns, ddof=1)  # Sample standard deviation
-
-    if std_return == 0:
-        return None  # Avoid division by zero
-
-    # Annualize (assuming daily predictions)
-    sharpe = (mean_return - risk_free_rate / 365) / std_return * np.sqrt(365)
-
-    return float(sharpe)
-
-
-def calculate_max_drawdown(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    pnl_column: str = "pnl_simulated",
-    timeframe: str | None = None,
-) -> float | None:
-    """
-    Calculate maximum drawdown for a model (largest cumulative loss).
-
-    Max Drawdown = MIN(cumulative_pnl - running_max(cumulative_pnl))
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate max drawdown for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together in one cumulative series.
-
-    Returns:
-        Maximum drawdown in USDT (negative value), or None if no data
-
-    Examples:
-        >>> calculate_max_drawdown(db, model_id=1, timeframe="1d")
-        -450.0  # Max drawdown of -$450
-    """
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Get all predictions ordered by date
-    predictions = query.order_by(Prediction.predicted_for).all()
-    if not predictions:
-        return None
-
-    # Calculate cumulative PnL
-    cumulative_pnl = []
-    cumsum = 0.0
-    for pred in predictions:
-        pnl = getattr(pred, pnl_column)
-        if pnl is not None:
-            cumsum += float(pnl)
-            cumulative_pnl.append(cumsum)
-
-    if not cumulative_pnl:
-        return None
-
-    # Calculate running maximum and drawdown
-    cumulative_pnl_arr = np.array(cumulative_pnl)
-    running_max = np.maximum.accumulate(cumulative_pnl_arr)
-    drawdown = cumulative_pnl_arr - running_max
-
-    max_drawdown = float(np.min(drawdown))
-
-    return max_drawdown
-
-
-def calculate_max_drawdown_pct(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    pnl_column: str = "pnl_simulated",
-    timeframe: str | None = None,
-    capital: float = DEFAULT_CAPITAL,
-) -> float | None:
-    """
-    Calculate maximum drawdown for a model as a percentage of an equity
-    curve, alongside (not replacing) calculate_max_drawdown()'s dollar
-    figure.
-
-    The equity curve starts at `capital` and accumulates pnl_column, so a
-    $500 drawdown means something very different depending on how much
-    capital was actually at risk -- calculate_max_drawdown() alone can't
-    express that (issue #72).
-
-    Max Drawdown % = MIN((equity - running_max(equity)) / running_max(equity)) * 100
-
-    Args:
-        db: Database session
-        model_id: Model ID to calculate max drawdown for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together in one equity curve.
-        capital: Starting capital the equity curve is built from
-            (default: DEFAULT_CAPITAL). Must be positive.
-
-    Returns:
-        Maximum drawdown as a negative percentage (e.g. -4.5 for a 4.5%
-        drawdown), or None if no data
-
-    Raises:
-        ValueError: If capital is zero or negative
-
-    Examples:
-        >>> calculate_max_drawdown_pct(db, model_id=1, timeframe="1d")
-        -4.5  # 4.5% drawdown from peak equity
-    """
-    if capital <= 0:
-        raise ValueError(f"capital must be positive, got {capital}")
-
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Get all predictions ordered by date
-    predictions = query.order_by(Prediction.predicted_for).all()
-    if not predictions:
-        return None
-
-    # Build the equity curve, starting from the reference capital
-    equity_curve = []
-    equity = capital
-    for pred in predictions:
-        pnl = getattr(pred, pnl_column)
-        if pnl is not None:
-            equity += float(pnl)
-            equity_curve.append(equity)
-
-    if not equity_curve:
-        return None
-
-    equity_arr = np.array(equity_curve)
-    running_max = np.maximum.accumulate(equity_arr)
-    drawdown_pct = (equity_arr - running_max) / running_max * 100
-
-    return float(np.min(drawdown_pct))
-
-
-def get_cumulative_pnl(
-    db: Session,
-    model_id: int,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    pnl_column: str = "pnl_simulated",
-    timeframe: str | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Get daily cumulative PnL time series for a model (for chart visualization).
-
-    Returns list of {date, cumulative_pnl} dictionaries ordered by date.
-
-    Args:
-        db: Database session
-        model_id: Model ID to get cumulative PnL for
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            daily and weekly records are combined into one series.
-
-    Returns:
-        List of {"date": "YYYY-MM-DD", "cumulative_pnl": float} dictionaries
-
-    Examples:
-        >>> get_cumulative_pnl(db, model_id=1, timeframe="1d")
-        [
-            {"date": "2024-05-01", "cumulative_pnl": 100.0},
-            {"date": "2024-05-02", "cumulative_pnl": 250.0},
-            ...
-        ]
-    """
-    from shared.db.models import Prediction
-
-    # Base query
-    query = db.query(Prediction).filter(
-        Prediction.model_id == model_id, Prediction.actual_price.isnot(None)
-    )
-
-    # Apply date filters
-    if start_date:
-        query = query.filter(Prediction.predicted_for >= start_date)
-    if end_date:
-        query = query.filter(Prediction.predicted_for <= end_date)
-    if timeframe:
-        query = query.filter(Prediction.timeframe == timeframe)
-
-    # Get all predictions ordered by date
-    predictions = query.order_by(Prediction.predicted_for).all()
-
-    # Calculate cumulative PnL
-    result = []
-    cumsum = 0.0
-    for pred in predictions:
-        pnl = getattr(pred, pnl_column)
-        if pnl is not None:
-            cumsum += float(pnl)
-            result.append(
-                {
-                    "date": pred.predicted_for.isoformat(),
-                    "cumulative_pnl": round(cumsum, 2),
-                }
-            )
-
-    return result
+    series: dict[str, list[dict[str, Any]]] = {}
+    for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
+        cumsum = 0.0
+        points = series.setdefault(family.name, [])
+        for prediction in family.predictions:
+            pnl = getattr(prediction, pnl_column)
+            if pnl is not None:
+                cumsum += float(pnl)
+                points.append(
+                    {
+                        "date": prediction.predicted_for.isoformat(),
+                        "cumulative_pnl": round(cumsum, 2),
+                    }
+                )
+    return series
 
 
 def get_all_models_metrics(
@@ -863,132 +292,58 @@ def get_all_models_metrics(
     end_date: date | None = None,
     pnl_column: str = "pnl_simulated",
     timeframe: str | None = None,
-    capital: float = DEFAULT_CAPITAL,
+    symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
 ) -> list[dict[str, Any]]:
-    """
-    Get performance metrics for all models in one call.
+    """Performance metrics per model family, one row per (symbol, family, timeframe).
 
-    Returns list of dictionaries with model metadata and calculated metrics.
+    The trainer saves a new row (``linear_v<N>``) every run and each makes a handful
+    of predictions, so a metric per row means nothing (#178). A family row pools
+    all its versions' evaluated predictions in ``predicted_for`` order; every model
+    row stays in the database. Queries: two (``_load_families``) plus one prices
+    query per family for the baselines.
 
     Args:
-        db: Database session
-        start_date: Optional start date filter for metrics calculation
-        end_date: Optional end date filter for metrics calculation
-        pnl_column: Which PnL column to use (default: pnl_simulated)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w'). If None,
-            every timeframe is mixed together for every metric below.
-        capital: Reference capital that sharpe_ratio and max_drawdown_pct
-            are normalized against (default: DEFAULT_CAPITAL)
+        db: Database session.
+        start_date: Optional lower bound on ``predicted_for``.
+        end_date: Optional upper bound on ``predicted_for``.
+        pnl_column: PnL column to use.
+        timeframe: Optional filter; ``None`` mixes every timeframe.
+        symbol: Optional asset filter.
+        source: ``live``, ``replay`` or ``all``; filters the models and so their
+            predictions (replay = trained by ``simulate_history``).
 
     Returns:
-        List of dictionaries with structure:
-        {
-            "id": int,
-            "name": str,
-            "version": str,
-            "is_active": bool,
-            "trained_at": datetime,
-            "predictions_count": int,
-            "accuracy": float | None,
-            "avg_error_pct": float | None,
-            "total_pnl": float | None,
-            "win_rate": float | None,
-            "sharpe_ratio": float | None,
-            "max_drawdown": float | None,
-            "max_drawdown_pct": float | None,
-        }
-
-    Examples:
-        >>> get_all_models_metrics(db)
-        [
-            {
-                "id": 1,
-                "name": "linear_v1",
-                "version": "1.0.0",
-                "accuracy": 0.65,
-                "total_pnl": 1200.50,
-                ...
-            },
-            ...
-        ]
+        One dict per family, ordered by symbol and name. ``id`` and ``version``
+        are those of the active version, else the newest; ``is_active`` is true if
+        any version is; ``is_replay`` if every version is; ``baseline`` is None
+        unless ``timeframe`` is the baseline one (see ``baseline_for_predictions``).
+        The remaining keys are ``name``, ``trained_at``, ``versions_count``,
+        ``first_train_to``, ``last_train_to``, ``predictions_count``, ``accuracy``,
+        ``avg_error_pct``, ``total_pnl``, ``win_rate``, ``sharpe_ratio``,
+        ``max_drawdown_pct`` and ``symbol``.
     """
-    from shared.db.models import Model, Prediction
-
-    # Get all models
-    models = db.query(Model).all()
-
     results = []
-    for model in models:
-        # Count evaluated predictions
-        query = db.query(Prediction).filter(
-            Prediction.model_id == model.id, Prediction.actual_price.isnot(None)
-        )
-
-        if start_date:
-            query = query.filter(Prediction.predicted_for >= start_date)
-        if end_date:
-            query = query.filter(Prediction.predicted_for <= end_date)
-        if timeframe:
-            query = query.filter(Prediction.timeframe == timeframe)
-
-        predictions_count = query.count()
-
-        # Calculate metrics (only if there are predictions)
-        if predictions_count > 0:
-            accuracy = calculate_accuracy(db, model.id, start_date, end_date, timeframe)
-            mape = calculate_model_mape(db, model.id, start_date, end_date, timeframe)
-            total_pnl = calculate_total_pnl(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            win_rate = calculate_win_rate(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            sharpe = calculate_sharpe_ratio(
-                db,
-                model.id,
-                start_date,
-                end_date,
-                pnl_column,
-                timeframe=timeframe,
-                capital=capital,
-            )
-            max_dd = calculate_max_drawdown(
-                db, model.id, start_date, end_date, pnl_column, timeframe
-            )
-            max_dd_pct = calculate_max_drawdown_pct(
-                db,
-                model.id,
-                start_date,
-                end_date,
-                pnl_column,
-                timeframe,
-                capital=capital,
-            )
-        else:
-            accuracy = None
-            mape = None
-            total_pnl = None
-            win_rate = None
-            sharpe = None
-            max_dd = None
-            max_dd_pct = None
-
+    for family in _load_families(db, start_date, end_date, timeframe, symbol, source):
+        model = family.representative
         results.append(
             {
                 "id": model.id,
-                "name": model.name,
+                "name": family.name,
                 "version": model.version,
-                "is_active": model.is_active,
-                "trained_at": model.trained_at,
-                "predictions_count": predictions_count,
-                "accuracy": round(accuracy, 4) if accuracy is not None else None,
-                "avg_error_pct": round(mape, 2) if mape is not None else None,
-                "total_pnl": round(total_pnl, 2) if total_pnl is not None else None,
-                "win_rate": round(win_rate, 4) if win_rate is not None else None,
-                "sharpe_ratio": round(sharpe, 2) if sharpe is not None else None,
-                "max_drawdown": round(max_dd, 2) if max_dd is not None else None,
-                "max_drawdown_pct": (
-                    round(max_dd_pct, 2) if max_dd_pct is not None else None
+                "is_active": any(m.is_active for m in family.models),
+                "trained_at": max(m.trained_at for m in family.models),
+                "versions_count": len(family.models),
+                "first_train_to": min(m.train_to for m in family.models),
+                "last_train_to": max(m.train_to for m in family.models),
+                "predictions_count": len(family.predictions),
+                **_round_model_metrics(_family_metrics(family.predictions, pnl_column)),
+                "symbol": family.symbol,
+                "is_replay": all(m.is_replay for m in family.models),
+                "baseline": (
+                    baseline_for_predictions(db, family.symbol, family.predictions)
+                    if timeframe == BASELINE_TIMEFRAME
+                    else None
                 ),
             }
         )

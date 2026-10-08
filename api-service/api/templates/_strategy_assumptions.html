@@ -1,0 +1,13 @@
+<div class="strategy-assumptions" data-testid="strategy-assumptions">
+    <p><strong>Metrics.</strong> Worst trade is the worst single-day return (PnL / price at prediction).
+    Max drawdown is the largest fall of the equity curve that compounds those daily returns from 1.0.
+    The Sharpe ratio is the mean over the standard deviation of the daily returns, times the square root of 365.
+    Total PnL, Avg Win and Avg Loss are in dollars per 1 unit of the asset.</p>
+    <p><strong>Assumptions.</strong></p>
+    <ul>
+        <li><strong>Simple</strong>: long when the model predicts up, in cash otherwise. It never shorts.</li>
+        <li><strong>Long Short</strong>: long when the model predicts up, short otherwise. Shorting is not possible on Binance spot, and the funding or borrowing costs of futures or margin are not modeled.</li>
+        <li><strong>Threshold</strong>: the long-short rule, but it stays out when the predicted move is under 1%. The same shorting and funding limits apply.</li>
+        <li><strong>Realistic</strong>: the long-short rule with a 0.2% fee charged every day, even when the position does not change (conservative), and a loss capped at 2% of the close-to-close move, because no intraday data is stored and a real stop-loss would fill differently (optimistic). The same shorting and funding limits apply.</li>
+    </ul>
+</div>

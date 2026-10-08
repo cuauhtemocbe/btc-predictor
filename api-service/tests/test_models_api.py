@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
+from soup_helpers import find_tag
 from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction
@@ -25,7 +26,7 @@ from shared.db.models import Model, Prediction
 
 
 @pytest.fixture
-def sample_models_with_predictions(db_session: Session):
+def sample_models_with_predictions(db_session: Session) -> dict[str, Model]:
     """
     Create sample models with evaluated predictions for testing.
 
@@ -178,8 +179,10 @@ def sample_models_with_predictions(db_session: Session):
 
 @pytest.mark.asyncio
 async def test_models_dashboard_renders_with_models(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Access model comparison dashboard
 
@@ -209,27 +212,29 @@ async def test_models_dashboard_renders_with_models(
     assert table is not None, "Dashboard should contain a comparison table"
 
     # Verify table has 3 rows (one per model)
-    tbody = table.find("tbody")
+    tbody = find_tag(table, "tbody")
     rows = tbody.find_all("tr")
     assert len(rows) == 3, f"Expected 3 model rows, got {len(rows)}"
 
     # Verify navigation link back to dashboard
     nav_link = soup.find("a", class_="nav-link")
     assert nav_link is not None
-    assert nav_link["href"] == "/"
+    assert nav_link["href"] == "/?symbol=BTCUSDT"
 
 
 @pytest.mark.asyncio
 async def test_models_dashboard_shows_all_metrics(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Model comparison table shows key metrics
 
     Given there are 3 models with different performance
     When I view the model comparison table
     Then I see columns: Model, Predictions, Accuracy, Avg Error %,
-         Total PnL, Win Rate, Sharpe, Max DD
+         Total PnL, Win Rate, Sharpe, Max drawdown and the baseline columns
     And I see metrics for all 3 models
     """
     # Act
@@ -239,7 +244,7 @@ async def test_models_dashboard_shows_all_metrics(
     soup = BeautifulSoup(response.text, "html.parser")
 
     # Verify table headers
-    thead = soup.find("thead")
+    thead = find_tag(soup, "thead")
     headers = [th.text.strip() for th in thead.find_all("th")]
     expected_headers = [
         "Model",
@@ -249,17 +254,21 @@ async def test_models_dashboard_shows_all_metrics(
         "Total PnL",
         "Win Rate",
         "Sharpe",
-        "Max DD",
+        "Max drawdown",
+        "Always-up",
+        "Persistence",
+        "Buy & hold PnL",
+        "vs best baseline",
     ]
     assert headers == expected_headers
 
     # Verify each model has data in all columns
-    tbody = soup.find("tbody")
+    tbody = find_tag(soup, "tbody")
     rows = tbody.find_all("tr")
 
     for row in rows:
         cells = row.find_all("td")
-        assert len(cells) == 8, "Each row should have 8 cells"
+        assert len(cells) == 12, "Each row should have 12 cells"
 
         # Verify no empty cells (except N/A for metrics)
         for cell in cells:
@@ -268,14 +277,16 @@ async def test_models_dashboard_shows_all_metrics(
 
 @pytest.mark.asyncio
 async def test_models_dashboard_highlights_best_model(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Highlight best performing model
 
     Given the models have different Total PnL
     When I view the comparison table
-    Then the lstm_v1 row is highlighted (green background)
+    Then the lstm family row is highlighted (green background)
     And there is a badge "🏆 Best Return" next to it
     """
     # Act
@@ -289,8 +300,8 @@ async def test_models_dashboard_highlights_best_model(
     assert best_row is not None, "Best model row should have 'best-model' class"
 
     # Verify the best model is lstm_v1 (highest total PnL: $220)
-    model_name_cell = best_row.find("span", class_="model-name")
-    assert "lstm_v1" in model_name_cell.text
+    model_name_cell = find_tag(best_row, "span", class_="model-name")
+    assert "lstm" in model_name_cell.text
 
     # Verify the "🏆 Best Return" badge exists
     badges = best_row.find_all("span", class_="badge")
@@ -301,14 +312,16 @@ async def test_models_dashboard_highlights_best_model(
 
 
 @pytest.mark.asyncio
-async def test_models_dashboard_empty_state(client: AsyncClient, db_session: Session):
+async def test_models_dashboard_empty_state(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Scenario: Empty state when no models exist
 
     Given there are no models in the database
     When I visit /models
     Then I see a message "No models have been trained yet"
-    And I see instructions to run train_all_models.py
+    And I see instructions to run the daily trainer
     """
     # Arrange: No models in database (db_session is clean)
 
@@ -325,19 +338,21 @@ async def test_models_dashboard_empty_state(client: AsyncClient, db_session: Ses
     assert empty_state is not None, "Should show empty state when no models"
 
     # Verify message content
-    h2 = empty_state.find("h2")
+    h2 = find_tag(empty_state, "h2")
     assert "No Models Found" in h2.text
 
     # Verify instructions
     code = empty_state.find("code")
     assert code is not None
-    assert "train_all_models.py" in code.text
+    assert "workers.daily.trainer" in code.text
 
 
 @pytest.mark.asyncio
 async def test_models_dashboard_with_date_filter(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Filter model comparison by date range
 
@@ -359,10 +374,10 @@ async def test_models_dashboard_with_date_filter(
     assert filter_form is not None
 
     # Verify date inputs have correct values
-    start_input = soup.find("input", {"name": "start_date"})
+    start_input = find_tag(soup, "input", {"name": "start_date"})
     assert start_input["value"] == "2024-05-01"
 
-    end_input = soup.find("input", {"name": "end_date"})
+    end_input = find_tag(soup, "input", {"name": "end_date"})
     assert end_input["value"] == "2024-05-02"
 
     # Verify table still renders (with filtered data)
@@ -372,8 +387,10 @@ async def test_models_dashboard_with_date_filter(
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_returns_json(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: API endpoint returns model metrics as JSON
 
@@ -416,13 +433,16 @@ async def test_models_metrics_api_returns_json(
         assert "total_pnl" in model
         assert "win_rate" in model
         assert "sharpe_ratio" in model
-        assert "max_drawdown" in model
+        assert "max_drawdown_pct" in model
+        assert "max_drawdown" not in model
 
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_rejects_unsupported_pnl_column(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Unsupported metric columns are rejected
 
@@ -438,8 +458,10 @@ async def test_models_metrics_api_rejects_unsupported_pnl_column(
 
 @pytest.mark.asyncio
 async def test_models_metrics_api_with_date_filter(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: API endpoint supports date filtering
 
@@ -467,8 +489,10 @@ async def test_models_metrics_api_with_date_filter(
 
 @pytest.mark.asyncio
 async def test_models_metrics_calculates_correctly(
-    client: AsyncClient, db_session: Session, sample_models_with_predictions
-):
+    client: AsyncClient,
+    db_session: Session,
+    sample_models_with_predictions: dict[str, Model],
+) -> None:
     """
     Scenario: Verify metrics calculations are correct
 
@@ -487,7 +511,7 @@ async def test_models_metrics_calculates_correctly(
     data = response.json()
 
     # Find lstm_v1
-    lstm = next(m for m in data["models"] if m["name"] == "lstm_v1")
+    lstm = next(m for m in data["models"] if m["name"] == "lstm")
 
     # Verify metrics
     assert lstm["predictions_count"] == 3
@@ -499,7 +523,9 @@ async def test_models_metrics_calculates_correctly(
 
 
 @pytest.mark.asyncio
-async def test_models_api_handles_empty_state(client: AsyncClient, db_session: Session):
+async def test_models_api_handles_empty_state(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Scenario: API returns empty list when no models exist
 
@@ -528,8 +554,8 @@ async def test_models_api_handles_empty_state(client: AsyncClient, db_session: S
 
 
 @pytest.fixture
-def sample_model_with_daily_and_weekly_predictions(db_session: Session):
-    """One model with 2 daily ($100 each) and 1 weekly ($1000) prediction."""
+def sample_model_with_daily_predictions(db_session: Session) -> Model:
+    """One model with 2 daily predictions ($100 each)."""
     model = Model(
         name="linear_v1",
         version="1.0.0",
@@ -562,58 +588,30 @@ def sample_model_with_daily_and_weekly_predictions(db_session: Session):
             )
         )
 
-    db_session.add(
-        Prediction(
-            model_id=model.id,
-            predicted_for=date.today() + timedelta(days=7),
-            timeframe="1w",
-            predicted_at=datetime.now(UTC) - timedelta(days=1),
-            price_at_prediction=Decimal("65000"),
-            predicted_price=Decimal("66000"),
-            actual_price=Decimal("66500"),
-            evaluated_at=datetime.now(UTC),
-            error_abs=Decimal("500"),
-            error_pct=Decimal("0.75"),
-            direction_correct=True,
-            pnl_simulated=Decimal("1000.00"),
-        )
-    )
-
     db_session.commit()
     return model
 
 
 @pytest.mark.asyncio
-async def test_models_metrics_does_not_mix_timeframes(
+async def test_models_metrics_for_the_daily_timeframe(
     client: AsyncClient,
     db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+    sample_model_with_daily_predictions: Model,
 ) -> None:
-    """
-    Scenario: Cumulative PnL does not mix timeframes
+    """The daily timeframe aggregates the model's daily predictions."""
+    response = await client.get("/models/metrics?timeframe=1d")
 
-    Given a model has daily and weekly PnL records
-    When cumulative PnL is requested for one timeframe
-    Then the returned series contains only records from that timeframe
-    """
-    response_daily = await client.get("/models/metrics?timeframe=1d")
-    assert response_daily.status_code == 200
-    daily_data = response_daily.json()
-    assert daily_data["models"][0]["predictions_count"] == 2
-    assert daily_data["models"][0]["total_pnl"] == 200.0
-
-    response_weekly = await client.get("/models/metrics?timeframe=1w")
-    assert response_weekly.status_code == 200
-    weekly_data = response_weekly.json()
-    assert weekly_data["models"][0]["predictions_count"] == 1
-    assert weekly_data["models"][0]["total_pnl"] == 1000.0
+    assert response.status_code == 200
+    model = response.json()["models"][0]
+    assert model["predictions_count"] == 2
+    assert model["total_pnl"] == 200.0
 
 
 @pytest.mark.asyncio
 async def test_models_metrics_missing_timeframe_applies_default(
     client: AsyncClient,
     db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+    sample_model_with_daily_predictions: Model,
 ) -> None:
     """
     Scenario: Missing timeframe applies the documented default
@@ -621,7 +619,6 @@ async def test_models_metrics_missing_timeframe_applies_default(
     Given a metrics request does not specify a timeframe
     When the request is processed
     Then the API applies DEFAULT_TIMEFRAME ("1d")
-    And it does not silently combine daily and weekly predictions
     """
     response = await client.get("/models/metrics")
 
@@ -643,23 +640,29 @@ async def test_models_metrics_invalid_timeframe_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_dashboard_displays_separate_timeframe_results(
-    client: AsyncClient,
-    db_session: Session,
-    sample_model_with_daily_and_weekly_predictions: Model,
+@pytest.mark.parametrize("path", ["/models/metrics", "/models/"])
+async def test_models_weekly_timeframe_is_rejected(
+    client: AsyncClient, path: str
 ) -> None:
     """
-    Scenario: Dashboard displays separate timeframe results
+    Scenario: The 1w timeframe no longer exists (#183)
 
-    Given evaluated predictions exist for daily and weekly horizons
-    When the model dashboard is opened with a selected timeframe
-    Then all displayed metrics correspond only to that timeframe
+    Given a request with timeframe=1w
+    When /models/ or /models/metrics is called
+    Then the API answers 422
     """
-    response_daily = await client.get("/models/?timeframe=1d")
-    assert response_daily.status_code == 200
+    response = await client.get(path, params={"timeframe": "1w"})
 
-    response_weekly = await client.get("/models/?timeframe=1w")
-    assert response_weekly.status_code == 200
+    assert response.status_code == 422
 
-    # Different timeframes must render different cumulative-PnL chart data
-    assert response_daily.text != response_weekly.text
+
+@pytest.mark.asyncio
+async def test_dashboard_renders_the_daily_timeframe(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model_with_daily_predictions: Model,
+) -> None:
+    """The model dashboard renders for the daily timeframe."""
+    response = await client.get("/models/?timeframe=1d")
+
+    assert response.status_code == 200

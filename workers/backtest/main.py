@@ -1,13 +1,17 @@
 """
 Backtest Worker - Railway Cron Job
 
-Executes walk-forward backtesting on a schedule with adaptive window sizing.
+Runs the walk-forward backtest (``scripts/backtest.py``) with the production
+configuration, so the stored results describe what the live system does:
 
-The worker automatically detects available data and adjusts:
-- Backtest date range
-- Training window size
+- window: ``settings.training_window_days``, the value the daily worker trains with
+- range: derived from the engine's history requirement, never earlier than the
+  earliest start date with enough history
+- split: the last ``TEST_DAYS`` days are the out-of-sample test slice
+- seed and retrain frequency: explicit constants, logged and shown in the report
 
-This ensures backtesting works even with limited historical data.
+With too little history it exits 1 and logs the engine's message instead of
+shrinking the window.
 """
 
 import logging
@@ -15,15 +19,24 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-# Add scripts and shared to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+# Add the repo root to the path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy import func
-
-from backtest import main as run_backtest_main
+# `scripts.backtest`, not `backtest`: with /app/workers on PYTHONPATH a bare
+# `backtest` can resolve to this package instead of the script.
+from scripts.backtest import main as run_backtest_main
+from scripts.backtest_engine import (
+    DEFAULT_SEED,
+    BacktestConfig,
+    DailyHistory,
+    InsufficientHistoryError,
+    check_enough_history,
+    load_daily_history,
+)
+from shared.config import settings
 from shared.db.database import SessionLocal
-from shared.db.models import DEFAULT_SYMBOL, Price
+from shared.utils import utc_today
+from workers.daily.trainer import required_training_days
 
 # Configure logging
 logging.basicConfig(
@@ -33,135 +46,109 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+SEED = DEFAULT_SEED
+RETRAIN_EVERY = 1  # Linear trains in milliseconds, so retrain every day like prod
+TEST_DAYS = 100  # a test slice shorter than this is not a meaningful headline
+LOOKBACK_DAYS = 365  # range length when the history is longer than that
 
-def calculate_adaptive_window(db) -> tuple[date, date, int] | None:
+
+def plan_range(history: DailyHistory, window_days: int) -> tuple[date, date, date]:
     """
-    Calculate optimal backtest window based on available data.
+    Choose the backtest range from the loaded history.
 
-    Strategy:
-    - Query oldest and newest data in prices table
-    - Calculate total days available
-    - Set training window and backtest range adaptively:
-      * >= 60 days: 30 days training, 30 days backtest
-      * 40-59 days: Use half for training, half for backtest
-      * 20-39 days: Use 10 days training, rest for backtest
-      * < 20 days: Skip (insufficient data)
-
-    Args:
-        db: Database session
+    The range ends on the newest loaded day and covers up to ``LOOKBACK_DAYS`` days.
+    It starts no earlier than the earliest start date the engine allows for the
+    window, and the last ``TEST_DAYS`` days are the test slice.
 
     Returns:
-        Tuple of (start_date, end_date, training_window) or None if insufficient data
+        ``(start_date, end_date, test_start_date)``
+
+    Raises:
+        InsufficientHistoryError: If the history is shorter than
+            ``required_training_days(window_days)`` or leaves less than
+            ``TEST_DAYS`` test days plus one validation day.
     """
-    # Query oldest and newest prices
-    result = (
-        db.query(
-            func.date(func.min(Price.timestamp)).label("oldest"),
-            func.date(func.max(Price.timestamp)).label("newest"),
-            func.count(func.distinct(func.date(Price.timestamp))).label("total_days"),
-        )
-        .filter(Price.symbol == DEFAULT_SYMBOL)
-        .first()
-    )
+    needed = required_training_days(window_days)
+    end_date = history.dates[-1] if history.dates else utc_today()
+    wanted_start = end_date - timedelta(days=LOOKBACK_DAYS - 1)
 
-    if not result or not result.oldest or not result.newest:
-        logger.error("No price data found in database")
-        return None
-
-    oldest_date = result.oldest
-    newest_date = result.newest
-    total_days = result.total_days
-
-    logger.info(f"Available data: {oldest_date} to {newest_date} ({total_days} days)")
-
-    # Adaptive window calculation
-    if total_days >= 60:
-        # Ideal case: 30 days training + 30 days backtest
-        training_window = 30
-        backtest_days = 30
-        logger.info("Using optimal window: 30 days training, 30 days backtest")
-    elif total_days >= 40:
-        # Use half/half
-        training_window = total_days // 2
-        backtest_days = total_days - training_window
-        logger.info(
-            f"Using adaptive window: {training_window} days training, "
-            f"{backtest_days} days backtest"
-        )
-    elif total_days >= 20:
-        # Minimum viable: 10 days training, rest backtest
-        training_window = 10
-        backtest_days = total_days - training_window - 1  # -1 for safety margin
-        logger.info(
-            f"Using minimal window: {training_window} days training, "
-            f"{backtest_days} days backtest"
-        )
+    if len(history.dates) > needed:
+        start_date = max(wanted_start, history.dates[needed])
     else:
-        logger.error(
-            f"Insufficient data: only {total_days} days available (minimum 20 required)"
+        start_date = wanted_start
+    config = BacktestConfig(
+        model_name="linear",
+        window_days=window_days,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    check_enough_history(history, config)
+
+    test_start_date = end_date - timedelta(days=TEST_DAYS - 1)
+    if start_date >= test_start_date:
+        raise InsufficientHistoryError(
+            f"The earliest allowed start date is {start_date}, which leaves "
+            f"{(end_date - start_date).days + 1} days up to {end_date}; the test "
+            f"slice alone needs {TEST_DAYS} days plus at least one validation day"
         )
-        return None
-
-    # Calculate backtest range (most recent data)
-    end_date = newest_date - timedelta(days=1)  # Yesterday (allow time for data)
-    start_date = end_date - timedelta(days=backtest_days - 1)
-
-    # Validate we have enough data before start_date for training
-    required_start = start_date - timedelta(days=training_window)
-    if required_start < oldest_date:
-        logger.warning(
-            f"Insufficient data for training window. "
-            f"Required: {required_start}, Available: {oldest_date}"
-        )
-        # Adjust backtest range to fit available data
-        start_date = oldest_date + timedelta(days=training_window)
-        logger.info(f"Adjusted backtest start date to {start_date}")
-
-    return start_date, end_date, training_window
+    return start_date, end_date, test_start_date
 
 
-def main():
+def build_arguments(
+    start_date: date, end_date: date, test_start_date: date, window_days: int
+) -> list[str]:
+    """Command-line arguments of ``scripts/backtest.py`` for the cron run."""
+    return [
+        "backtest.py",
+        f"--start-date={start_date.isoformat()}",
+        f"--end-date={end_date.isoformat()}",
+        f"--test-start-date={test_start_date.isoformat()}",
+        f"--training-window={window_days}",
+        f"--seed={SEED}",
+        f"--retrain-every={RETRAIN_EVERY}",
+    ]
+
+
+def main() -> None:
     """
-    Execute adaptive backtest based on available data.
+    Execute the production-parity backtest.
 
     This is designed to run as a Railway cron job.
     """
-    logger.info("Starting scheduled backtest worker (adaptive mode)")
+    logger.info("Starting scheduled backtest worker (production configuration)")
+    window_days = settings.training_window_days
 
-    # Connect to database
-    db = SessionLocal()
+    with SessionLocal() as db:
+        history = load_daily_history(db)
+    if history.dates:
+        logger.info(
+            f"Available data: {history.dates[0]} to {history.dates[-1]} "
+            f"({len(history.dates)} days)"
+        )
+
     try:
-        # Calculate optimal window based on available data
-        window_config = calculate_adaptive_window(db)
+        start_date, end_date, test_start_date = plan_range(history, window_days)
+    except InsufficientHistoryError as e:
+        logger.exception(f"Cannot plan the backtest range: {e}")
+        sys.exit(1)
 
-        if window_config is None:
-            logger.error("Cannot calculate backtest window - insufficient data")
-            sys.exit(1)
+    logger.info(f"Backtesting range: {start_date} to {end_date}")
+    logger.info(f"Test slice: {test_start_date} to {end_date} ({TEST_DAYS} days)")
+    logger.info(
+        f"Training window: {window_days} days  Seed: {SEED}  "
+        f"Retrain every: {RETRAIN_EVERY} day(s)"
+    )
 
-        start_date, end_date, training_window = window_config
+    # Override sys.argv to pass arguments to backtest script
+    sys.argv = build_arguments(start_date, end_date, test_start_date, window_days)
 
-        logger.info(f"Backtesting range: {start_date} to {end_date}")
-        logger.info(f"Training window: {training_window} days")
+    exit_code = run_backtest_main()
 
-        # Override sys.argv to pass arguments to backtest script
-        sys.argv = [
-            "backtest.py",
-            f"--start-date={start_date.isoformat()}",
-            f"--end-date={end_date.isoformat()}",
-            f"--training-window={training_window}",
-        ]
-
-        # Run backtest
-        exit_code = run_backtest_main()
-
-        if exit_code == 0:
-            logger.info("Backtest completed successfully")
-        else:
-            logger.error(f"Backtest failed with exit code {exit_code}")
-            sys.exit(exit_code)
-
-    finally:
-        db.close()
+    if exit_code == 0:
+        logger.info("Backtest completed successfully")
+    else:
+        logger.error(f"Backtest failed with exit code {exit_code}")
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

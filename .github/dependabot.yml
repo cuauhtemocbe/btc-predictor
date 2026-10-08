@@ -21,7 +21,8 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      # tensorflow-cpu has no stable cp314 wheel, so the ml image cannot build.
+      # Python 3.14 was blocked by tensorflow-cpu (no stable cp314 wheel), removed in
+      # #184. The ignore stays until the 3.14 migration is decided on its own.
       - dependency-name: "python"
         versions: [">=3.14"]
     groups:

@@ -1,17 +1,19 @@
 """Tests for strategy metrics calculation utilities."""
 
+import math
+import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy.orm import Session
 
-from btc_shared.strategies import (
+from shared.db.models import Model, Prediction
+from shared.strategies import (
     calculate_cumulative_pnl,
     calculate_strategy_metrics,
     get_all_strategies_metrics,
 )
-from shared.db.models import Model, Prediction
 
 
 @pytest.fixture
@@ -107,14 +109,17 @@ def sample_predictions(db_session: Session, test_model: Model) -> list[Predictio
 
 def test_calculate_strategy_metrics_with_known_values(
     sample_predictions: list[Prediction],
-):
+) -> None:
     """Test metrics calculation with known PnL values."""
     # Long/Short strategy: [100, -50, 200, -30, 150]
     metrics = calculate_strategy_metrics(sample_predictions, "pnl_long_short")
 
     assert metrics["total_pnl"] == 370.0  # 100 - 50 + 200 - 30 + 150
     assert metrics["win_rate"] == 0.6  # 3 wins out of 5 trades (60%)
-    assert metrics["max_drawdown"] == -50.0  # Worst single loss
+    # Returns pnl / price: 0.2%, -0.098%, 0.396%, -0.058%, 0.29%
+    assert metrics["worst_trade_pct"] == -0.1  # -50 / 51000
+    assert metrics["max_drawdown_pct"] == -0.1  # equity 1.002 -> 0.99902
+    assert "max_drawdown" not in metrics
     assert metrics["avg_win"] == 150.0  # (100 + 200 + 150) / 3
     assert metrics["avg_loss"] == -40.0  # (-50 + -30) / 2
     assert metrics["trade_count"] == 5
@@ -123,7 +128,7 @@ def test_calculate_strategy_metrics_with_known_values(
 
 def test_calculate_strategy_metrics_with_threshold_strategy(
     sample_predictions: list[Prediction],
-):
+) -> None:
     """Test threshold strategy which has some zero-trade days."""
     # Threshold strategy: [100, 0, 200, 0, 150] (only 3 actual trades)
     metrics = calculate_strategy_metrics(sample_predictions, "pnl_threshold")
@@ -131,16 +136,17 @@ def test_calculate_strategy_metrics_with_threshold_strategy(
     assert metrics["total_pnl"] == 450.0  # 100 + 200 + 150 (ignoring zeros)
     assert metrics["trade_count"] == 5  # All predictions included
     assert metrics["win_rate"] == 0.6  # 3 wins, 2 zeros
-    assert metrics["max_drawdown"] == 0.0  # No losses
+    assert metrics["max_drawdown_pct"] == 0.0  # No losses
 
 
-def test_calculate_strategy_metrics_with_empty_predictions():
+def test_calculate_strategy_metrics_with_empty_predictions() -> None:
     """Test metrics calculation with no predictions."""
     metrics = calculate_strategy_metrics([], "pnl_simulated")
 
     assert metrics["total_pnl"] == 0.0
     assert metrics["win_rate"] == 0.0
-    assert metrics["max_drawdown"] == 0.0
+    assert metrics["max_drawdown_pct"] == 0.0
+    assert metrics["worst_trade_pct"] == 0.0
     assert metrics["avg_win"] == 0.0
     assert metrics["avg_loss"] == 0.0
     assert metrics["sharpe_ratio"] == 0.0
@@ -149,7 +155,7 @@ def test_calculate_strategy_metrics_with_empty_predictions():
 
 def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
     db_session: Session, test_model: Model
-):
+) -> None:
     """Test metrics with predictions not yet evaluated (actual_price is NULL)."""
     predictions = [
         Prediction(
@@ -175,36 +181,103 @@ def test_calculate_strategy_metrics_with_only_unevaluated_predictions(
     assert metrics["trade_count"] == 0
 
 
-def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model):
-    """Test Sharpe Ratio calculation with known daily returns."""
-    # Create predictions with specific PnL pattern
-    predictions = [
+def _daily_predictions(
+    test_model: Model, pnls: list[int], price: str = "100"
+) -> list[Prediction]:
+    """One evaluated prediction per day, all at the same price."""
+    return [
         Prediction(
             model_id=test_model.id,
             predicted_for=date(2026, 5, i),
             predicted_at=datetime.now(UTC),
-            price_at_prediction=Decimal("50000"),
-            predicted_price=Decimal("50000"),
-            actual_price=Decimal("50000"),
-            pnl_simulated=Decimal(str(pnl)),
-            pnl_long_short=Decimal(str(pnl)),
-            pnl_threshold=Decimal(str(pnl)),
-            pnl_realistic=Decimal(str(pnl)),
+            price_at_prediction=Decimal(price),
+            predicted_price=Decimal(price),
+            actual_price=Decimal(price),
+            pnl_simulated=Decimal(pnl),
         )
-        for i, pnl in enumerate([100, -50, 150, 80, 120], start=1)
+        for i, pnl in enumerate(pnls, start=1)
     ]
+
+
+def test_calculate_strategy_metrics_sharpe_ratio(test_model: Model) -> None:
+    """The Sharpe ratio is m / s * sqrt(365) of the returns pnl / price."""
+    pnls = [10, -5, 15, 8, 12]
+    returns = [p / 100 for p in pnls]
+    expected = statistics.fmean(returns) / statistics.stdev(returns) * math.sqrt(365)
+
+    metrics = calculate_strategy_metrics(
+        _daily_predictions(test_model, pnls), "pnl_simulated"
+    )
+
+    assert metrics["sharpe_ratio"] == pytest.approx(expected, abs=0.005)
+
+
+def test_calculate_strategy_metrics_worst_trade_and_drawdown_differ(
+    test_model: Model,
+) -> None:
+    """
+    Given returns of +10%, -10% and -10%
+    Then Worst trade is -10% and Max drawdown is the compounded -19%
+    """
+    metrics = calculate_strategy_metrics(
+        _daily_predictions(test_model, [10, -10, -10]), "pnl_simulated"
+    )
+
+    assert metrics["worst_trade_pct"] == -10.0
+    assert metrics["max_drawdown_pct"] == -19.0
+
+
+def test_calculate_strategy_metrics_sorts_by_date_before_compounding(
+    test_model: Model,
+) -> None:
+    """The equity curve follows predicted_for, not the order of the list."""
+    predictions = _daily_predictions(test_model, [10, -10, -10])
+
+    metrics = calculate_strategy_metrics(predictions[::-1], "pnl_simulated")
+
+    assert metrics["max_drawdown_pct"] == -19.0
+
+
+def test_calculate_strategy_metrics_five_thousand_at_100000_is_five_pct(
+    test_model: Model,
+) -> None:
+    """One day of -$5,000 at BTC = $100,000 is -5%, not -50%."""
+    metrics = calculate_strategy_metrics(
+        _daily_predictions(test_model, [-5000], price="100000"), "pnl_simulated"
+    )
+
+    assert metrics["worst_trade_pct"] == -5.0
+    assert metrics["max_drawdown_pct"] == -5.0
+    assert metrics["total_pnl"] == -5000.0
+
+
+def test_calculate_strategy_metrics_skips_a_zero_price_in_the_risk_figures(
+    test_model: Model,
+) -> None:
+    """A row with no usable price keeps its dollar PnL but has no return."""
+    predictions = _daily_predictions(test_model, [10, -50, -10])
+    predictions[1].price_at_prediction = Decimal("0")
 
     metrics = calculate_strategy_metrics(predictions, "pnl_simulated")
 
-    # Sharpe = mean / stdev
-    # mean = (100 - 50 + 150 + 80 + 120) / 5 = 80
-    # stdev ≈ 69.28 (numpy calculation)
-    # sharpe ≈ 80 / 69.28 ≈ 1.15
-    assert metrics["sharpe_ratio"] > 0
-    assert 1.0 <= metrics["sharpe_ratio"] <= 1.2
+    assert metrics["trade_count"] == 3
+    assert metrics["total_pnl"] == -50.0
+    assert metrics["worst_trade_pct"] == -10.0
+    assert metrics["max_drawdown_pct"] == -10.0
 
 
-def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
+def test_calculate_strategy_metrics_sharpe_is_zero_with_one_trade(
+    test_model: Model,
+) -> None:
+    metrics = calculate_strategy_metrics(
+        _daily_predictions(test_model, [10]), "pnl_simulated"
+    )
+
+    assert metrics["sharpe_ratio"] == 0.0
+    assert metrics["trade_count"] == 1
+
+
+def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]) -> None:
     """Test cumulative PnL calculation over time."""
     cumulative = calculate_cumulative_pnl(sample_predictions, "pnl_long_short")
 
@@ -219,7 +292,7 @@ def test_calculate_cumulative_pnl(sample_predictions: list[Prediction]):
 
 def test_calculate_cumulative_pnl_sorted_by_date(
     db_session: Session, test_model: Model
-):
+) -> None:
     """Test that cumulative PnL is calculated in date order."""
     # Insert predictions out of order
     predictions = [
@@ -276,7 +349,7 @@ def test_calculate_cumulative_pnl_sorted_by_date(
 
 def test_get_all_strategies_metrics(
     db_session: Session, sample_predictions: list[Prediction]
-):
+) -> None:
     """Test getting metrics for all 4 strategies at once."""
     strategies = get_all_strategies_metrics(db_session)
 
@@ -292,7 +365,8 @@ def test_get_all_strategies_metrics(
         assert "color" in strategy
         assert "total_pnl" in strategy
         assert "win_rate" in strategy
-        assert "max_drawdown" in strategy
+        assert "worst_trade_pct" in strategy
+        assert "max_drawdown_pct" in strategy
         assert "avg_win" in strategy
         assert "avg_loss" in strategy
         assert "sharpe_ratio" in strategy
@@ -304,7 +378,7 @@ def test_get_all_strategies_metrics(
     assert len(strategies[0]["cumulative_pnl"]) == 5  # 5 sample predictions
 
 
-def test_get_all_strategies_metrics_with_empty_database(db_session: Session):
+def test_get_all_strategies_metrics_with_empty_database(db_session: Session) -> None:
     """Test all strategies metrics with no predictions."""
     strategies = get_all_strategies_metrics(db_session)
 

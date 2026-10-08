@@ -7,15 +7,17 @@ Tests the GET / endpoint that renders the dashboard HTML:
 - Dashboard displays model name and version
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
+from soup_helpers import attribute, find_tag
 from sqlalchemy.orm import Session
 
-from shared.db.models import Prediction
+from shared.db.models import Model, Prediction
 
 
 # Gherkin Scenario 1: Render dashboard with predictions
@@ -23,8 +25,8 @@ from shared.db.models import Prediction
 async def test_dashboard_with_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 10 evaluated records
     When I navigate to GET /
@@ -92,7 +94,7 @@ async def test_dashboard_with_predictions(
 async def test_dashboard_with_no_data(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the predictions table is empty
     When I navigate to GET /
@@ -128,8 +130,8 @@ async def test_dashboard_with_no_data(
 async def test_dashboard_shows_model_name(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given a prediction was made by model "linear_v1"
     When I navigate to GET /
@@ -163,8 +165,8 @@ async def test_dashboard_shows_model_name(
 async def test_dashboard_direction_indicators(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that direction correctness is visualized with checkmarks and X marks.
     """
@@ -199,8 +201,8 @@ async def test_dashboard_direction_indicators(
 async def test_dashboard_stats_summary(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that dashboard shows summary statistics cards.
     """
@@ -222,7 +224,9 @@ async def test_dashboard_stats_summary(
     assert len(stat_cards) == 4, "Should show 4 stat cards"
 
     # Verify stat labels
-    stat_labels = [card.find(class_="stat-label").get_text() for card in stat_cards]
+    stat_labels = [
+        find_tag(card, class_="stat-label").get_text() for card in stat_cards
+    ]
     expected_labels = [
         "Total Predictions",
         "Correct Direction",
@@ -234,7 +238,7 @@ async def test_dashboard_stats_summary(
         assert expected in stat_labels, f"Missing stat card: {expected}"
 
     # Verify first stat shows total count
-    first_value = stat_cards[0].find(class_="stat-value").get_text()
+    first_value = find_tag(stat_cards[0], class_="stat-value").get_text()
     assert "10" in first_value, "Total predictions should be 10"
 
 
@@ -243,7 +247,7 @@ async def test_dashboard_stats_summary(
 async def test_dashboard_responsive_meta_tag(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Verify that dashboard includes viewport meta tag for responsive design.
     """
@@ -256,7 +260,7 @@ async def test_dashboard_responsive_meta_tag(
     # Find viewport meta tag
     viewport = soup.find("meta", attrs={"name": "viewport"})
     assert viewport is not None, "Dashboard should have viewport meta tag"
-    assert "width=device-width" in viewport.get("content", "")
+    assert "width=device-width" in attribute(viewport, "content")
 
 
 # Gherkin: Redundant non-color signal for PnL indicators (accessibility)
@@ -264,8 +268,8 @@ async def test_dashboard_responsive_meta_tag(
 async def test_pnl_glyphs_are_redundant_non_color_signal(
     client: AsyncClient,
     db_session: Session,
-    sample_model,
-):
+    sample_model: Model,
+) -> None:
     """
     Given a strategy row with total_pnl >= 0 and another with total_pnl < 0
     When dashboard.html renders the positive-pnl/negative-pnl cells
@@ -310,3 +314,111 @@ async def test_pnl_glyphs_are_redundant_non_color_signal(
     assert any("▼" in cell.get_text() for cell in negative_cells), (
         "negative-pnl cells should be prefixed with a ▼ glyph"
     )
+
+
+@pytest.mark.asyncio
+async def test_dashboard_has_no_weekly_tab(
+    client: AsyncClient, db_session: Session
+) -> None:
+    """
+    Gherkin: The dashboard renders without a Weekly tab (#183).
+
+    When I navigate to GET /
+    Then the page has the Daily tab and no tab for the 1w timeframe
+    """
+    response = await client.get("/")
+
+    assert response.status_code == 200
+    soup = BeautifulSoup(response.text, "html.parser")
+    tabs = {tab.get("data-timeframe") for tab in soup.select("button.tab")}
+    assert tabs == {"1d"}
+    assert "Weekly" not in soup.get_text()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_worst_trade_and_max_drawdown_as_two_figures(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model: Model,
+) -> None:
+    """
+    Given three predictions with returns of +10%, -10% and -10%
+    When the dashboard renders
+    Then the strategies table has a "Worst trade" column (the minimum single-day
+    return, -10.00%) and a "Max drawdown" column (from the compounded equity
+    curve, -19.00%), as two different figures (#177)
+    """
+    for day, pnl in [(1, "10"), (2, "-10"), (3, "-10")]:
+        db_session.add(
+            Prediction(
+                model_id=sample_model.id,
+                predicted_for=date(2024, 5, day),
+                predicted_at=datetime(2024, 5, day, 0, 10, tzinfo=UTC),
+                price_at_prediction=Decimal("100.00"),
+                predicted_price=Decimal("101.00"),
+                actual_price=Decimal("100.00") + Decimal(pnl),
+                evaluated_at=datetime(2024, 5, day, 10, 0, tzinfo=UTC),
+                error_abs=Decimal("1.00"),
+                error_pct=Decimal("1.00"),
+                direction_correct=True,
+                pnl_simulated=Decimal(pnl),
+                pnl_long_short=Decimal(pnl),
+                pnl_threshold=Decimal(pnl),
+                pnl_realistic=Decimal(pnl),
+            )
+        )
+    db_session.commit()
+
+    response = await client.get("/")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = find_tag(soup, "table", class_="strategy-table")
+    headers = [th.get_text(strip=True) for th in table.find_all("th")]
+    assert "Worst trade" in headers
+    assert "Max drawdown" in headers
+    assert "Max Drawdown" not in headers
+    row = find_tag(find_tag(table, "tbody"), "tr")
+    cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+    assert cells[headers.index("Worst trade")] == "▼ -10.00%"
+    assert cells[headers.index("Max drawdown")] == "▼ -19.00%"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_states_the_assumptions_of_each_strategy(
+    client: AsyncClient,
+    db_session: Session,
+    sample_model: Model,
+) -> None:
+    """
+    Given the strategies table is shown
+    Then the page states, next to it, that shorting is not possible on Binance spot
+    and funding is not modeled, that the fee is charged every day, and that the
+    stop-loss acts on closes because there is no intraday data (#177)
+    """
+    db_session.add(
+        Prediction(
+            model_id=sample_model.id,
+            predicted_for=date(2024, 5, 1),
+            predicted_at=datetime(2024, 4, 30, 10, 0, tzinfo=UTC),
+            price_at_prediction=Decimal("100.00"),
+            predicted_price=Decimal("101.00"),
+            actual_price=Decimal("101.00"),
+            evaluated_at=datetime(2024, 5, 1, 10, 0, tzinfo=UTC),
+            error_abs=Decimal("0.00"),
+            error_pct=Decimal("0.00"),
+            direction_correct=True,
+            pnl_simulated=Decimal("1"),
+        )
+    )
+    db_session.commit()
+
+    response = await client.get("/")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    text = find_tag(soup, "div", class_="strategy-assumptions").get_text(
+        " ", strip=True
+    )
+    assert "Shorting is not possible on Binance spot" in text
+    assert "funding" in text
+    assert "fee charged every day" in text
+    assert "no intraday data" in text

@@ -1,15 +1,13 @@
-name: Scheduled Quality
+name: Mutation Testing
 
 on:
-  schedule:
-    - cron: '0 7 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: scheduled-quality
+  group: mutation-testing
   cancel-in-progress: false
 
 jobs:
@@ -20,32 +18,62 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Start Docker Compose services
         run: docker compose up -d --wait
 
-      - name: Run mutation testing
+      # The workspace is bind-mounted at /app in the api container, so the
+      # session database and the report land in ./mutation-output on the runner
+      # and survive the container.
+      - name: Initialise mutation session
         run: >-
           docker compose exec -T api sh -c
-          'cosmic-ray init cosmic-ray.toml /tmp/session.sqlite &&
-          cosmic-ray exec cosmic-ray.toml /tmp/session.sqlite &&
-          cr-report /tmp/session.sqlite | tee /tmp/mutation-report.txt'
+          'mkdir -p mutation-output &&
+          cosmic-ray init cosmic-ray.toml mutation-output/session.sqlite'
 
-      - name: Copy mutation report
+      # Bounded below the 60 minute job limit: a job timeout cancels the
+      # remaining steps, so exec stops itself and the report steps still run.
+      # Exit 124 (SIGTERM) or 137 (SIGKILL after 2 m) means "out of time".
+      - name: Run mutation testing (45 minute budget)
+        run: |
+          rc=0
+          docker compose exec -T api timeout --kill-after=2m 45m \
+            cosmic-ray exec cosmic-ray.toml mutation-output/session.sqlite || rc=$?
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::warning::Mutation run hit its 45 minute budget; the report is partial."
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Write mutation report
         if: always()
-        run: docker compose cp api:/tmp/mutation-report.txt ./mutation-report.txt || true
+        run: >-
+          docker compose exec -T api sh -c
+          'cr-report mutation-output/session.sqlite > mutation-output/mutation-report.txt'
+
+      - name: Summarise mutation report
+        if: always()
+        run: |
+          {
+            echo "### Mutation testing"
+            echo '```'
+            grep -E '^(total jobs|complete|surviving mutants)' mutation-output/mutation-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-report
-          path: mutation-report.txt
-          if-no-files-found: ignore
+          path: |
+            mutation-output/mutation-report.txt
+            mutation-output/session.sqlite
+          if-no-files-found: error
 
       - name: Stop Docker Compose services
         if: always()

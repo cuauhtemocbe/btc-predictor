@@ -11,12 +11,15 @@ import hashlib
 import io
 import urllib.error
 import zipfile
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from email.message import Message
+from typing import Literal, NoReturn
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from shared.binance_vision import (
     ChecksumMismatchError,
@@ -71,20 +74,28 @@ def _zip_bytes(csv_text: str, name: str = "data.csv") -> bytes:
 class FakeBinanceVision:
     """In-memory data.binance.vision keyed by URL; records every request."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.requests: list[str] = []
 
     def add_month(
-        self, symbol, year, month, csv_text=None, archive=None, checksum=None
-    ):
+        self,
+        symbol: str,
+        year: int,
+        month: int,
+        csv_text: str | None = None,
+        archive: bytes | None = None,
+        checksum: str | None = None,
+    ) -> None:
         url = month_file_url(symbol, year, month)
         archive = archive or _zip_bytes(csv_text or _csv_for_month(year, month))
         self.files[url] = archive
         digest = checksum or hashlib.sha256(archive).hexdigest()
         self.files[url + ".CHECKSUM"] = f"{digest}  {url.rsplit('/', 1)[1]}\n".encode()
 
-    def add_range(self, symbol, start, end):
+    def add_range(
+        self, symbol: str, start: tuple[int, int], end: tuple[int, int]
+    ) -> None:
         for year, month in months_between(start, end):
             self.add_month(symbol, year, month)
 
@@ -96,11 +107,11 @@ class FakeBinanceVision:
 
 
 @pytest.fixture
-def vision():
+def vision() -> FakeBinanceVision:
     return FakeBinanceVision()
 
 
-def _count(db_session, symbol=None) -> int:
+def _count(db_session: Session, symbol: str | None = None) -> int:
     query = select(func.count()).select_from(Price)
     if symbol:
         query = query.where(Price.symbol == symbol)
@@ -117,12 +128,14 @@ class TestTimestampParsing:
             (1748736000000000, date(2025, 6, 1)),
         ],
     )
-    def test_open_time_maps_to_midnight_utc(self, open_time, utc_date):
+    def test_open_time_maps_to_midnight_utc(
+        self, open_time: int, utc_date: date
+    ) -> None:
         assert parse_open_time(open_time) == datetime(
             utc_date.year, utc_date.month, utc_date.day, tzinfo=UTC
         )
 
-    def test_same_instant_in_ms_and_us_gives_same_timestamp(self):
+    def test_same_instant_in_ms_and_us_gives_same_timestamp(self) -> None:
         millis = 1748736000000
         assert parse_open_time(millis) == parse_open_time(millis * 1000)
 
@@ -130,7 +143,9 @@ class TestTimestampParsing:
 class TestFullHistoryLoad:
     """Scenario: Full history of BTC loads without gaps."""
 
-    def test_every_day_has_exactly_one_row_with_volume(self, db_session, vision):
+    def test_every_day_has_exactly_one_row_with_volume(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_range("BTCUSDT", (2024, 11), (2025, 2))
 
         load_history(
@@ -157,7 +172,9 @@ class TestFullHistoryLoad:
         assert {row.source for row in rows} == {"binance_vision"}
         validate_history(db_session, "BTCUSDT")  # no gaps
 
-    def test_stops_at_last_closed_month(self, db_session, vision):
+    def test_stops_at_last_closed_month(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_range("BTCUSDT", (2025, 1), (2025, 3))
 
         load_history(
@@ -172,7 +189,9 @@ class TestFullHistoryLoad:
         assert month_file_url("BTCUSDT", 2025, 3) not in requested
         assert month_file_url("BTCUSDT", 2025, 2) in requested
 
-    def test_unsupported_symbol_is_rejected(self, db_session, vision):
+    def test_unsupported_symbol_is_rejected(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         with pytest.raises(ValueError, match="Unsupported symbol"):
             load_history(db_session, "ETHUSDT", fetch=vision)
 
@@ -181,15 +200,17 @@ class TestChecksumVerification:
     """Scenario: A file with a wrong checksum is rejected."""
 
     def test_wrong_checksum_inserts_nothing_and_names_the_file(
-        self, db_session, vision
-    ):
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2025, 1, checksum="0" * 64)
+
+        today = date(2025, 2, 10)
 
         with pytest.raises(ChecksumMismatchError) as error:
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
@@ -197,15 +218,19 @@ class TestChecksumVerification:
         assert "BTCUSDT-1d-2025-01.zip" in str(error.value)
         assert _count(db_session) == 0
 
-    def test_bad_month_stops_load_but_keeps_earlier_months(self, db_session, vision):
+    def test_bad_month_stops_load_but_keeps_earlier_months(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2024, 12)
         vision.add_month("BTCUSDT", 2025, 1, checksum="f" * 64)
+
+        today = date(2025, 2, 10)
 
         with pytest.raises(ChecksumMismatchError):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2024, 12),
             )
@@ -216,19 +241,24 @@ class TestChecksumVerification:
 class TestMissingAndCorruptFiles:
     """ZOMBIES: a missing month or a corrupt zip stops the load with a clear error."""
 
-    def test_missing_month_file_raises_clear_error(self, db_session, vision):
+    def test_missing_month_file_raises_clear_error(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2025, 2)  # January is missing, February is last
+        today = date(2025, 3, 10)
         with pytest.raises(MonthFileNotFoundError, match="BTCUSDT-1d-2025-01.zip"):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 3, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
         assert _count(db_session) == 0
 
-    def test_last_closed_month_not_published_yet_is_skipped(self, db_session, vision):
+    def test_last_closed_month_not_published_yet_is_skipped(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2025, 1)  # February is not published yet
 
         inserted = load_history(
@@ -241,35 +271,41 @@ class TestMissingAndCorruptFiles:
 
         assert inserted == _count(db_session, "BTCUSDT") == 31
 
-    def test_missing_checksum_file_raises_clear_error(self, vision):
+    def test_missing_checksum_file_raises_clear_error(
+        self, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2025, 1)
         del vision.files[month_file_url("BTCUSDT", 2025, 1) + ".CHECKSUM"]
 
         with pytest.raises(MonthFileNotFoundError, match="CHECKSUM"):
             fetch_month("BTCUSDT", 2025, 1, vision)
 
-    def test_blocked_host_surfaces_the_http_status(self):
-        def blocked(url):
+    def test_blocked_host_surfaces_the_http_status(self) -> None:
+        def blocked(url: str) -> NoReturn:
             raise HttpStatusError(url, 451)
 
         with pytest.raises(HttpStatusError) as error:
             fetch_month("BTCUSDT", 2025, 1, blocked)
         assert error.value.status == 451
 
-    def test_corrupt_zip_raises_clear_error(self, db_session, vision):
+    def test_corrupt_zip_raises_clear_error(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2025, 1, archive=b"this is not a zip")
+
+        today = date(2025, 2, 10)
 
         with pytest.raises(CorruptArchiveError, match="BTCUSDT-1d-2025-01.zip"):
             load_history(
                 db_session,
                 "BTCUSDT",
-                today=date(2025, 2, 10),
+                today=today,
                 fetch=vision,
                 start_month=(2025, 1),
             )
         assert _count(db_session) == 0
 
-    def test_zip_with_several_files_is_corrupt(self, vision):
+    def test_zip_with_several_files_is_corrupt(self, vision: FakeBinanceVision) -> None:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as bundle:
             bundle.writestr("a.csv", _csv_for_month(2025, 1))
@@ -283,13 +319,23 @@ class TestMissingAndCorruptFiles:
 class TestIdempotentLoad:
     """Scenario: Loading twice does not duplicate rows."""
 
-    def test_second_load_leaves_row_count_unchanged(self, db_session, vision):
+    def test_second_load_leaves_row_count_unchanged(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_range("BTCUSDT", (2025, 1), (2025, 2))
-        kwargs = {"today": date(2025, 3, 5), "fetch": vision, "start_month": (2025, 1)}
 
-        first = load_history(db_session, "BTCUSDT", **kwargs)
+        def load() -> int:
+            return load_history(
+                db_session,
+                "BTCUSDT",
+                today=date(2025, 3, 5),
+                fetch=vision,
+                start_month=(2025, 1),
+            )
+
+        first = load()
         count_after_first = _count(db_session, "BTCUSDT")
-        second = load_history(db_session, "BTCUSDT", **kwargs)
+        second = load()
 
         assert first == count_after_first == 31 + 28
         assert second == 0
@@ -299,7 +345,9 @@ class TestIdempotentLoad:
 class TestGoldSymbol:
     """Scenario: Gold history loads under its own symbol."""
 
-    def test_paxg_rows_use_own_symbol_and_leave_btc_untouched(self, db_session, vision):
+    def test_paxg_rows_use_own_symbol_and_leave_btc_untouched(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_range("BTCUSDT", (2020, 8), (2020, 9))
         vision.add_range("PAXGUSDT", (2020, 8), (2020, 9))
         today = date(2020, 10, 5)
@@ -317,22 +365,26 @@ class TestGoldSymbol:
         assert _count(db_session, "PAXGUSDT") == 31 + 30
         assert _count(db_session, "BTCUSDT") == btc_before
 
-    def test_default_start_month_per_symbol(self, db_session, vision):
-        load_history_calls = []
+    def test_default_start_month_per_symbol(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
+        load_history_calls: list[str] = []
 
-        def spy(url):
+        def spy(url: str) -> bytes:
             load_history_calls.append(url)
             return vision(url)
 
+        today = date(2021, 1, 5)
+
         with pytest.raises(MonthFileNotFoundError):
-            load_history(db_session, "PAXGUSDT", today=date(2021, 1, 5), fetch=spy)
+            load_history(db_session, "PAXGUSDT", today=today, fetch=spy)
         assert load_history_calls[0] == month_file_url("PAXGUSDT", 2020, 8)
 
 
 class TestContinuityValidation:
     """Scenario: A gap in the loaded series is detected."""
 
-    def _load_with_gap(self, db_session, gap: date):
+    def _load_with_gap(self, db_session: Session, gap: date) -> None:
         csv_lines = [
             line
             for line in _csv_for_month(2024, 3).splitlines()
@@ -348,7 +400,7 @@ class TestContinuityValidation:
             start_month=(2024, 3),
         )
 
-    def test_missing_day_is_reported(self, db_session):
+    def test_missing_day_is_reported(self, db_session: Session) -> None:
         self._load_with_gap(db_session, date(2024, 3, 10))
 
         with pytest.raises(HistoryValidationError) as error:
@@ -357,7 +409,9 @@ class TestContinuityValidation:
         assert error.value.missing_days == [date(2024, 3, 10)]
         assert "2024-03-10" in str(error.value)
 
-    def test_zero_volume_day_is_reported(self, db_session, vision):
+    def test_zero_volume_day_is_reported(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         csv_text = _csv_for_month(2024, 3).replace(",12.5,", ",0,", 1)
         vision.add_month("BTCUSDT", 2024, 3, csv_text=csv_text)
         load_history(
@@ -373,10 +427,12 @@ class TestContinuityValidation:
 
         assert error.value.zero_volume_days == [date(2024, 3, 1)]
 
-    def test_empty_series_is_valid(self, db_session):
+    def test_empty_series_is_valid(self, db_session: Session) -> None:
         validate_history(db_session, "BTCUSDT")
 
-    def test_rows_from_other_sources_are_ignored(self, db_session, vision):
+    def test_rows_from_other_sources_are_ignored(
+        self, db_session: Session, vision: FakeBinanceVision
+    ) -> None:
         vision.add_month("BTCUSDT", 2024, 3)
         load_history(
             db_session,
@@ -401,7 +457,7 @@ class TestContinuityValidation:
 
         validate_history(db_session, "BTCUSDT")  # zero-volume foreign row ignored
 
-    def test_validation_is_per_symbol(self, db_session):
+    def test_validation_is_per_symbol(self, db_session: Session) -> None:
         self._load_with_gap(db_session, date(2024, 3, 10))
         validate_history(db_session, "PAXGUSDT")  # nothing loaded for it
 
@@ -413,19 +469,23 @@ class TestReachability:
     tested against a fake host.
     """
 
-    def test_reachable_host_returns_the_requested_url(self, vision):
+    def test_reachable_host_returns_the_requested_url(
+        self, vision: FakeBinanceVision
+    ) -> None:
         url = month_file_url("BTCUSDT", 2025, 5) + ".CHECKSUM"
         vision.files[url] = b"abc  file.zip"
 
         assert check_reachability(vision, today=date(2025, 6, 20)) == url
 
     @pytest.mark.parametrize("status", [451, 403])
-    def test_blocked_host_raises_with_status(self, status):
-        def blocked(url):
+    def test_blocked_host_raises_with_status(self, status: int) -> None:
+        def blocked(url: str) -> NoReturn:
             raise HttpStatusError(url, status)
 
+        today = date(2025, 6, 20)
+
         with pytest.raises(HttpStatusError) as error:
-            check_reachability(blocked, today=date(2025, 6, 20))
+            check_reachability(blocked, today=today)
         assert error.value.status == status
 
 
@@ -438,10 +498,10 @@ class TestCalendarHelpers:
             (date(2025, 3, 1), (2025, 2)),
         ],
     )
-    def test_last_closed_month(self, today, expected):
+    def test_last_closed_month(self, today: date, expected: tuple[int, int]) -> None:
         assert last_closed_month(today) == expected
 
-    def test_months_between_crosses_year_boundary(self):
+    def test_months_between_crosses_year_boundary(self) -> None:
         assert months_between((2024, 11), (2025, 2)) == [
             (2024, 11),
             (2024, 12),
@@ -449,18 +509,18 @@ class TestCalendarHelpers:
             (2025, 2),
         ]
 
-    def test_months_between_is_empty_when_start_is_after_end(self):
+    def test_months_between_is_empty_when_start_is_after_end(self) -> None:
         assert months_between((2025, 3), (2025, 2)) == []
 
 
 class _Response:
-    def __enter__(self):
+    def __enter__(self) -> "_Response":
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> Literal[False]:
         return False
 
-    def read(self):
+    def read(self) -> bytes:
         return b"payload"
 
 
@@ -468,20 +528,22 @@ class TestHttpGet:
     """Transient network failures are retried; final answers are not."""
 
     @pytest.fixture(autouse=True)
-    def no_sleep(self, monkeypatch):
+    def no_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.pauses: list[float] = []
         monkeypatch.setattr("time.sleep", self.pauses.append)
 
-    def test_returns_the_response_body(self, monkeypatch):
+    def test_returns_the_response_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout: _Response())
 
         assert http_get("https://example.test/file") == b"payload"
 
     @pytest.mark.parametrize("status", [404, 451])
-    def test_client_errors_are_final_and_not_retried(self, monkeypatch, status):
-        calls = []
+    def test_client_errors_are_final_and_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        calls: list[str] = []
 
-        def failing(url, timeout):
+        def failing(url: str, timeout: float) -> NoReturn:
             calls.append(url)
             raise urllib.error.HTTPError(url, status, "err", Message(), None)
 
@@ -492,12 +554,14 @@ class TestHttpGet:
         assert error.value.status == status
         assert len(calls) == 1
 
-    def test_timeout_is_retried_and_then_succeeds(self, monkeypatch):
-        outcomes = iter(
+    def test_timeout_is_retried_and_then_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        outcomes: Iterator[Exception | _Response] = iter(
             [urllib.error.URLError("handshake timed out"), TimeoutError(), _Response()]
         )
 
-        def flaky(url, timeout):
+        def flaky(url: str, timeout: float) -> _Response:
             outcome = next(outcomes)
             if isinstance(outcome, Exception):
                 raise outcome
@@ -508,12 +572,12 @@ class TestHttpGet:
         assert http_get("https://example.test/file") == b"payload"
         assert self.pauses == [2.0, 4.0]
 
-    def test_server_error_is_retried(self, monkeypatch):
-        outcomes = iter(
+    def test_server_error_is_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        outcomes: Iterator[Exception | _Response] = iter(
             [urllib.error.HTTPError("u", 503, "busy", Message(), None), _Response()]
         )
 
-        def flaky(url, timeout):
+        def flaky(url: str, timeout: float) -> _Response:
             outcome = next(outcomes)
             if isinstance(outcome, Exception):
                 raise outcome
@@ -523,8 +587,10 @@ class TestHttpGet:
 
         assert http_get("https://example.test/file") == b"payload"
 
-    def test_gives_up_after_every_attempt_with_a_clear_error(self, monkeypatch):
-        def down(url, timeout):
+    def test_gives_up_after_every_attempt_with_a_clear_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(url: str, timeout: float) -> NoReturn:
             raise urllib.error.URLError("handshake timed out")
 
         monkeypatch.setattr("urllib.request.urlopen", down)
@@ -535,7 +601,7 @@ class TestHttpGet:
 
 
 class TestParsingEdgeCases:
-    def test_blank_lines_are_ignored(self):
+    def test_blank_lines_are_ignored(self) -> None:
         csv_text = "\n1500000000000,1,2,0.5,1.5,10,0,0,0,0,0,0\n\n"
 
         rows = parse_klines_csv(csv_text, "BTCUSDT")
@@ -543,5 +609,5 @@ class TestParsingEdgeCases:
         assert len(rows) == 1
         assert rows[0]["close"] == Decimal("1.5")
 
-    def test_inserting_no_rows_is_a_no_op(self, db_session):
+    def test_inserting_no_rows_is_a_no_op(self, db_session: Session) -> None:
         assert insert_prices(db_session, []) == 0

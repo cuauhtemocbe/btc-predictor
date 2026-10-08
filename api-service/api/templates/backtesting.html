@@ -246,6 +246,16 @@
             color: #1f2937;
         }
 
+        .strategy-assumptions {
+            margin: 12px 0 24px;
+            font-size: 0.85rem;
+            color: #4b5563;
+        }
+
+        .strategy-assumptions ul {
+            margin: 4px 0 0 20px;
+        }
+
         .best-strategy-row {
             background-color: #d1fae5 !important;
             font-weight: 600;
@@ -345,10 +355,12 @@
         <header>
             <h1>📈 Backtesting Results</h1>
             <p class="subtitle">Historical model performance simulation with walk-forward validation</p>
-            <a href="/" class="nav-link">← Back to Dashboard</a>
+            <a href="/?symbol={{ asset.symbol }}" class="nav-link">← Back to Dashboard</a>
         </header>
 
         <div class="content">
+            {% include "_asset_selector.html" %}
+
             {% if has_data %}
                 <!-- Metadata Section -->
                 <div class="metadata">
@@ -372,6 +384,7 @@
 
                 <!-- Date Range Filter -->
                 <form class="filter-form" method="get" action="/backtesting">
+                    <input type="hidden" name="symbol" value="{{ asset.symbol }}">
                     <div class="filter-group">
                         <label class="filter-label" for="start">Start Date</label>
                         <input
@@ -404,7 +417,7 @@
                             <th>Strategy</th>
                             <th>Total PnL</th>
                             <th>Win Rate</th>
-                            <th>Max Drawdown</th>
+                            <th>Max drawdown</th>
                             <th>Best Day</th>
                             <th>Worst Day</th>
                             <th>Sharpe Ratio</th>
@@ -426,7 +439,7 @@
                                 ${{ "%.2f"|format(strategy.total_pnl) }}
                             </td>
                             <td>{{ "%.1f"|format(strategy.win_rate * 100) }}%</td>
-                            <td class="negative-pnl">${{ "%.2f"|format(strategy.max_drawdown) }}</td>
+                            <td class="negative-pnl">{{ "%.2f"|format(strategy.max_drawdown_pct) }}%</td>
                             <td class="positive-pnl">${{ "%.2f"|format(strategy.best_day) }}</td>
                             <td class="negative-pnl">${{ "%.2f"|format(strategy.worst_day) }}</td>
                             <td>{{ "%.2f"|format(strategy.sharpe_ratio) }}</td>
@@ -435,6 +448,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
+
+                {% include "_strategy_assumptions.html" %}
 
                 <!-- Cumulative PnL Chart -->
                 <h2 class="section-title">📉 Cumulative PnL Over Time</h2>

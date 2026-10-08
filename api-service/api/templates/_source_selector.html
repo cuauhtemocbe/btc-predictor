@@ -1,0 +1,52 @@
+{# Prediction source selector (#176). Needs `source_options` from
+   api.symbols.source_context. Also defines the Replay badge both pages use.
+   The selected option is marked with a check glyph and aria-current, never by
+   color alone. #}
+<style>
+    .source-selector { margin-bottom: 24px; }
+    .source-selector .source-label { font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 8px; }
+    .source-options { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; }
+    .source-option {
+        display: inline-block;
+        padding: 6px 14px;
+        border: 2px solid #4b5563;
+        border-radius: 999px;
+        background: #f9fafb;
+        color: #374151;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .source-option:hover { background: #e5e7eb; }
+    .source-option:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+    .source-option[aria-current="page"] { background: #374151; color: #ffffff; }
+    .replay-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        margin-left: 8px;
+        border: 1px solid #b45309;
+        border-radius: 4px;
+        background: #fffbeb;
+        color: #78350f;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+    }
+</style>
+<nav class="source-selector" aria-label="Prediction source">
+    <p class="source-label">Predictions shown</p>
+    <ul class="source-options">
+        {% for option in source_options %}
+        <li>
+            <a class="source-option"
+               href="{{ option.href }}"
+               data-source="{{ option.value }}"
+               {% if option.selected %}aria-current="page"{% endif %}>
+                {% if option.selected %}✓ {% endif %}{{ option.label }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</nav>

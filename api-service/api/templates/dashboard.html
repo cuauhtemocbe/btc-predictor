@@ -307,6 +307,16 @@
             background: white;
         }
 
+        .strategy-assumptions {
+            margin: 12px 0 24px;
+            font-size: 0.85rem;
+            color: #4b5563;
+        }
+
+        .strategy-assumptions ul {
+            margin: 4px 0 0 20px;
+        }
+
         .best-strategy-row {
             background-color: #d1fae5 !important;
             font-weight: 600;
@@ -334,19 +344,57 @@
             margin-right: 8px;
             vertical-align: middle;
         }
+
+        /* Source blocks (#176): live and replay scored apart */
+        .source-blocks {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .source-block {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            border-top: 4px solid #1e3a8a;
+        }
+
+        .source-block[data-source="replay"] { border-top-color: #b45309; }
+        .source-block[data-source="combined"] { border-top-color: #6b7280; }
+
+        .source-block h3 { font-size: 18px; color: #1f2937; margin-bottom: 4px; }
+        .source-block .source-note { font-size: 13px; color: #4b5563; margin-bottom: 12px; }
+        .source-block dl { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 14px; }
+        .source-block dt { color: #4b5563; }
+        .source-block dd { font-weight: 600; color: #1f2937; text-align: right; }
+        .source-block .source-baselines {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .source-block .source-baselines h4 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+        .source-empty { font-size: 14px; color: #4b5563; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🪙 Bitcoin Price Predictions</h1>
+            <h1>🪙 {{ asset.label }} Price Predictions</h1>
             <p class="subtitle" id="subtitle">
                 {% set timeframe = request.query_params.get('timeframe', '1d') %}
-                {{ 'Weekly' if timeframe == '1w' else 'Daily' }} model performance tracking and evaluation
+                Daily model performance tracking and evaluation
             </p>
             <div style="margin-top: 12px;">
-                <a href="/models" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-right: 20px;">📊 Compare Models →</a>
-                <a href="/backtesting" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">📈 View Backtesting Results →</a>
+                <a href="/models?symbol={{ asset.symbol }}" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-right: 20px;">📊 Compare Models →</a>
+                <a href="/backtesting?symbol={{ asset.symbol }}" class="nav-link" style="color: #fbbf24; text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block;">📈 View Backtesting Results →</a>
             </div>
         </header>
 
@@ -354,12 +402,63 @@
         <div class="tabs-container">
             <div class="tabs">
                 <button class="tab active" data-timeframe="1d">Daily Predictions</button>
-                <button class="tab" data-timeframe="1w">Weekly Predictions</button>
             </div>
         </div>
 
         <div class="content">
+            {% include "_asset_selector.html" %}
+
+            {% include "_source_selector.html" %}
+
             {% if predictions %}
+                <div class="source-blocks">
+                    {% for block in summaries %}
+                    <section class="source-block" data-source="{{ block.key }}" aria-labelledby="source-{{ block.key }}">
+                        <h3 id="source-{{ block.key }}">{{ block.title }}</h3>
+                        <p class="source-note">{{ block.note }}</p>
+                        {% if block.count %}
+                        <dl>
+                            <dt>Predictions</dt>
+                            <dd class="source-count">{{ block.count }}</dd>
+                            <dt>Correct direction</dt>
+                            <dd class="source-accuracy">{{ "%.1f"|format(block.accuracy_pct) }}%</dd>
+                            <dt>Avg error</dt>
+                            <dd>{{ "%.2f"|format(block.avg_error_pct) }}%</dd>
+                            <dt>Simple PnL</dt>
+                            <dd class="source-pnl {{ 'positive-pnl' if block.total_pnl >= 0 else 'negative-pnl' }}">{{ '▲' if block.total_pnl >= 0 else '▼' }} ${{ "%.2f"|format(block.total_pnl) }}</dd>
+                        </dl>
+                        {% set b = block.baseline %}
+                        <div class="source-baselines">
+                            <h4>Baselines, same {{ block.count }} days</h4>
+                            {% if b and b.always_up_accuracy is not none %}
+                            <dl>
+                                <dt>Always-up accuracy</dt>
+                                <dd class="source-always-up">{{ "%.1f"|format(b.always_up_accuracy * 100) }}%</dd>
+                                {% if b.persistence_accuracy is not none %}
+                                <dt>Persistence accuracy (n={{ b.persistence_n_days }})</dt>
+                                <dd>{{ "%.1f"|format(b.persistence_accuracy * 100) }}%</dd>
+                                {% endif %}
+                                {% if b.buy_and_hold_pnl is not none %}
+                                <dt>Buy &amp; hold PnL</dt>
+                                <dd>${{ "%.2f"|format(b.buy_and_hold_pnl) }}</dd>
+                                {% endif %}
+                                {% if b.edge is not none %}
+                                <dt>Edge vs best baseline</dt>
+                                <dd class="source-edge">{{ "{:+.1f}".format(b.edge * 100) }} pts, {{ "p&lt;0.001"|safe if b.p_value < 0.001 else "p=" ~ "{:.3f}".format(b.p_value) }}</dd>
+                                {% endif %}
+                            </dl>
+                            {% else %}
+                            <p class="source-empty">Baselines are available for the daily timeframe only.</p>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <p class="source-empty source-count" data-count="0">0 predictions yet.</p>
+                        {% endif %}
+                    </section>
+                    {% endfor %}
+                </div>
+
+                <h2 class="section-title" style="margin-top: 0;">{{ 'Live + replay' if source == 'all' else ('Live' if source == 'live' else 'Replay') }} predictions</h2>
                 <div class="stats">
                     <div class="stat-card">
                         <div class="stat-label">Total Predictions</div>
@@ -406,6 +505,7 @@
                             </td>
                             <td>
                                 <span class="model-badge">{{ p.model_name }} v{{ p.model_version }}</span>
+                                {% if p.is_replay %}<span class="replay-badge" title="Simulated afterwards, not a live prediction">Replay</span>{% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -422,7 +522,8 @@
                             <th>Strategy</th>
                             <th>Total PnL</th>
                             <th>Win Rate</th>
-                            <th>Max Drawdown</th>
+                            <th>Worst trade</th>
+                            <th>Max drawdown</th>
                             <th>Avg Win</th>
                             <th>Avg Loss</th>
                             <th>Sharpe Ratio</th>
@@ -444,7 +545,8 @@
                                 {{ '▲' if strategy.total_pnl >= 0 else '▼' }} ${{ "%.2f"|format(strategy.total_pnl) }}
                             </td>
                             <td>{{ "%.1f"|format(strategy.win_rate * 100) }}%</td>
-                            <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.max_drawdown) }}</td>
+                            <td class="{{ 'positive-pnl' if strategy.worst_trade_pct >= 0 else 'negative-pnl' }}">{{ '▲' if strategy.worst_trade_pct >= 0 else '▼' }} {{ "%.2f"|format(strategy.worst_trade_pct) }}%</td>
+                            <td class="negative-pnl">▼ {{ "%.2f"|format(strategy.max_drawdown_pct) }}%</td>
                             <td class="positive-pnl">▲ ${{ "%.2f"|format(strategy.avg_win) }}</td>
                             <td class="negative-pnl">▼ ${{ "%.2f"|format(strategy.avg_loss) }}</td>
                             <td>{{ "%.2f"|format(strategy.sharpe_ratio) }}</td>
@@ -453,6 +555,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
+
+                {% include "_strategy_assumptions.html" %}
 
                 <div class="chart-container">
                     <canvas id="cumulativePnlChart"></canvas>
@@ -535,7 +639,8 @@
 
             {% else %}
                 <div class="empty-state">
-                    <h2>No predictions yet</h2>
+                    <h2>No predictions yet for {{ asset.label }}</h2>
+                    <p>No evaluated {{ asset.symbol }} predictions exist, so there is nothing to show here.</p>
                     <p>Check back tomorrow! The predictor runs daily at 7 AM.</p>
                 </div>
             {% endif %}

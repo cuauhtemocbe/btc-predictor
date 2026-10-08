@@ -83,12 +83,11 @@ CMD ["python", "-m", "fetch_price.main"]
 # ============================================================================
 FROM base AS ml-worker
 
-# Install ML dependencies (scikit-learn, tensorflow, xgboost, statsmodels, numpy)
+# Install ML dependencies (scikit-learn, numpy)
 RUN poetry install --no-interaction --no-ansi --only main --with ml --no-root
 
-# Copy daily and weekly worker code
+# Copy daily worker code
 COPY workers/daily/ ./workers/daily/
-COPY workers/weekly/ ./workers/weekly/
 
 # Create non-root user and set permissions
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser && \

@@ -49,7 +49,7 @@ jobs:
         run: |
           pip install poetry==2.4.1 poetry-plugin-export==1.10.1
           # --with api,fetch,ml,dev: los grupos api/fetch/ml son optional y `export` omite también
-          # dev por defecto; sin esto los bumps de fastapi/tensorflow/ruff/pytest (la mayoría de
+          # dev por defecto; sin esto los bumps de fastapi/scikit-learn/ruff/pytest (la mayoría de
           # los PRs) no pasarían por sfw.
           poetry export -f requirements.txt --without-hashes --with api,fetch,ml,dev -o /tmp/req-root.txt
           # Quita `-e file:///.../shared` (dependencia path de la raíz): es código local, no

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Model Comparison - BTC Predictor</title>
+    <title>Model Comparison - {{ asset.label }} - BTC Predictor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
@@ -236,6 +236,33 @@
             color: #6b7280;
         }
 
+        .table-scroll {
+            overflow-x: auto;
+        }
+
+        .verdict {
+            display: inline-block;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .verdict-beats { color: #047857; }
+        .verdict-inconclusive { color: #92400e; }
+        .verdict-not-beating { color: #b91c1c; }
+
+        .baseline-detail {
+            display: block;
+            margin-top: 2px;
+            font-size: 12px;
+            color: #4b5563;
+        }
+
+        .baseline-note {
+            margin-top: 16px;
+            font-size: 13px;
+            color: #4b5563;
+        }
+
         .chart-container {
             margin-top: 40px;
             padding: 24px;
@@ -282,13 +309,17 @@
     <div class="container">
         <header>
             <h1>📊 Model Performance Comparison</h1>
-            <p class="subtitle">Compare accuracy, PnL, and risk metrics across all ML models</p>
-            <a href="/" class="nav-link">← Back to Dashboard</a>
+            <p class="subtitle">Compare accuracy, PnL, and risk metrics per model; each row covers every version of the model</p>
+            <a href="/?symbol={{ asset.symbol }}" class="nav-link">← Back to Dashboard</a>
         </header>
 
         <div class="content">
+            {% include "_asset_selector.html" %}
+            {% include "_source_selector.html" %}
+
             <!-- Date Range Filter -->
             <form method="get" class="filter-form">
+                <input type="hidden" name="symbol" value="{{ asset.symbol }}">
                 <div class="filter-group">
                     <label class="filter-label" for="start_date">Start Date</label>
                     <input
@@ -315,13 +346,15 @@
             {% if not models %}
             <!-- Empty State -->
             <div class="empty-state">
-                <h2>No Models Found</h2>
-                <p>No models have been trained yet.</p>
-                <p style="margin-top: 16px;">To train models, run:</p>
-                <code>docker compose exec api python scripts/train_all_models.py</code>
+                <h2>No Models Found for {{ asset.label }}</h2>
+                <p>No {{ asset.symbol }} models have been trained yet, so there is nothing to compare.</p>
+                <p style="margin-top: 16px;">To train the model, run:</p>
+                <code>docker compose exec api python -m workers.daily.trainer</code>
+                <p style="margin-top: 16px;">The trainer saves the model and makes it the active one.</p>
             </div>
             {% else %}
             <!-- Model Comparison Table -->
+            <div class="table-scroll">
             <table>
                 <thead>
                     <tr>
@@ -332,7 +365,11 @@
                         <th>Total PnL</th>
                         <th>Win Rate</th>
                         <th>Sharpe</th>
-                        <th>Max DD</th>
+                        <th>Max drawdown</th>
+                        <th>Always-up</th>
+                        <th>Persistence</th>
+                        <th>Buy &amp; hold PnL</th>
+                        <th>vs best baseline</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -340,6 +377,10 @@
                     <tr class="{% if model.id == best_model_id %}best-model{% endif %}">
                         <td>
                             <span class="model-name">{{ model.name }}</span>
+                            <span class="baseline-detail version-detail" title="Metrics cover the predictions of every version">{{ model.versions_count }} version{{ '' if model.versions_count == 1 else 's' }}, trained on data up to {{ model.first_train_to }}{% if model.last_train_to != model.first_train_to %} to {{ model.last_train_to }}{% endif %}</span>
+                            {% if model.is_replay %}
+                            <span class="replay-badge" title="Every version was trained by the history replay, not a live model">Replay</span>
+                            {% endif %}
                             {% if model.is_active %}
                             <span class="badge active-badge">ACTIVE</span>
                             {% endif %}
@@ -392,18 +433,65 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if model.max_drawdown is not none %}
+                            {% if model.max_drawdown_pct is not none %}
                             <span class="metric-negative">
-                                ${{ "{:,.2f}".format(model.max_drawdown) }}
+                                {{ "{:,.2f}".format(model.max_drawdown_pct) }}%
                             </span>
                             {% else %}
                             <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        {% set b = model.baseline %}
+                        <td>
+                            {% if b and b.always_up_accuracy is not none %}
+                            {{ (b.always_up_accuracy * 100) | round(1) }}%
+                            <span class="baseline-detail">n={{ b.n_days }}</span>
+                            {% else %}
+                            <span class="metric-neutral" title="Baselines need evaluated daily predictions">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if b and b.persistence_accuracy is not none %}
+                            {{ (b.persistence_accuracy * 100) | round(1) }}%
+                            <span class="baseline-detail">n={{ b.persistence_n_days }}</span>
+                            {% else %}
+                            <span class="metric-neutral" title="Baselines need evaluated daily predictions">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if b and b.buy_and_hold_pnl is not none %}
+                            ${{ "{:,.2f}".format(b.buy_and_hold_pnl) }}
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td class="baseline-verdict" data-verdict="{{ b.verdict if b else '' }}">
+                            {% if b and b.verdict == 'beats' %}
+                            <span class="verdict verdict-beats">✓ Beats baseline</span>
+                            {% elif b and b.verdict == 'inconclusive' %}
+                            <span class="verdict verdict-inconclusive">≈ Not significant</span>
+                            {% elif b and b.verdict == 'not_beating' %}
+                            <span class="verdict verdict-not-beating">✗ Does not beat baseline</span>
+                            {% else %}
+                            <span class="metric-neutral">N/A</span>
+                            {% endif %}
+                            {% if b and b.edge is not none %}
+                            <span class="baseline-detail">
+                                {{ "{:+.1f}".format(b.edge * 100) }} pts vs {{ 'always-up' if b.best_baseline == 'always_up' else 'persistence' }}, {{ "p<0.001" if b.p_value < 0.001 else "p=" ~ "{:.3f}".format(b.p_value) }}, n={{ b.n_days }}
+                            </span>
                             {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
+            <p class="baseline-note">
+                Baselines are scored on the same days as each model. Always-up predicts a rise every day;
+                persistence repeats yesterday's direction. A model beats the baseline only when its accuracy is
+                higher and the gap is statistically significant (one-sided binomial test, p &lt; 0.05).
+                Baselines are available for the daily timeframe only.
+            </p>
 
             <!-- Cumulative PnL Chart -->
             <div class="chart-container">
@@ -428,10 +516,7 @@
 
         // Define colors for each model
         const modelColors = {
-            'linear_v1': '#3b82f6',    // Blue
-            'lstm_v1': '#10b981',      // Green
-            'xgboost_v1': '#f59e0b',   // Orange
-            'arima_v1': '#ef4444'      // Red
+            'linear': '#3b82f6'     // Blue
         };
 
         // Build datasets for Chart.js

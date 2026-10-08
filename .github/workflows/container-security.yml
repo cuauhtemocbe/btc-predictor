@@ -25,7 +25,7 @@ jobs:
   # run reports every vulnerable image; the job still fails if any step fails.
   # Images are built the way Railway builds them (`docker build -f <path> .`,
   # no build args or secrets) and are never pushed. Each image is removed after
-  # its scan to keep the runner's disk free for the next (TensorFlow) build.
+  # its scan to keep the runner's disk free for the next build.
   trivy-image:
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +66,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: docker image rm -f btc-predictor-fetch:scan || true
 
-      # Deployed via railway.daily.toml and railway.weekly.toml (same image)
+      # Deployed via railway.daily.toml (same image)
       - name: Build Dockerfile.ml
         if: ${{ !cancelled() }}
         run: docker build -f Dockerfile.ml -t btc-predictor-ml:scan .

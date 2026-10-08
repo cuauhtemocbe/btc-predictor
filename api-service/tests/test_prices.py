@@ -8,11 +8,19 @@ Covers all Gherkin scenarios from US-005:
 - Scenario 4: Invalid limit parameter
 """
 
+from collections.abc import Callable
 from datetime import datetime
+
+from httpx import AsyncClient
+from sqlalchemy.orm import Session
+
+from shared.db.models import Price
 
 
 # Scenario 1: Fetch last 24 prices (default)
-async def test_get_prices_default_limit(client, db_session, sample_prices):
+async def test_get_prices_default_limit(
+    client: AsyncClient, db_session: Session, sample_prices: Callable[..., list[Price]]
+) -> None:
     """
     Given the btc_prices table has 100 records
     When I send GET /api/prices
@@ -49,7 +57,9 @@ async def test_get_prices_default_limit(client, db_session, sample_prices):
 
 
 # Scenario 2: Fetch last 168 prices (1 week)
-async def test_get_prices_custom_limit(client, db_session, sample_prices):
+async def test_get_prices_custom_limit(
+    client: AsyncClient, db_session: Session, sample_prices: Callable[..., list[Price]]
+) -> None:
     """
     Given the btc_prices table has 500 records
     When I send GET /api/prices?limit=168
@@ -78,7 +88,7 @@ async def test_get_prices_custom_limit(client, db_session, sample_prices):
 
 
 # Scenario 3: Empty table returns empty array
-async def test_get_prices_empty_table(client, db_session):
+async def test_get_prices_empty_table(client: AsyncClient, db_session: Session) -> None:
     """
     Given the btc_prices table is empty
     When I send GET /api/prices
@@ -103,7 +113,9 @@ async def test_get_prices_empty_table(client, db_session):
 
 
 # Scenario 4: Invalid limit parameter (negative)
-async def test_get_prices_invalid_limit_negative(client, db_session):
+async def test_get_prices_invalid_limit_negative(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Given I send GET /api/prices?limit=-1
     Then the response status is 422 Unprocessable Entity
@@ -123,7 +135,9 @@ async def test_get_prices_invalid_limit_negative(client, db_session):
 
 
 # Scenario 5: Invalid limit parameter (zero)
-async def test_get_prices_invalid_limit_zero(client, db_session):
+async def test_get_prices_invalid_limit_zero(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Given I send GET /api/prices?limit=0
     Then the response status is 422 Unprocessable Entity
@@ -140,7 +154,9 @@ async def test_get_prices_invalid_limit_zero(client, db_session):
 
 
 # Scenario 6: Invalid limit parameter (exceeds max)
-async def test_get_prices_invalid_limit_exceeds_max(client, db_session):
+async def test_get_prices_invalid_limit_exceeds_max(
+    client: AsyncClient, db_session: Session
+) -> None:
     """
     Given I send GET /api/prices?limit=1001
     Then the response status is 422 Unprocessable Entity
@@ -159,7 +175,9 @@ async def test_get_prices_invalid_limit_exceeds_max(client, db_session):
 
 
 # Scenario 7: Verify ordering (newest first)
-async def test_get_prices_ordering(client, db_session, sample_prices):
+async def test_get_prices_ordering(
+    client: AsyncClient, db_session: Session, sample_prices: Callable[..., list[Price]]
+) -> None:
     """
     Verify that prices are returned in descending timestamp order (newest first).
     """
@@ -184,7 +202,9 @@ async def test_get_prices_ordering(client, db_session, sample_prices):
 
 
 # Scenario 8: Response schema validation
-async def test_get_prices_response_schema(client, db_session, sample_prices):
+async def test_get_prices_response_schema(
+    client: AsyncClient, db_session: Session, sample_prices: Callable[..., list[Price]]
+) -> None:
     """
     Verify that each price object in the response has all required fields
     with correct data types.
@@ -228,7 +248,9 @@ async def test_get_prices_response_schema(client, db_session, sample_prices):
         assert len(item["source"]) > 0
 
 
-async def test_get_prices_only_returns_btc(client, db_session, sample_prices):
+async def test_get_prices_only_returns_btc(
+    client: AsyncClient, db_session: Session, sample_prices: Callable[..., list[Price]]
+) -> None:
     """The endpoint serves BTC prices; other symbols in the table are excluded."""
     from datetime import UTC, timedelta
     from decimal import Decimal

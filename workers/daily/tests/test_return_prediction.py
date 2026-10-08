@@ -9,8 +9,7 @@ shared/tests/test_features.py.
 """
 
 import math
-from argparse import Namespace
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from shared import features
 from shared.db.models import Model, Prediction, Price
+from shared.utils import utc_today
 from workers.daily import predictor, trainer
 from workers.daily.models import LinearRegressionModel
 
@@ -31,7 +31,7 @@ def _add_random_walk(session: Session, days: int, last_close: float = 84000) -> 
     closes = np.exp(np.cumsum(rng.normal(0, 0.02, days)))
     closes = last_close * closes / closes[-1]
     volumes = 1000 * np.exp(rng.normal(0, 0.2, days))
-    first_day = date.today() - timedelta(days=days)
+    first_day = utc_today() - timedelta(days=days)
     session.add_all(
         Price(
             symbol="BTCUSDT",
@@ -55,7 +55,6 @@ def use_session(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> Session
     """The trainer and predictor open their own session; hand them the test one."""
     monkeypatch.setattr(trainer, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(predictor, "parse_args", lambda: Namespace(multi_model=False))
     return db_session
 
 
@@ -88,6 +87,17 @@ class TestLinearModelTrainsOnReturns:
         restored = LinearRegressionModel.deserialize(model.artifact)
         assert restored.n_features == features.feature_count(21)
 
+    def test_the_daily_cron_trains_only_the_linear_model(
+        self, use_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The cron's trainer.main trains Linear Regression only."""
+        _add_random_walk(use_session, 300)
+
+        exit_code = trainer.main()
+
+        assert exit_code == 0
+        assert [m.name for m in use_session.query(Model)] == ["linear_v1"]
+
     def test_trainer_feeds_return_features_not_price_levels(
         self, use_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -95,9 +105,9 @@ class TestLinearModelTrainsOnReturns:
         seen: dict[str, np.ndarray] = {}
         original_train = LinearRegressionModel.train
 
-        def spy(self, X, y):  # noqa: ANN001, ANN202
+        def spy(self: LinearRegressionModel, X: np.ndarray, y: np.ndarray) -> None:
             seen["X"], seen["y"] = X, y
-            return original_train(self, X, y)
+            original_train(self, X, y)
 
         monkeypatch.setattr(LinearRegressionModel, "train", spy)
 
@@ -164,7 +174,9 @@ class TestTrainingAndPredictionUseTheSameBuilder:
         original = features._feature_matrix
         stage = {"name": "train"}
 
-        def spy(closes, volumes, window_days):  # noqa: ANN001, ANN202
+        def spy(
+            closes: np.ndarray, volumes: np.ndarray, window_days: int
+        ) -> np.ndarray:
             windows.append((stage["name"], window_days))
             return original(closes, volumes, window_days)
 

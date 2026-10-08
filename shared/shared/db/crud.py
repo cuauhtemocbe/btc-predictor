@@ -1,16 +1,31 @@
-"""
-Database CRUD operations for BTC Predictor.
-
-Functions for querying and manipulating database records using SQLAlchemy ORM.
-"""
+"""Queries and updates on predictions and models."""
 
 from datetime import date
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, false, func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from shared.db.models import Model, Prediction
+from shared.db.models import (
+    REPLAY_PARAM,
+    VERSION_SUFFIX_PATTERN,
+    Model,
+    Prediction,
+    PredictionSource,
+    model_family,
+)
+
+
+def source_filter(source: PredictionSource) -> ColumnElement[bool]:
+    """SQL condition selecting the models of one source; needs ``models`` in the query.
+
+    A replay model has ``params["simulated"]`` true (``is_replay_params`` is the Python
+    twin); one without the key, or with it false, is live.
+    """
+    if source is PredictionSource.ALL:
+        return true()
+    is_replay = func.coalesce(Model.params[REPLAY_PARAM].as_boolean(), false())
+    return is_replay if source is PredictionSource.REPLAY else ~is_replay
 
 
 def get_evaluated_predictions(
@@ -18,24 +33,18 @@ def get_evaluated_predictions(
     from_date: date | None = None,
     to_date: date | None = None,
     timeframe: str | None = None,
+    symbol: str | None = None,
+    source: PredictionSource = PredictionSource.ALL,
 ) -> list[Prediction]:
-    """
-    Query all evaluated predictions (actual_price IS NOT NULL) with model info.
+    """Evaluated predictions (``actual_price`` set), newest ``predicted_for`` first.
 
     Args:
-        session: SQLAlchemy database session
-        from_date: Optional start date filter (inclusive)
-        to_date: Optional end date filter (inclusive)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w')
-
-    Returns:
-        List of Prediction objects with model relationship loaded,
-        ordered by predicted_for DESC (most recent first)
-
-    Example:
-        >>> predictions = get_evaluated_predictions(session, from_date=date(2026, 5, 1))
-        >>> for p in predictions:
-        ...     print(f"{p.predicted_for}: {p.error_pct}% error")
+        session: Database session.
+        from_date: Inclusive lower bound on ``predicted_for``.
+        to_date: Inclusive upper bound on ``predicted_for``.
+        timeframe: Optional timeframe filter (``1d``).
+        symbol: Optional filter on the predicting model's symbol.
+        source: ``live``, ``replay`` or ``all``, by the predicting model.
     """
     query = (
         select(Prediction)
@@ -43,15 +52,16 @@ def get_evaluated_predictions(
         .where(Prediction.actual_price.isnot(None))
     )
 
-    # Apply date range filters
     if from_date:
         query = query.where(Prediction.predicted_for >= from_date)
     if to_date:
         query = query.where(Prediction.predicted_for <= to_date)
     if timeframe:
         query = query.where(Prediction.timeframe == timeframe)
+    if symbol:
+        query = query.where(Model.symbol == symbol)
+    query = query.where(source_filter(source))
 
-    # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())
 
     result = session.execute(query)
@@ -64,28 +74,13 @@ async def get_evaluated_predictions_async(
     to_date: date | None = None,
     timeframe: str | None = None,
 ) -> list[Prediction]:
-    """
-    Async version of get_evaluated_predictions.
-
-    Query all evaluated predictions (actual_price IS NOT NULL) with model info.
-
-    Args:
-        session: SQLAlchemy async database session
-        from_date: Optional start date filter (inclusive)
-        to_date: Optional end date filter (inclusive)
-        timeframe: Optional timeframe filter ('1h', '1d', '1w')
-
-    Returns:
-        List of Prediction objects with model relationship loaded,
-        ordered by predicted_for DESC (most recent first)
-    """
+    """Async ``get_evaluated_predictions`` without the symbol and source filters."""
     query = (
         select(Prediction)
         .join(Model, Prediction.model_id == Model.id)
         .where(Prediction.actual_price.isnot(None))
     )
 
-    # Apply date range filters
     if from_date:
         query = query.where(Prediction.predicted_for >= from_date)
     if to_date:
@@ -93,7 +88,6 @@ async def get_evaluated_predictions_async(
     if timeframe:
         query = query.where(Prediction.timeframe == timeframe)
 
-    # Order by most recent first
     query = query.order_by(Prediction.predicted_for.desc())
 
     result = await session.execute(query)
@@ -101,29 +95,12 @@ async def get_evaluated_predictions_async(
 
 
 def get_active_model(session: Session, timeframe: str = "1d") -> Model | None:
-    """
-    Get an active model for a given timeframe.
+    """An active model of ``timeframe``, or None.
 
-    At most one active version per (name, timeframe) is allowed (see
-    ix_models_one_active_version_per_name_timeframe), but multiple
-    different-named models can be active within the same timeframe at once
-    (multi-model prediction mode, US-025). This returns the first match --
-    callers that need every active model for a timeframe should query
-    directly instead.
-
-    Args:
-        session: SQLAlchemy database session
-        timeframe: Prediction horizon to look up ('1h', '1d', '1w').
-            Defaults to '1d' for backward compatibility with callers
-            that only ever dealt with daily models.
-
-    Returns:
-        An active Model object for that timeframe, or None if none is active
-
-    Example:
-        >>> active = get_active_model(session, timeframe="1d")
-        >>> if active:
-        ...     print(f"Active model: {active.name} v{active.version}")
+    The partial unique index ``ix_models_one_active_version_per_name_timeframe`` allows
+    one active version per (symbol, family, timeframe), so several families can be
+    active at once; this returns the first match. Callers that need every active model
+    query directly.
     """
     query = (
         select(Model)
@@ -135,42 +112,19 @@ def get_active_model(session: Session, timeframe: str = "1d") -> Model | None:
 
 
 def get_all_models(session: Session) -> list[Model]:
-    """
-    Get all models ordered by trained_at DESC (most recent first).
-
-    Args:
-        session: SQLAlchemy database session
-
-    Returns:
-        List of all Model objects ordered by training date
-
-    Example:
-        >>> models = get_all_models(session)
-        >>> for m in models:
-        ...     print(f"{m.name} v{m.version} - Active: {m.is_active}")
-    """
+    """All models, most recently trained first."""
     query = select(Model).order_by(Model.trained_at.desc())
     result = session.execute(query)
     return list(result.scalars().all())
 
 
 def deactivate_all_models(session: Session, timeframe: str | None = None) -> int:
-    """
-    Set is_active=False for models, optionally scoped to one timeframe.
+    """Set ``is_active`` to False on every active model, or only those of ``timeframe``.
 
-    Args:
-        session: SQLAlchemy database session
-        timeframe: If given, only deactivate models for this timeframe
-            ('1h', '1d', '1w'). If None, deactivate every active model
-            across all timeframes.
+    Does not commit.
 
     Returns:
-        Number of models deactivated
-
-    Example:
-        >>> count = deactivate_all_models(session)
-        >>> session.commit()
-        >>> print(f"Deactivated {count} models")
+        Number of models deactivated.
     """
     query = select(Model).where(Model.is_active.is_(True))
     if timeframe is not None:
@@ -185,39 +139,18 @@ def deactivate_all_models(session: Session, timeframe: str | None = None) -> int
 
 
 def activate_model(session: Session, model_id: int) -> Model:
-    """
-    Atomically activate a specific model by ID, replacing prior versions
-    of that same (name, timeframe).
+    """Activate a model and deactivate the other versions of its family, atomically.
 
-    Deactivates every other model that shares the target model's name AND
-    timeframe -- e.g. activating a new "linear_v1"/"1d" model deactivates
-    the previous active "linear_v1"/"1d" version, but never touches an
-    active "xgboost_v1"/"1d" or "linear_v1"/"1w" model -- and activates the
-    target, committing both changes as a single transaction. This scoping
-    is what lets multi-model prediction mode (US-025) keep multiple
-    different-named models active at once within the same timeframe.
-
-    The partial unique index ix_models_one_active_version_per_name_timeframe
-    is the final guard: if a concurrent activation for the same
-    (name, timeframe) commits first, this raises IntegrityError and the
-    whole transaction is rolled back, leaving the previous active model
-    untouched.
-
-    Args:
-        session: SQLAlchemy database session
-        model_id: ID of the model to activate
-
-    Returns:
-        The activated Model object
+    The family is the name without its ``_v<N>`` suffix (``model_family``): activating
+    ``linear_v2`` deactivates the active ``linear_v1`` of the same symbol and timeframe,
+    and leaves other families, symbols and timeframes alone. The partial unique index
+    ``ix_models_one_active_version_per_name_timeframe`` is the final guard: if a
+    concurrent activation of the same family commits first, this raises and rolls back,
+    leaving the previous active model untouched.
 
     Raises:
-        ValueError: If model_id doesn't exist
-        sqlalchemy.exc.IntegrityError: If a concurrent activation for the
-            same (name, timeframe) wins the race (rolled back first)
-
-    Example:
-        >>> model = activate_model(session, model_id=42)
-        >>> print(f"Activated: {model.name} v{model.version}")
+        ValueError: If ``model_id`` does not exist.
+        sqlalchemy.exc.IntegrityError: If a concurrent activation wins the race.
     """
     model = session.get(Model, model_id)
 
@@ -225,12 +158,13 @@ def activate_model(session: Session, model_id: int) -> Model:
         raise ValueError(f"Model with id={model_id} does not exist")
 
     try:
-        # Deactivate other active versions of the same (name, timeframe) via
-        # a single UPDATE (not the ORM-object loop deactivate_all_models()
-        # uses) so this doesn't require those rows to already be loaded.
         session.execute(
             update(Model)
-            .where(Model.name == model.name)
+            .where(Model.symbol == model.symbol)
+            .where(
+                func.regexp_replace(Model.name, VERSION_SUFFIX_PATTERN, "")
+                == model_family(model.name)
+            )
             .where(Model.timeframe == model.timeframe)
             .where(Model.id != model_id)
             .where(Model.is_active.is_(True))

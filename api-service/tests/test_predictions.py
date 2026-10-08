@@ -8,6 +8,7 @@ Tests the /api/predictions/history endpoint with various scenarios:
 """
 
 import pickle
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -49,7 +50,9 @@ def sample_model(db_session: Session) -> Model:
 
 
 @pytest.fixture
-def sample_predictions_factory(db_session: Session, sample_model: Model):
+def sample_predictions_factory(
+    db_session: Session, sample_model: Model
+) -> Callable[..., list[Prediction]]:
     """
     Factory fixture for creating prediction records.
 
@@ -60,7 +63,7 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
 
     def _create_predictions(
         count: int = 10, evaluated: bool = True, start_days_ago: int = 0
-    ):
+    ) -> list[Prediction]:
         predictions = []
         base_date = date.today() - timedelta(days=start_days_ago)
 
@@ -129,8 +132,8 @@ def sample_predictions_factory(db_session: Session, sample_model: Model):
 async def test_fetch_all_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 30 evaluated records (actual_price != NULL)
     And 5 unevaluated records (actual_price = NULL)
@@ -182,8 +185,8 @@ async def test_fetch_all_evaluated_predictions(
 async def test_no_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given all predictions have actual_price = NULL
     When I send GET /api/predictions/history
@@ -208,8 +211,8 @@ async def test_no_evaluated_predictions(
 async def test_filter_by_date_range(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering predictions by date range.
 
@@ -248,8 +251,8 @@ async def test_filter_by_date_range(
 async def test_filter_from_date_only(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering with only from_date parameter.
     Should return all predictions from that date forward.
@@ -280,8 +283,8 @@ async def test_filter_from_date_only(
 async def test_filter_to_date_only(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test filtering with only to_date parameter.
     Should return all predictions up to that date.
@@ -316,8 +319,8 @@ async def test_filter_to_date_only(
 async def test_get_total_pnl_with_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given the predictions table has 30 evaluated records
     And the sum of pnl_simulated is 12345.67
@@ -329,7 +332,7 @@ async def test_get_total_pnl_with_evaluated_predictions(
     predictions = sample_predictions_factory(count=30, evaluated=True)
 
     # Calculate expected total PnL (predictions have pnl_simulated already set)
-    expected_pnl = sum(float(p.pnl_simulated) for p in predictions)
+    expected_pnl = sum(float(p.pnl_simulated or 0) for p in predictions)
     expected_count = 30
 
     # Act: Fetch total PnL
@@ -354,8 +357,8 @@ async def test_get_total_pnl_with_evaluated_predictions(
 async def test_get_total_pnl_no_evaluated_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Given all predictions have pnl_simulated = NULL
     When I send GET /api/predictions/pnl
@@ -380,8 +383,8 @@ async def test_get_total_pnl_no_evaluated_predictions(
 async def test_get_total_pnl_mixed_predictions(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_factory,
-):
+    sample_predictions_factory: Callable[..., list[Prediction]],
+) -> None:
     """
     Test that PnL endpoint only counts evaluated predictions and ignores unevaluated.
     """
@@ -391,7 +394,7 @@ async def test_get_total_pnl_mixed_predictions(
     sample_predictions_factory(count=10, evaluated=False, start_days_ago=20)
 
     # Calculate expected PnL (only from evaluated predictions)
-    expected_pnl = sum(float(p.pnl_simulated) for p in evaluated)
+    expected_pnl = sum(float(p.pnl_simulated or 0) for p in evaluated)
     expected_count = 20
 
     # Act
@@ -411,7 +414,7 @@ async def test_get_total_pnl_with_losses(
     client: AsyncClient,
     db_session: Session,
     sample_model: Model,
-):
+) -> None:
     """
     Test that PnL endpoint correctly handles negative total PnL.
     """
@@ -467,7 +470,9 @@ async def test_get_total_pnl_with_losses(
 
 
 @pytest.fixture
-def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
+def sample_predictions_with_pnl(
+    db_session: Session, sample_model: Model
+) -> list[Prediction]:
     """Create sample predictions with all 4 PnL strategy values."""
     predictions = [
         Prediction(
@@ -548,8 +553,8 @@ def sample_predictions_with_pnl(db_session: Session, sample_model: Model):
 async def test_get_strategies_endpoint(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     Given the predictions table has 5 evaluated predictions with PnL values
     When I send GET /api/predictions/strategies
@@ -578,7 +583,8 @@ async def test_get_strategies_endpoint(
         assert "color" in strategy
         assert "total_pnl" in strategy
         assert "win_rate" in strategy
-        assert "max_drawdown" in strategy
+        assert "worst_trade_pct" in strategy
+        assert "max_drawdown_pct" in strategy
         assert "avg_win" in strategy
         assert "avg_loss" in strategy
         assert "sharpe_ratio" in strategy
@@ -592,14 +598,14 @@ async def test_get_strategies_endpoint(
 async def test_strategies_metrics_calculation(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     Given predictions with pnl_long_short values: [100, -50, 200, -30, 150]
     When the backend calculates metrics for "Long/Short" strategy
     Then Total PnL = 370
     And Win Rate = 60% (3 wins out of 5 trades)
-    And Max Drawdown = -50 (worst single loss)
+    And Worst trade = -0.1% (-50 at 51,000) and Max drawdown = -0.1%
     And Avg Win = 150 (mean of 100, 200, 150)
     And Avg Loss = -40 (mean of -50, -30)
     """
@@ -613,7 +619,9 @@ async def test_strategies_metrics_calculation(
     # Assert metrics
     assert long_short["total_pnl"] == 370.0
     assert long_short["win_rate"] == 0.6  # 60%
-    assert long_short["max_drawdown"] == -50.0
+    assert long_short["worst_trade_pct"] == -0.1
+    assert long_short["max_drawdown_pct"] == -0.1
+    assert "max_drawdown" not in long_short
     assert long_short["avg_win"] == 150.0  # (100 + 200 + 150) / 3
     assert long_short["avg_loss"] == -40.0  # (-50 + -30) / 2
     assert long_short["trade_count"] == 5
@@ -625,8 +633,8 @@ async def test_strategies_metrics_calculation(
 async def test_cumulative_pnl_chart_data(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     When I fetch strategies endpoint
     Then cumulative_pnl is a list of objects with date and cumulative_pnl
@@ -658,7 +666,7 @@ async def test_cumulative_pnl_chart_data(
 async def test_strategies_with_zero_trades(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given there are no evaluated predictions
     When I fetch strategies endpoint
@@ -674,7 +682,8 @@ async def test_strategies_with_zero_trades(
     for strategy in data["strategies"]:
         assert strategy["total_pnl"] == 0.0
         assert strategy["win_rate"] == 0.0
-        assert strategy["max_drawdown"] == 0.0
+        assert strategy["worst_trade_pct"] == 0.0
+        assert strategy["max_drawdown_pct"] == 0.0
         assert strategy["avg_win"] == 0.0
         assert strategy["avg_loss"] == 0.0
         assert strategy["sharpe_ratio"] == 0.0
@@ -687,8 +696,8 @@ async def test_strategies_with_zero_trades(
 async def test_all_four_strategies_returned(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_pnl,
-):
+    sample_predictions_with_pnl: list[Prediction],
+) -> None:
     """
     When I fetch strategies endpoint
     Then I receive 4 strategies: Simple, Long/Short, Threshold, Realistic
@@ -725,23 +734,18 @@ async def test_all_four_strategies_returned(
 
 
 @pytest.fixture
-def sample_predictions_with_timeframes(db_session: Session, sample_model: Model):
-    """
-    Create predictions with different timeframes (daily and weekly).
-
-    Returns:
-        Tuple of (daily_predictions, weekly_predictions)
-    """
+def sample_daily_predictions(
+    db_session: Session, sample_model: Model
+) -> list[Prediction]:
+    """Create 5 evaluated daily predictions (the only timeframe left, #183)."""
     daily_predictions = []
-    weekly_predictions = []
 
-    # Create 5 daily predictions
     for i in range(5):
         predicted_for = date.today() - timedelta(days=i)
         prediction = Prediction(
             model_id=sample_model.id,
             predicted_for=predicted_for,
-            timeframe="1d",  # Daily
+            timeframe="1d",
             predicted_at=datetime.now(UTC) - timedelta(days=i + 1),
             price_at_prediction=Decimal("67000") + Decimal(i * 100),
             predicted_price=Decimal("67500") + Decimal(i * 100),
@@ -758,222 +762,117 @@ def sample_predictions_with_timeframes(db_session: Session, sample_model: Model)
         db_session.add(prediction)
         daily_predictions.append(prediction)
 
-    # Create 3 weekly predictions
-    for i in range(3):
-        predicted_for = date.today() - timedelta(days=i * 7)
-        prediction = Prediction(
-            model_id=sample_model.id,
-            predicted_for=predicted_for,
-            timeframe="1w",  # Weekly
-            predicted_at=datetime.now(UTC) - timedelta(days=i * 7 + 7),
-            price_at_prediction=Decimal("65000") + Decimal(i * 200),
-            predicted_price=Decimal("66000") + Decimal(i * 200),
-            actual_price=Decimal("66500") + Decimal(i * 200),
-            evaluated_at=datetime.now(UTC) - timedelta(days=i * 7),
-            error_abs=Decimal("500"),
-            error_pct=Decimal("0.75"),
-            direction_correct=True,
-            pnl_simulated=Decimal("2000"),
-            pnl_long_short=Decimal("2000"),
-            pnl_threshold=Decimal("2000"),
-            pnl_realistic=Decimal("1900"),
-        )
-        db_session.add(prediction)
-        weekly_predictions.append(prediction)
-
     db_session.commit()
-    for pred in daily_predictions + weekly_predictions:
+    for pred in daily_predictions:
         db_session.refresh(pred)
 
-    return daily_predictions, weekly_predictions
+    return daily_predictions
 
 
-# Gherkin Scenario: API endpoint filters predictions by timeframe
 @pytest.mark.asyncio
-async def test_filter_predictions_by_timeframe_1w(
-    client: AsyncClient,
-    db_session: Session,
-    sample_predictions_with_timeframes,
-):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/predictions/history?timeframe=1w",
+        "/api/predictions/history?timeframe=1h",
+        "/api/predictions/pnl?timeframe=1w",
+        "/api/predictions/strategies?timeframe=1w",
+    ],
+)
+async def test_weekly_and_hourly_timeframes_are_rejected(
+    client: AsyncClient, path: str
+) -> None:
     """
-    Gherkin: Filter predictions by timeframe=1w.
+    Gherkin: The 1w timeframe no longer exists (#183).
 
-    Given the predictions table has 5 daily and 3 weekly predictions
-    When I send GET /api/predictions/history?timeframe=1w
-    Then I receive only weekly predictions (3 records)
-    And all returned predictions have timeframe = '1w'
+    Given a request with timeframe=1w (or 1h)
+    When the history, pnl or strategies endpoint is called
+    Then the API answers 422
     """
-    daily_preds, weekly_preds = sample_predictions_with_timeframes
+    response = await client.get(path)
 
-    # Act
-    response = await client.get("/api/predictions/history?timeframe=1w")
-
-    # Assert
-    assert response.status_code == 200
-    predictions = response.json()
-    assert isinstance(predictions, list)
-    assert len(predictions) == 3  # Only weekly predictions
-
-    # Verify all are weekly
-    for pred in predictions:
-        assert pred["timeframe"] == "1w"
+    assert response.status_code == 422
 
 
-# Gherkin Scenario: API endpoint filters predictions by timeframe
 @pytest.mark.asyncio
 async def test_filter_predictions_by_timeframe_1d(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_daily_predictions: list[Prediction],
+) -> None:
     """
     Gherkin: Filter predictions by timeframe=1d.
 
-    Given the predictions table has 5 daily and 3 weekly predictions
+    Given the predictions table has 5 daily predictions
     When I send GET /api/predictions/history?timeframe=1d
-    Then I receive only daily predictions (5 records)
-    And all returned predictions have timeframe = '1d'
+    Then I receive the 5 predictions, all with timeframe = '1d'
     """
-    daily_preds, weekly_preds = sample_predictions_with_timeframes
-
-    # Act
     response = await client.get("/api/predictions/history?timeframe=1d")
 
-    # Assert
     assert response.status_code == 200
     predictions = response.json()
-    assert isinstance(predictions, list)
-    assert len(predictions) == 5  # Only daily predictions
-
-    # Verify all are daily
-    for pred in predictions:
-        assert pred["timeframe"] == "1d"
+    assert len(predictions) == 5
+    assert {pred["timeframe"] for pred in predictions} == {"1d"}
 
 
-# Gherkin Scenario: API endpoint returns all predictions when no timeframe filter
 @pytest.mark.asyncio
 async def test_no_timeframe_filter_returns_all(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
-    """
-    Gherkin: No timeframe filter returns all predictions.
-
-    Given the predictions table has 5 daily and 3 weekly predictions
-    When I send GET /api/predictions/history (no timeframe param)
-    Then I receive all 8 predictions
-    And they include both daily and weekly timeframes
-    """
-    daily_preds, weekly_preds = sample_predictions_with_timeframes
-
-    # Act
+    sample_daily_predictions: list[Prediction],
+) -> None:
+    """Without a timeframe param the history returns every prediction."""
     response = await client.get("/api/predictions/history")
 
-    # Assert
     assert response.status_code == 200
     predictions = response.json()
-    assert isinstance(predictions, list)
-    assert len(predictions) == 8  # All predictions (5 + 3)
-
-    # Verify both timeframes present
-    timeframes = {pred["timeframe"] for pred in predictions}
-    assert "1d" in timeframes
-    assert "1w" in timeframes
+    assert len(predictions) == 5
+    assert {pred["timeframe"] for pred in predictions} == {"1d"}
 
 
-# Gherkin Scenario: Combine timeframe filter with date range
 @pytest.mark.asyncio
 async def test_timeframe_filter_with_date_range(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
+    sample_daily_predictions: list[Prediction],
+) -> None:
     """
     Gherkin: Combine timeframe filter with date range.
 
-    Given the predictions table has multiple daily and weekly predictions
-    When I send GET /api/predictions/history?timeframe=1w&from=<date>&to=<date>
-    Then I receive only weekly predictions within the date range
+    When I send GET /api/predictions/history?timeframe=1d&from=<date>&to=<date>
+    Then I receive only the predictions within the date range
     """
-    daily_preds, weekly_preds = sample_predictions_with_timeframes
-
-    # Get the middle weekly prediction's date
-    middle_pred = weekly_preds[1]
+    middle_pred = sample_daily_predictions[2]
     from_date = (middle_pred.predicted_for - timedelta(days=1)).isoformat()
     to_date = (middle_pred.predicted_for + timedelta(days=1)).isoformat()
 
-    # Act
     response = await client.get(
-        f"/api/predictions/history?timeframe=1w&from={from_date}&to={to_date}"
+        f"/api/predictions/history?timeframe=1d&from={from_date}&to={to_date}"
     )
 
-    # Assert
     assert response.status_code == 200
     predictions = response.json()
-    assert isinstance(predictions, list)
-
-    # Should return at least the middle prediction
-    assert len(predictions) >= 1
-
-    # Verify all are weekly and within date range
+    assert len(predictions) == 3
     for pred in predictions:
-        assert pred["timeframe"] == "1w"
+        assert pred["timeframe"] == "1d"
         pred_date = date.fromisoformat(pred["predicted_for"])
         assert date.fromisoformat(from_date) <= pred_date <= date.fromisoformat(to_date)
 
 
-# ============================================================================
-# Gherkin scenarios: /pnl and /strategies respect timeframe (issue #67)
-# ============================================================================
-
-
 @pytest.mark.asyncio
-async def test_total_pnl_does_not_mix_timeframes(
+async def test_total_pnl_for_the_daily_timeframe(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
-    """
-    Scenario: Total PnL does not mix timeframes
+    sample_daily_predictions: list[Prediction],
+) -> None:
+    """5 daily predictions x $1200 = $6000, with the filter or without it."""
+    explicit = await client.get("/api/predictions/pnl?timeframe=1d")
+    default = await client.get("/api/predictions/pnl")
 
-    Given a model has daily and weekly PnL records
-    When total PnL is requested for one timeframe
-    Then the returned value contains only records from that timeframe
-    """
-    # 5 daily predictions x $1200 = $6000
-    response_daily = await client.get("/api/predictions/pnl?timeframe=1d")
-    assert response_daily.status_code == 200
-    assert response_daily.json()["total_pnl"] == 6000.0
-    assert response_daily.json()["evaluated_predictions"] == 5
-
-    # 3 weekly predictions x $2000 = $6000
-    response_weekly = await client.get("/api/predictions/pnl?timeframe=1w")
-    assert response_weekly.status_code == 200
-    assert response_weekly.json()["total_pnl"] == 6000.0
-    assert response_weekly.json()["evaluated_predictions"] == 3
-
-
-@pytest.mark.asyncio
-async def test_total_pnl_missing_timeframe_applies_default(
-    client: AsyncClient,
-    db_session: Session,
-    sample_predictions_with_timeframes,
-):
-    """
-    Scenario: Missing timeframe applies the documented default
-
-    Given a metrics request does not specify a timeframe
-    When the request is processed
-    Then the API applies DEFAULT_TIMEFRAME ("1d")
-    And it does not silently combine daily and weekly predictions
-    """
-    response = await client.get("/api/predictions/pnl")
-
-    assert response.status_code == 200
-    # Same result as explicitly requesting timeframe=1d, NOT 6000+6000=12000
-    assert response.json()["total_pnl"] == 6000.0
-    assert response.json()["evaluated_predictions"] == 5
+    for response in (explicit, default):
+        assert response.status_code == 200
+        assert response.json()["total_pnl"] == 6000.0
+        assert response.json()["evaluated_predictions"] == 5
 
 
 @pytest.mark.asyncio
@@ -991,29 +890,17 @@ async def test_total_pnl_invalid_timeframe_is_rejected(client: AsyncClient) -> N
 
 
 @pytest.mark.asyncio
-async def test_strategies_does_not_mix_timeframes(
+async def test_strategies_for_the_daily_timeframe(
     client: AsyncClient,
     db_session: Session,
-    sample_predictions_with_timeframes,
-):
-    """
-    Given a model has daily and weekly PnL records
-    When strategy metrics are requested for one timeframe
-    Then trade_count reflects only that timeframe
-    """
-    response_daily = await client.get("/api/predictions/strategies?timeframe=1d")
-    assert response_daily.status_code == 200
-    simple_daily = next(
-        s for s in response_daily.json()["strategies"] if s["name"] == "simple"
-    )
-    assert simple_daily["trade_count"] == 5
+    sample_daily_predictions: list[Prediction],
+) -> None:
+    """trade_count counts the daily predictions."""
+    response = await client.get("/api/predictions/strategies?timeframe=1d")
 
-    response_weekly = await client.get("/api/predictions/strategies?timeframe=1w")
-    assert response_weekly.status_code == 200
-    simple_weekly = next(
-        s for s in response_weekly.json()["strategies"] if s["name"] == "simple"
-    )
-    assert simple_weekly["trade_count"] == 3
+    assert response.status_code == 200
+    simple = next(s for s in response.json()["strategies"] if s["name"] == "simple")
+    assert simple["trade_count"] == 5
 
 
 @pytest.mark.asyncio

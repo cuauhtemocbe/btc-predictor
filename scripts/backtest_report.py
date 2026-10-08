@@ -20,6 +20,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -54,7 +55,7 @@ class RunReport:
     """Everything the report shows about one run."""
 
     run_id: UUID
-    params: dict
+    params: dict[str, Any]
     first_day: date
     last_day: date
     sections: dict[str, SliceReport]

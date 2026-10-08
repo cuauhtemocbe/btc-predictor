@@ -1,6 +1,9 @@
 """Tests for the ``scripts/load_binance_history.py`` command-line entry point."""
 
+from typing import Literal, Self
+
 import pytest
+from sqlalchemy.orm import Session
 
 from scripts import load_binance_history
 from shared.binance_vision import (
@@ -11,45 +14,49 @@ from shared.binance_vision import (
 
 
 @pytest.fixture
-def calls(monkeypatch):
+def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
     """Replace loader collaborators with recorders; the DB is never touched."""
-    recorded = {"load": [], "validate": []}
-    monkeypatch.setattr(
-        load_binance_history,
-        "load_history",
-        lambda session, symbol: recorded["load"].append(symbol) or 5,
-    )
-    monkeypatch.setattr(
-        load_binance_history,
-        "validate_history",
-        lambda session, symbol: recorded["validate"].append(symbol),
-    )
+    recorded: dict[str, list[str]] = {"load": [], "validate": []}
+
+    def load_history(session: Session, symbol: str) -> int:
+        recorded["load"].append(symbol)
+        return 5
+
+    def validate_history(session: Session, symbol: str) -> None:
+        recorded["validate"].append(symbol)
+
+    monkeypatch.setattr(load_binance_history, "load_history", load_history)
+    monkeypatch.setattr(load_binance_history, "validate_history", validate_history)
     monkeypatch.setattr(load_binance_history, "SessionLocal", lambda: _FakeSession())
     return recorded
 
 
 class _FakeSession:
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> Literal[False]:
         return False
 
 
-def test_loads_and_validates_every_symbol_by_default(calls):
+def test_loads_and_validates_every_symbol_by_default(
+    calls: dict[str, list[str]],
+) -> None:
     assert load_binance_history.main([]) == 0
 
     assert calls["load"] == ["BTCUSDT", "PAXGUSDT"]
     assert calls["validate"] == ["BTCUSDT", "PAXGUSDT"]
 
 
-def test_symbols_option_limits_the_load(calls):
+def test_symbols_option_limits_the_load(calls: dict[str, list[str]]) -> None:
     assert load_binance_history.main(["--symbols", "PAXGUSDT"]) == 0
 
     assert calls["load"] == ["PAXGUSDT"]
 
 
-def test_check_only_probes_the_host_and_writes_nothing(calls, monkeypatch):
+def test_check_only_probes_the_host_and_writes_nothing(
+    calls: dict[str, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         load_binance_history, "check_reachability", lambda: "https://x/y.CHECKSUM"
     )
@@ -59,8 +66,8 @@ def test_check_only_probes_the_host_and_writes_nothing(calls, monkeypatch):
     assert calls["load"] == []
 
 
-def test_blocked_host_fails_the_check(monkeypatch):
-    def blocked():
+def test_blocked_host_fails_the_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    def blocked() -> None:
         raise HttpStatusError("https://x/y", 451)
 
     monkeypatch.setattr(load_binance_history, "check_reachability", blocked)
@@ -68,8 +75,8 @@ def test_blocked_host_fails_the_check(monkeypatch):
     assert load_binance_history.main(["--check"]) == 1
 
 
-def test_load_error_gives_exit_code_1(monkeypatch):
-    def failing(session, symbol):
+def test_load_error_gives_exit_code_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(session: Session, symbol: str) -> int:
         raise ChecksumMismatchError("bad checksum for BTCUSDT-1d-2025-01.zip")
 
     monkeypatch.setattr(load_binance_history, "load_history", failing)
@@ -78,8 +85,10 @@ def test_load_error_gives_exit_code_1(monkeypatch):
     assert load_binance_history.main([]) == 1
 
 
-def test_validation_error_gives_exit_code_1(calls, monkeypatch):
-    def invalid(session, symbol):
+def test_validation_error_gives_exit_code_1(
+    calls: dict[str, list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def invalid(session: Session, symbol: str) -> None:
         raise HistoryValidationError(symbol, [], [])
 
     monkeypatch.setattr(load_binance_history, "validate_history", invalid)

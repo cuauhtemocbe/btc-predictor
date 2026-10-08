@@ -49,3 +49,4 @@ Thumbs.db
 mutation_output.txt
 mutation_testing_report.md
 opencode.json
+mutation-output/

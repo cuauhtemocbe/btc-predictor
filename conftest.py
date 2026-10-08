@@ -6,6 +6,10 @@ to eliminate race conditions and reduce DDL overhead.
 """
 
 import os
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime, tzinfo
+from typing import Self
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -19,7 +23,7 @@ from testdb import database_name_for_tests, ensure_database
 def _limit_threads_per_xdist_worker() -> None:
     """Keep numeric libraries to one thread per xdist worker.
 
-    TensorFlow, XGBoost and BLAS each default to one thread per core. With N
+    BLAS libraries default to one thread per core. With N
     workers that oversubscribes the CPU and makes the parallel run slower than
     the serial one. Must run before those libraries are imported.
     """
@@ -28,8 +32,6 @@ def _limit_threads_per_xdist_worker() -> None:
             "OMP_NUM_THREADS",
             "OPENBLAS_NUM_THREADS",
             "MKL_NUM_THREADS",
-            "TF_NUM_INTRAOP_THREADS",
-            "TF_NUM_INTEROP_THREADS",
         ):
             os.environ.setdefault(variable, "1")
 
@@ -49,50 +51,6 @@ def _point_tests_at_test_database() -> None:
     )
     ensure_database(url)
     os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
-
-
-NON_LINEAR_SKIP_REASON = (
-    "Out of scope for the Linear-only reboot; re-enable with "
-    "--run-non-linear (tracked in #124)"
-)
-
-
-# These modules import TensorFlow/XGBoost/statsmodels at the top, so merely
-# collecting them costs ~20 s even when every test in them is skipped.
-NON_LINEAR_MODULES = frozenset(
-    {
-        "test_lstm_model.py",
-        "test_xgboost_model.py",
-        "test_arima_model.py",
-        "test_all_models.py",
-    }
-)
-
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--run-non-linear",
-        action="store_true",
-        default=False,
-        help="Run the LSTM/XGBoost/ARIMA tests disabled during the reboot (#124)",
-    )
-
-
-def pytest_ignore_collect(collection_path, config):
-    """Do not even import the non-linear test modules unless asked to."""
-    if config.getoption("--run-non-linear"):
-        return None
-    return collection_path.name in NON_LINEAR_MODULES or None
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip tests marked ``non_linear`` unless --run-non-linear is given."""
-    if config.getoption("--run-non-linear"):
-        return
-    skip = pytest.mark.skip(reason=NON_LINEAR_SKIP_REASON)
-    for item in items:
-        if "non_linear" in item.keywords:
-            item.add_marker(skip)
 
 
 _limit_threads_per_xdist_worker()
@@ -194,3 +152,38 @@ def db_session(db_engine_session):
 def session(db_session):
     """Alias for db_session to support tests that use 'session' parameter."""
     return db_session
+
+
+# The instant the daily cron runs (#175): 00:10 UTC on 2026-10-04 is still 2026-10-03
+# (18:10) in America/Mexico_City, the #173 scenario, and the bar of 2026-10-03 closed
+# ten minutes earlier.
+FROZEN_UTC_NOW = datetime(2026, 10, 4, 0, 10, tzinfo=UTC)
+
+
+class _FrozenDatetime(datetime):
+    """``datetime`` whose ``now()`` returns ``FROZEN_UTC_NOW``."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(FROZEN_UTC_NOW.timestamp(), tz)
+
+
+@pytest.fixture
+def mexico_city_at_0010_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[datetime]:
+    """Set ``TZ=America/Mexico_City`` and the clock to 2026-10-04 00:10 UTC.
+
+    Freezes the clock behind ``shared.utils.utc_today`` only, so a job that still
+    calls ``date.today()`` sees the real date and the test fails.
+    """
+    previous_tz = os.environ.get("TZ")
+    os.environ["TZ"] = "America/Mexico_City"
+    time.tzset()
+    monkeypatch.setattr("shared.utils.datetime", _FrozenDatetime)
+    try:
+        yield FROZEN_UTC_NOW
+    finally:
+        if previous_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous_tz
+        time.tzset()

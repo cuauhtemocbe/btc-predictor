@@ -10,7 +10,7 @@ gets its own UUID.
 Usage:
     python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-30
     python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-30 \
-        --model=xgboost --training-window=30
+        --training-window=30
 """
 
 import argparse
@@ -49,9 +49,9 @@ Examples:
   # Backtest May 2024 with the production window
   python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-31
 
-  # Backtest another model with a 30-day window
+  # Backtest with a 30-day window
   python scripts/backtest.py --start-date=2024-05-01 --end-date=2024-05-31 \\
-      --model=xgboost --training-window=30
+      --training-window=30
         """,
     )
     parser.add_argument(

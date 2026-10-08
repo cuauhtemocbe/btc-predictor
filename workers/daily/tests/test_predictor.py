@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from shared.db.models import Model, Prediction, Price
 from shared.features import DailySeries, build_training_set
+from shared.utils import utc_today
 from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
 
@@ -39,7 +40,7 @@ class TestGetActiveModel:
 
     def test_no_active_model(self, db_session: Session) -> None:
         """Should raise ValueError when no active model exists."""
-        with pytest.raises(ValueError, match="No active models found"):
+        with pytest.raises(ValueError, match="No active model found"):
             predictor.get_active_model(db_session)
 
     def test_inactive_model_not_loaded(
@@ -50,7 +51,7 @@ class TestGetActiveModel:
         sample_trained_model.is_active = False
         db_session.commit()
 
-        with pytest.raises(ValueError, match="No active models found"):
+        with pytest.raises(ValueError, match="No active model found"):
             predictor.get_active_model(db_session)
 
 
@@ -92,6 +93,7 @@ class TestPrepareFeatures:
     def test_builds_return_features_of_the_last_day(self) -> None:
         """Should return one row of 2 * window + 1 float features."""
         series = DailySeries(
+            dates=[date(2026, 9, 1) + timedelta(days=i) for i in range(31)],
             closes=[Decimal(50000 + i * 10) for i in range(31)],
             volumes=[Decimal(1000 + i) for i in range(31)],
         )
@@ -107,13 +109,38 @@ class TestPrepareFeatures:
         closes = [Decimal(50000 + (i * 37) % 900) for i in range(40)]
         volumes = [Decimal(1000 + (i * 13) % 50) for i in range(40)]
 
-        X = predictor.prepare_features(DailySeries(closes, volumes), window_days=10)
+        X = predictor.prepare_features(
+            DailySeries(
+                [date(2026, 9, 1) + timedelta(days=i) for i in range(40)],
+                closes,
+                volumes,
+            ),
+            window_days=10,
+        )
         # horizon 1 drops the last day; compare with a series ending one day earlier
         training = build_training_set(
             closes + [closes[-1]], volumes + [volumes[-1]], 10
         )
 
         assert np.array_equal(X[0], training.X[-1])
+
+
+class TestDeserializeModel:
+    """Only linear models can be loaded since LSTM, ARIMA and XGBoost went (#184)."""
+
+    def test_loads_a_linear_model(self, sample_trained_model: Model) -> None:
+        assert isinstance(
+            predictor.deserialize_model(sample_trained_model), LinearRegressionModel
+        )
+
+    @pytest.mark.parametrize("name", ["lstm_v1", "xgboost_v1", "arima_v1"])
+    def test_removed_model_types_raise_runtime_error_naming_the_type(
+        self, sample_trained_model: Model, name: str
+    ) -> None:
+        sample_trained_model.name = name
+
+        with pytest.raises(RuntimeError, match=f"Unknown model type: {name}"):
+            predictor.deserialize_model(sample_trained_model)
 
 
 class TestRequireReturnModel:
@@ -138,7 +165,7 @@ class TestCheckExistingPrediction:
         self, db_session: Session, sample_prediction_for_tomorrow: Prediction
     ) -> None:
         """Should return True when prediction exists."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         exists = predictor.check_existing_prediction(db_session, tomorrow)
 
@@ -146,7 +173,7 @@ class TestCheckExistingPrediction:
 
     def test_prediction_does_not_exist(self, db_session: Session) -> None:
         """Should return False when prediction does not exist."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
 
         exists = predictor.check_existing_prediction(db_session, tomorrow)
 
@@ -160,7 +187,7 @@ class TestSavePrediction:
         self, db_session: Session, sample_trained_model: Model
     ) -> None:
         """Should create a new prediction record with correct fields."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         current_price = Decimal("51000.00")
         predicted_price = 51500.00
 
@@ -196,7 +223,7 @@ class TestSavePrediction:
         prediction = predictor.save_prediction(
             session=db_session,
             model_id=sample_trained_model.id,
-            predicted_for=date.today() + timedelta(days=1),
+            predicted_for=utc_today() + timedelta(days=1),
             current_price=Decimal("51000.00"),
             predicted_price=51500.00,
         )
@@ -221,6 +248,7 @@ class TestPredictorGherkinScenarios:
 
     def test_scenario_1_predict_next_day_price(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
@@ -237,49 +265,35 @@ class TestPredictorGherkinScenarios:
         And actual_price is NULL (not evaluated yet)
         """
         # Setup: Active model exists, 30+ prices exist (from fixtures)
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = utc_today() + timedelta(days=1)
         model_id = sample_trained_model.id  # Store ID before main() commits
 
         # Verify no prediction exists yet
         count_before = db_session.query(Prediction).count()
         assert count_before == 0
 
-        # Mock parse_args to avoid pytest argument conflicts
-        from argparse import Namespace
-
-        def mock_parse_args():
-            return Namespace(multi_model=False)
-
         # Mock SessionLocal to return our test session
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
+        # Execute
+        exit_code = predictor.main()
 
-            # Assert
-            assert exit_code == 0
+        # Assert
+        assert exit_code == 0
 
-            # Verify prediction was created
-            predictions = db_session.query(Prediction).all()
-            assert len(predictions) == 1
+        # Verify prediction was created
+        predictions = db_session.query(Prediction).all()
+        assert len(predictions) == 1
 
-            prediction = predictions[0]
-            assert prediction.predicted_for == tomorrow
-            assert prediction.predicted_price > 0
-            assert prediction.actual_price is None
-            assert prediction.model_id == model_id
-
-        finally:
-            # Restore originals
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        prediction = predictions[0]
+        assert prediction.predicted_for == tomorrow
+        assert prediction.predicted_price > 0
+        assert prediction.actual_price is None
+        assert prediction.model_id == model_id
 
     def test_scenario_2_insufficient_historical_data(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_10_days: list[Price],
@@ -296,74 +310,52 @@ class TestPredictorGherkinScenarios:
         # Setup: Active model exists, only 10 prices (from fixtures)
         count_before = db_session.query(Prediction).count()
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
+        # Mock SessionLocal to return our test session
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
 
-        def mock_parse_args():
-            return Namespace(multi_model=False)
+        # Execute
+        exit_code = predictor.main()
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        # Assert
+        assert exit_code == 1  # Should exit with error code
 
-        try:
-            # Execute
-            exit_code = predictor.main()
-
-            # Assert
-            assert exit_code == 1  # Should exit with error code
-
-            # Verify no prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before
 
     def test_scenario_3_no_active_model(
-        self, db_session: Session, sample_btc_prices_31_days: list[Price]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        db_session: Session,
+        sample_btc_prices_31_days: list[Price],
     ) -> None:
         """
         Gherkin Scenario 3: No active model
 
         Given the models table has no record with is_active=True
         When I run the predictor main()
-        Then a ValueError is logged: "No active models found"
+        Then a ValueError is logged: "No active model found"
         And the job exits with code 1
         """
         # Setup: No active model (don't use sample_trained_model fixture)
         count_before = db_session.query(Prediction).count()
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
+        # Mock SessionLocal to return our test session
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
 
-        def mock_parse_args():
-            return Namespace(multi_model=False)
+        # Execute
+        exit_code = predictor.main()
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        # Assert
+        assert exit_code == 1
 
-        try:
-            # Execute
-            exit_code = predictor.main()
-
-            # Assert
-            assert exit_code == 1
-
-            # Verify no prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before
 
     def test_scenario_4_prediction_already_exists(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         db_session: Session,
         sample_trained_model: Model,
         sample_btc_prices_31_days: list[Price],
@@ -381,28 +373,15 @@ class TestPredictorGherkinScenarios:
         count_before = db_session.query(Prediction).count()
         assert count_before == 1  # The existing prediction
 
-        # Mock parse_args and SessionLocal
-        from argparse import Namespace
+        # Mock SessionLocal to return our test session
+        monkeypatch.setattr(predictor, "SessionLocal", lambda: db_session)
 
-        def mock_parse_args():
-            return Namespace(multi_model=False)
+        # Execute
+        exit_code = predictor.main()
 
-        original_session_local = predictor.SessionLocal
-        original_parse_args = predictor.parse_args
-        predictor.SessionLocal = lambda: db_session
-        predictor.parse_args = mock_parse_args
+        # Assert
+        assert exit_code == 0  # Success (idempotent)
 
-        try:
-            # Execute
-            exit_code = predictor.main()
-
-            # Assert
-            assert exit_code == 0  # Success (idempotent)
-
-            # Verify no additional prediction was created
-            count_after = db_session.query(Prediction).count()
-            assert count_after == count_before  # Still just 1
-
-        finally:
-            predictor.SessionLocal = original_session_local
-            predictor.parse_args = original_parse_args
+        # Verify no additional prediction was created
+        count_after = db_session.query(Prediction).count()
+        assert count_after == count_before  # Still just 1

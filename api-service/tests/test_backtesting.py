@@ -8,9 +8,10 @@ Tests the /api/backtesting/metrics endpoint with various scenarios:
 - Metrics calculations (win rate, Sharpe ratio, max drawdown, etc.)
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -20,7 +21,9 @@ from shared.db.models import BacktestResult
 
 
 @pytest.fixture
-def sample_backtest_results_factory(db_session: Session):
+def sample_backtest_results_factory(
+    db_session: Session,
+) -> Callable[..., list[BacktestResult]]:
     """
     Factory fixture for creating backtest result records.
 
@@ -28,7 +31,9 @@ def sample_backtest_results_factory(db_session: Session):
         sample_backtest_results_factory(count=30, backtest_run_id=uuid4())
     """
 
-    def _create_backtest_results(count: int = 30, backtest_run_id=None):
+    def _create_backtest_results(
+        count: int = 30, backtest_run_id: UUID | None = None
+    ) -> list[BacktestResult]:
         if backtest_run_id is None:
             backtest_run_id = uuid4()
 
@@ -90,8 +95,8 @@ def sample_backtest_results_factory(db_session: Session):
 async def test_fetch_backtest_metrics_success(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given there is a backtest run with 30 results
     And each result has all 4 PnL strategies calculated
@@ -133,7 +138,7 @@ async def test_fetch_backtest_metrics_success(
         assert "color" in strategy
         assert "total_pnl" in strategy
         assert "win_rate" in strategy
-        assert "max_drawdown" in strategy
+        assert "max_drawdown_pct" in strategy
         assert "best_day" in strategy
         assert "worst_day" in strategy
         assert "sharpe_ratio" in strategy
@@ -155,7 +160,7 @@ async def test_fetch_backtest_metrics_success(
 async def test_fetch_backtest_metrics_empty_data(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the backtest_results table is empty
     When I send GET /api/backtesting/metrics
@@ -179,8 +184,8 @@ async def test_fetch_backtest_metrics_empty_data(
 async def test_fetch_backtest_metrics_date_filter(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given backtest results from May 1-30 (30 days)
     When I send GET /api/backtesting/metrics?start=2024-05-10&end=2024-05-20
@@ -232,7 +237,7 @@ async def test_fetch_backtest_metrics_date_filter(
 async def test_calculate_win_rate(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with mixed wins and losses
     When the dashboard calculates Win Rate for each strategy
@@ -288,17 +293,19 @@ async def test_calculate_win_rate(
     assert simple_strategy["win_rate"] == 0.5  # 3 wins / 6 trades
 
 
-# Gherkin Scenario 5: Calculate Max Drawdown (worst single-day loss)
+# Gherkin Scenario 5: Max Drawdown on the compounded equity curve, Worst Day apart
 @pytest.mark.asyncio
 async def test_calculate_max_drawdown(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with PnL values: [100, -450, 200, -30, 150]
+    And a price at prediction of 67,000 on every day
     When the dashboard calculates Max Drawdown
-    Then it finds the minimum PnL = -450
-    And displays it as Max Drawdown = -450.00
+    Then it is the largest fall of the compounded equity curve, -0.67%
+    (the -450 day is a -0.67% return and the only fall from a peak)
+    And the worst single-day PnL stays -450.00 as Worst Day
     """
     # Arrange
     backtest_run_id = uuid4()
@@ -338,7 +345,8 @@ async def test_calculate_max_drawdown(
     data = response.json()
 
     realistic_strategy = next(s for s in data["strategies"] if s["name"] == "realistic")
-    assert realistic_strategy["max_drawdown"] == -450.0
+    assert realistic_strategy["max_drawdown_pct"] == -0.67
+    assert "max_drawdown" not in realistic_strategy
     assert realistic_strategy["worst_day"] == -450.0
 
 
@@ -347,7 +355,7 @@ async def test_calculate_max_drawdown(
 async def test_best_and_worst_day(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given backtest results with PnL values: [100, -50, 320, -30, 150]
     When the dashboard displays Best/Worst Day
@@ -401,8 +409,8 @@ async def test_best_and_worst_day(
 async def test_backtesting_dashboard_page_loads(
     client: AsyncClient,
     db_session: Session,
-    sample_backtest_results_factory,
-):
+    sample_backtest_results_factory: Callable[..., list[BacktestResult]],
+) -> None:
     """
     Given there is a backtest run with results
     When I navigate to GET /backtesting
@@ -429,7 +437,7 @@ async def test_backtesting_dashboard_page_loads(
 async def test_backtesting_dashboard_empty_state(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given the backtest_results table is empty
     When I visit /backtesting
@@ -452,7 +460,7 @@ async def test_backtesting_dashboard_empty_state(
 async def test_fetch_most_recent_backtest_run(
     client: AsyncClient,
     db_session: Session,
-):
+) -> None:
     """
     Given there are 2 backtest runs (run_1 created yesterday, run_2 created today)
     When I send GET /api/backtesting/metrics

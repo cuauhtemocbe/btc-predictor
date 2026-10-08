@@ -10,17 +10,20 @@ Tests all Gherkin scenarios:
 6. NOT NULL constraints
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import inspect
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from shared.db.models import Prediction
+from shared.db.models import Model, Prediction
 
 
-def test_migration_creates_predictions_table(db_engine):
+def test_migration_creates_predictions_table(db_engine: Engine) -> None:
     """
     Gherkin Scenario: Create predictions table via migration
 
@@ -77,7 +80,9 @@ def test_migration_creates_predictions_table(db_engine):
     assert "predicted_for" in index_names["ix_predictions_predicted_for"]
 
 
-def test_insert_prediction_phase1(db_session, sample_model):
+def test_insert_prediction_phase1(
+    db_session: Session, sample_model: Callable[..., Model]
+) -> None:
     """
     Gherkin Scenario: Insert new prediction (before evaluation)
 
@@ -126,7 +131,9 @@ def test_insert_prediction_phase1(db_session, sample_model):
     assert prediction.pnl_simulated is None
 
 
-def test_update_prediction_phase2(db_session, sample_prediction):
+def test_update_prediction_phase2(
+    db_session: Session, sample_prediction: Callable[..., Prediction]
+) -> None:
     """
     Gherkin Scenario: Update prediction with evaluation (next day)
 
@@ -166,7 +173,9 @@ def test_update_prediction_phase2(db_session, sample_prediction):
     assert prediction.pnl_simulated == Decimal("500.00")
 
 
-def test_query_unevaluated_predictions(db_session, sample_model):
+def test_query_unevaluated_predictions(
+    db_session: Session, sample_model: Callable[..., Model]
+) -> None:
     """
     Gherkin Scenario: Query unevaluated predictions
 
@@ -226,7 +235,7 @@ def test_query_unevaluated_predictions(db_session, sample_model):
         assert pred.actual_price is None
 
 
-def test_foreign_key_cascade_delete(db_session):
+def test_foreign_key_cascade_delete(db_session: Session) -> None:
     """
     Test: Foreign key CASCADE delete works
 
@@ -287,7 +296,7 @@ def test_foreign_key_cascade_delete(db_session):
     )
 
 
-def test_not_null_constraints(db_session):
+def test_not_null_constraints(db_session: Session) -> None:
     """
     Test: NOT NULL constraints are enforced
 
@@ -371,7 +380,11 @@ def test_not_null_constraints(db_session):
     db_session.rollback()
 
 
-def test_prediction_relationship_to_model(db_session, sample_model, sample_prediction):
+def test_prediction_relationship_to_model(
+    db_session: Session,
+    sample_model: Callable[..., Model],
+    sample_prediction: Callable[..., Prediction],
+) -> None:
     """
     Test: Prediction has relationship to Model via model_id
     """
@@ -385,7 +398,9 @@ def test_prediction_relationship_to_model(db_session, sample_model, sample_predi
     assert prediction.model.name == "relationship_test"
 
 
-def test_prediction_repr(db_session, sample_prediction):
+def test_prediction_repr(
+    db_session: Session, sample_prediction: Callable[..., Prediction]
+) -> None:
     """
     Test: __repr__ method returns useful debug string
     """

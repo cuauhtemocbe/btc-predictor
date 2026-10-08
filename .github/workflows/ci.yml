@@ -24,30 +24,40 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No `docker/setup-buildx-action` on purpose: it switches to the
-      # docker-container driver, which then has to export the 4.5 GB image
-      # (TensorFlow, XGBoost) as a tarball and load it into the daemon, ~130 s
-      # of a ~220 s build. The runner's default builder writes layers directly.
+      # docker-container driver, which then has to export the image as a
+      # tarball and load it into the daemon, which costs a large share of the build
+      # time. The runner's default builder writes layers directly.
       - name: Start Docker Compose services
         run: docker compose up -d --wait
 
       - name: Run Ruff lint
-        run: docker compose exec -T api ruff check shared api workers
+        run: docker compose exec -T api ruff check shared api workers scripts
 
       - name: Check Ruff formatting
-        run: docker compose exec -T api ruff format --check shared api workers
+        run: docker compose exec -T api ruff format --check shared api workers scripts
 
+      # shared, workers, api and scripts: all production packages, strict.
+      # Test code is included (shared/tests, workers/*/tests, api/tests, scripts/tests); no
+      # test directory is excluded in [tool.mypy] of pyproject.toml.
       - name: Run mypy strict checks
         run: >-
           docker compose exec -T api python -m mypy
-          shared/shared shared/btc_shared shared/tests
+          shared/shared shared/tests workers api scripts
 
       - name: Run tests with coverage
         run: >-
           docker compose exec -T api pytest --cov --cov-report=term-missing
           --cov-report=xml:/tmp/coverage.xml
+
+      # Reads the coverage.xml of the run above (the suite does not run twice)
+      # and fails naming each critical module below its minimum or missing.
+      - name: Check per-module coverage thresholds
+        run: >-
+          docker compose exec -T api python scripts/check_coverage_thresholds.py
+          /tmp/coverage.xml
 
       - name: Copy coverage report
         if: always()
@@ -55,7 +65,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: coverage.xml

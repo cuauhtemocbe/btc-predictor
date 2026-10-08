@@ -14,14 +14,17 @@ they never touch the schema the rest of the suite is using.
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from shared.config import settings
 from shared.db.models import DEFAULT_SYMBOL, Model, Price
@@ -47,8 +50,8 @@ def _price(symbol: str | None = None, timestamp: datetime = TIMESTAMP) -> Price:
     return Price(**values)
 
 
-def _model(symbol: str | None = None, version: str = "1", **overrides) -> Model:
-    values = {
+def _model(symbol: str | None = None, version: str = "1", **overrides: Any) -> Model:
+    values: dict[str, Any] = {
         "name": "linear_v1",
         "version": version,
         "params": {},
@@ -68,7 +71,7 @@ def _model(symbol: str | None = None, version: str = "1", **overrides) -> Model:
 class TestSymbolUniqueness:
     """Scenario: Inserting the same timestamp for two different symbols."""
 
-    def test_same_timestamp_for_two_symbols_succeeds(self, db_session):
+    def test_same_timestamp_for_two_symbols_succeeds(self, db_session: Session) -> None:
         db_session.add_all([_price("BTCUSDT"), _price("PAXGUSDT")])
         db_session.commit()
 
@@ -78,7 +81,9 @@ class TestSymbolUniqueness:
         }
         assert symbols == {"BTCUSDT", "PAXGUSDT"}
 
-    def test_same_symbol_and_timestamp_twice_is_rejected(self, db_session):
+    def test_same_symbol_and_timestamp_twice_is_rejected(
+        self, db_session: Session
+    ) -> None:
         db_session.add(_price("PAXGUSDT"))
         db_session.commit()
 
@@ -87,7 +92,7 @@ class TestSymbolUniqueness:
             db_session.commit()
         db_session.rollback()
 
-    def test_symbol_defaults_to_btc(self, db_session):
+    def test_symbol_defaults_to_btc(self, db_session: Session) -> None:
         db_session.add(_price())
         db_session.commit()
 
@@ -97,13 +102,17 @@ class TestSymbolUniqueness:
 class TestModelSymbolUniqueness:
     """The same model can exist once per asset."""
 
-    def test_same_name_and_version_for_two_symbols_succeeds(self, db_session):
+    def test_same_name_and_version_for_two_symbols_succeeds(
+        self, db_session: Session
+    ) -> None:
         db_session.add_all([_model("BTCUSDT"), _model("PAXGUSDT")])
         db_session.commit()
 
         assert db_session.query(Model).count() == 2
 
-    def test_same_symbol_name_and_version_twice_is_rejected(self, db_session):
+    def test_same_symbol_name_and_version_twice_is_rejected(
+        self, db_session: Session
+    ) -> None:
         db_session.add(_model("PAXGUSDT"))
         db_session.commit()
 
@@ -112,7 +121,9 @@ class TestModelSymbolUniqueness:
             db_session.commit()
         db_session.rollback()
 
-    def test_one_active_version_per_symbol_name_and_timeframe(self, db_session):
+    def test_one_active_version_per_symbol_name_and_timeframe(
+        self, db_session: Session
+    ) -> None:
         db_session.add_all(
             [
                 _model("BTCUSDT", version="1", is_active=True),
@@ -126,7 +137,7 @@ class TestModelSymbolUniqueness:
             db_session.commit()
         db_session.rollback()
 
-    def test_symbol_defaults_to_btc(self, db_session):
+    def test_symbol_defaults_to_btc(self, db_session: Session) -> None:
         db_session.add(_model())
         db_session.commit()
 
@@ -146,7 +157,7 @@ def _alembic(database_url: str, *args: str) -> None:
 
 
 @pytest.fixture
-def migration_db():
+def migration_db() -> Iterator[tuple[str, Engine]]:
     """An empty scratch database, kept between runs and emptied by schema reset.
 
     Emptying the schema avoids ``DROP DATABASE``, which forces a slow Postgres
@@ -163,7 +174,7 @@ def migration_db():
     engine.dispose()
 
 
-def _seed_before_migration(engine) -> None:
+def _seed_before_migration(engine: Engine) -> None:
     """Rows as they exist in production before the migration."""
     with engine.begin() as connection:
         connection.execute(
@@ -195,7 +206,9 @@ def _seed_before_migration(engine) -> None:
 
 @pytest.mark.slow
 class TestMigration:
-    def test_upgrade_keeps_binance_rows_as_btc_and_drops_coingecko(self, migration_db):
+    def test_upgrade_keeps_binance_rows_as_btc_and_drops_coingecko(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
         """Scenario: upgrade on a database with data, CoinGecko rows deleted."""
         url, engine = migration_db
         _alembic(url, "upgrade", REVISION_BEFORE)
@@ -215,17 +228,19 @@ class TestMigration:
                     )
                 ).scalars()
             )
-            model_symbols = connection.execute(text("SELECT symbol FROM models"))
+            model_rows = connection.execute(text("SELECT symbol FROM models"))
             predictions = connection.execute(
                 text("SELECT count(*) FROM predictions")
             ).scalar()
-            model_symbols = list(model_symbols.scalars())
+            model_symbols = list(model_rows.scalars())
         assert [(p.symbol, p.source) for p in prices] == [("BTCUSDT", "binance")]
         assert "btc_prices" not in tables
         assert model_symbols == ["BTCUSDT"]
         assert predictions == 1, "predictions survive and keep their model"
 
-    def test_upgraded_schema_enforces_uniqueness_per_symbol(self, migration_db):
+    def test_upgraded_schema_enforces_uniqueness_per_symbol(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
         url, engine = migration_db
         _alembic(url, "upgrade", "head")
 
@@ -239,7 +254,9 @@ class TestMigration:
         with pytest.raises(IntegrityError), engine.begin() as connection:
             connection.execute(insert, {"symbol": "BTCUSDT", "ts": TIMESTAMP})
 
-    def test_downgrade_restores_the_single_asset_schema(self, migration_db):
+    def test_downgrade_restores_the_single_asset_schema(
+        self, migration_db: tuple[str, Engine]
+    ) -> None:
         """Scenario: downgrade on a database with data, then upgrade again."""
         url, engine = migration_db
         _alembic(url, "upgrade", "head")
@@ -296,7 +313,8 @@ class TestMigration:
             remaining_models = connection.execute(
                 text("SELECT count(*) FROM models")
             ).scalar()
-        assert "prices" not in tables and "btc_prices" in tables
+        assert "prices" not in tables
+        assert "btc_prices" in tables
         assert "symbol" not in price_columns | model_columns
         assert remaining_prices == remaining_models == 1, "only BTC rows can survive"
 

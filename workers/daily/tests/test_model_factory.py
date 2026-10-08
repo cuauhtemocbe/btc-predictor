@@ -11,20 +11,27 @@ import sys
 import pytest
 
 from shared.features import feature_count
-from workers.daily.models import BaseModel, LinearRegressionModel
+from workers.daily.models import LinearRegressionModel
 from workers.daily.models.factory import (
     MODEL_NAMES,
     build_model,
-    instantiate_model,
     model_class_for,
 )
 
 
-def test_model_names_are_the_four_production_models():
-    assert MODEL_NAMES == ("linear", "xgboost", "lstm", "arima")
+def test_the_linear_model_is_the_only_model_family() -> None:
+    assert MODEL_NAMES == ("linear",)
 
 
-def test_linear_is_built_with_the_return_feature_count():
+@pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
+def test_removed_model_families_are_rejected(name: str) -> None:
+    features = feature_count(21)
+
+    with pytest.raises(ValueError, match=f"Unknown model '{name}'"):
+        build_model(name, 21, features)
+
+
+def test_linear_is_built_with_the_return_feature_count() -> None:
     window = 21
 
     model = build_model("linear", window, feature_count(window))
@@ -34,60 +41,24 @@ def test_linear_is_built_with_the_return_feature_count():
     assert model.n_features == feature_count(window)
 
 
-def test_unknown_model_name_is_rejected_with_the_valid_names():
+def test_unknown_model_name_is_rejected_with_the_valid_names() -> None:
     with pytest.raises(ValueError, match="Unknown model 'prophet'.*linear"):
         build_model("prophet", 21, 43)
 
 
-def test_model_name_matching_is_exact_not_by_prefix():
+def test_model_name_matching_is_exact_not_by_prefix() -> None:
     # production names carry a version ("linear_v1"); the factory takes the family
     with pytest.raises(ValueError, match="Unknown model"):
         build_model("linear_v1", 21, 43)
 
 
-def test_instantiate_model_matches_what_the_trainer_does_for_each_class():
-    class Plain(BaseModel):
-        def __init__(self, window_days: int):
-            self.window_days = window_days
+def test_linear_name_resolves_to_the_linear_class() -> None:
+    model = build_model("linear", 21, feature_count(21))
 
-        def train(self, X, y):  # pragma: no cover - not exercised
-            ...
-
-        def predict(self, X):  # pragma: no cover - not exercised
-            ...
-
-        def serialize(self):  # pragma: no cover - not exercised
-            ...
-
-        @classmethod
-        def deserialize(cls, data):  # pragma: no cover - not exercised
-            ...
-
-        def is_trained(self):  # pragma: no cover - not exercised
-            ...
-
-    assert instantiate_model(Plain, "custom", 30, 61).window_days == 30
-    linear = instantiate_model(LinearRegressionModel, "linear", 30, 61)
-    assert (linear.window_days, linear.n_features) == (30, 61)
+    assert type(model) is model_class_for("linear")
 
 
-@pytest.mark.non_linear
-@pytest.mark.parametrize("name", ["xgboost", "lstm", "arima"])
-def test_every_model_name_resolves_to_a_base_model(name):
-    model = build_model(name, 21, feature_count(21))
-
-    assert isinstance(model, BaseModel)
-    assert type(model) is model_class_for(name)
-
-
-@pytest.mark.non_linear
-def test_arima_is_built_with_the_production_order():
-    model = build_model("arima", 21, feature_count(21))
-
-    assert model.order == (5, 1, 0)
-
-
-def test_building_linear_does_not_import_the_heavy_libraries():
+def test_building_linear_does_not_import_the_heavy_libraries() -> None:
     code = (
         "import sys; "
         "from workers.daily.models.factory import build_model; "

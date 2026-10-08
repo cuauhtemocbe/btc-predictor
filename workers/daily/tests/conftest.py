@@ -2,16 +2,45 @@
 Shared test fixtures for workers.daily tests.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
+import shared.utils
 from shared.db.models import Model, Prediction, Price
-from shared.features import build_training_set, feature_count
+from shared.features import (
+    FeatureSet,
+    build_prediction_features,
+    build_training_set,
+    feature_count,
+)
+from shared.utils import utc_today
+from workers.daily import predictor
 from workers.daily.models import LinearRegressionModel
+
+
+@pytest.fixture(autouse=True)
+def predictor_runs_right_after_the_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the predictor at 00:10 UTC of the current UTC day, as the cron does (#175).
+
+    The freshness guard refuses a last bar older than ``max_bar_age_hours``. Tests
+    seed the bar of yesterday and run at whatever time the suite starts, so the
+    predictor clock is pinned to the day boundary. The date comes from
+    ``shared.utils.utc_today`` at call time, so a test that freezes it (or passes
+    ``now=`` itself) still gets a consistent clock.
+    """
+    monkeypatch.setattr(
+        predictor,
+        "utc_now",
+        lambda: datetime.combine(shared.utils.utc_today(), time(0, 10), tzinfo=UTC),
+    )
+
+
+# One cached bar: (timestamp, open, high, low, close, volume).
+type BarRow = tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]
 
 
 @pytest.fixture
@@ -100,6 +129,39 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
     return synthetic_prices_60_days[-30:].reshape(1, -1)
 
 
+RETURN_WINDOW = 10
+RETURN_FEATURES = feature_count(RETURN_WINDOW)
+
+
+def _return_walk(days: int = 120) -> tuple[np.ndarray, np.ndarray]:
+    """Closes and volumes of a noisy random walk (daily log returns ~ 2%)."""
+    rng = np.random.default_rng(7)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, days)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, days))
+    return closes, volumes
+
+
+@pytest.fixture
+def return_training_set() -> FeatureSet:
+    """Return features and next-day log return targets, as the trainers build them.
+
+    ``RETURN_WINDOW`` days of window give ``RETURN_FEATURES`` columns; 120 days of
+    history give 109 samples.
+    """
+    closes, volumes = _return_walk()
+    return build_training_set(closes, volumes, RETURN_WINDOW)
+
+
+@pytest.fixture
+def latest_return_features() -> np.ndarray:
+    """Features of the latest day, shape (1, RETURN_FEATURES), as the predictor gets.
+
+    Built with build_prediction_features, the code the predictor runs.
+    """
+    closes, volumes = _return_walk()
+    return build_prediction_features(closes, volumes, RETURN_WINDOW)
+
+
 # ============================================================================
 # Predictor test fixtures
 # ============================================================================
@@ -113,6 +175,14 @@ def last_30_days(synthetic_prices_60_days: np.ndarray) -> np.ndarray:
 # Training happens ONCE per module, but each test gets a fresh DB record.
 
 
+def _cached_return_training_set(window_days: int) -> FeatureSet:
+    """Return features and log-return targets of a noisy 120-day series."""
+    rng = np.random.default_rng(42)
+    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
+    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
+    return build_training_set(closes, volumes, window_days)
+
+
 @pytest.fixture(scope="module")
 def cached_linear_artifact() -> bytes:
     """
@@ -121,13 +191,8 @@ def cached_linear_artifact() -> bytes:
     Trains the model ONCE and caches the serialized bytes.
     Tests use this to create fresh DB records without re-training.
     """
-    # Return features of a noisy 120-day series (log-return target)
-    rng = np.random.default_rng(42)
-    closes = 50000 * np.exp(np.cumsum(rng.normal(0, 0.02, 120)))
-    volumes = 1000 * np.exp(rng.normal(0, 0.1, 120))
-
     window_days = 30
-    training_set = build_training_set(closes, volumes, window_days)
+    training_set = _cached_return_training_set(window_days)
 
     # Train model ONCE
     lr_model = LinearRegressionModel(
@@ -137,70 +202,6 @@ def cached_linear_artifact() -> bytes:
 
     # Return serialized bytes (cached for all tests in this module)
     return lr_model.serialize()
-
-
-@pytest.fixture(scope="module")
-def cached_xgboost_artifact() -> bytes:
-    """
-    Module-scoped cached XGBoost model artifact.
-
-    Trains the model ONCE and caches the serialized bytes.
-    Tests use this to create fresh DB records without re-training.
-    """
-    # Generate training data (same as sliding_window_data fixture)
-    base_prices = np.linspace(50000, 51500, 60)
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
-
-    window_days = 30
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
-
-    # Train model ONCE
-    from workers.daily.models import XGBoostModel  # heavy import, only if used
-
-    xgb_model = XGBoostModel(window_days=30)
-    xgb_model.train(X, y)
-
-    # Return serialized bytes (cached for all tests in this module)
-    return xgb_model.serialize()
-
-
-@pytest.fixture(scope="module")
-def cached_lstm_artifact() -> bytes:
-    """
-    Module-scoped cached LSTM model artifact.
-
-    Trains the model ONCE and caches the serialized bytes.
-    Tests use this to create fresh DB records without re-training.
-    """
-    # Generate training data (same as sliding_window_data fixture)
-    base_prices = np.linspace(50000, 51500, 60)
-    noise = np.random.uniform(-500, 500, 60)
-    prices = base_prices + noise
-
-    window_days = 30
-    n_samples = len(prices) - window_days
-    X = np.zeros((n_samples, window_days))
-    y = np.zeros(n_samples)
-
-    for i in range(n_samples):
-        X[i] = prices[i : i + window_days]
-        y[i] = prices[i + window_days]
-
-    # Train model ONCE
-    from workers.daily.models import LSTMModel  # heavy import, only if used
-
-    lstm_model = LSTMModel(window_days=30, epochs=10)
-    lstm_model.train(X, y)
-
-    # Return serialized bytes (cached for all tests in this module)
-    return lstm_model.serialize()
 
 
 # ============================================================================
@@ -226,8 +227,8 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
         params={"window_days": 30, "horizon_days": 1, "target": "log_return"},
         artifact=cached_linear_artifact,  # Use cached bytes
         trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
+        train_from=utc_today() - timedelta(days=60),
+        train_to=utc_today() - timedelta(days=1),
         is_active=True,
     )
 
@@ -238,45 +239,15 @@ def sample_trained_model(db_session: Session, cached_linear_artifact: bytes) -> 
     return model_record
 
 
-@pytest.fixture
-def sample_xgboost_model(db_session: Session, cached_xgboost_artifact: bytes) -> Model:
-    """
-    Function-scoped XGBoostModel using cached artifact.
-
-    Uses pre-trained model artifact (cached at module scope) to avoid
-    redundant training. Each test gets a fresh DB record.
-
-    Returns:
-        Model record with is_active=False (default for multi-model tests)
-    """
-    # Use cached artifact (NO re-training!)
-    model_record = Model(
-        name="xgboost_v1",
-        version="1.0.0",
-        params={"window_days": 30, "n_estimators": 100, "learning_rate": 0.1},
-        artifact=cached_xgboost_artifact,  # Use cached bytes
-        trained_at=datetime.now(UTC),
-        train_from=date.today() - timedelta(days=60),
-        train_to=date.today() - timedelta(days=1),
-        is_active=False,  # Inactive by default (tests will activate as needed)
-    )
-
-    db_session.add(model_record)
-    db_session.commit()
-    db_session.refresh(model_record)
-
-    return model_record
-
-
 @pytest.fixture(scope="module")
-def cached_price_data_31_days():
+def cached_price_data_31_days() -> list[BarRow]:
     """
     Module-scoped cached price data (pre-calculated values).
 
     Returns list of tuples: (timestamp, open, high, low, close, volume)
     Generated ONCE per module, reused by all tests.
     """
-    data = []
+    data: list[BarRow] = []
     today = datetime.now(UTC).date()
     base_date = today - timedelta(days=31)
 
@@ -306,7 +277,7 @@ def cached_price_data_31_days():
 
 @pytest.fixture
 def sample_btc_prices_31_days(
-    db_session: Session, cached_price_data_31_days
+    db_session: Session, cached_price_data_31_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 31 days of BTC price records using cached data.
@@ -317,7 +288,7 @@ def sample_btc_prices_31_days(
     Returns:
         List of 186 Price records (6 per day at 4-hour intervals)
     """
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_price, high, low, close, volume in cached_price_data_31_days:
         price_record = Price(
@@ -337,14 +308,14 @@ def sample_btc_prices_31_days(
 
 
 @pytest.fixture(scope="module")
-def cached_price_data_10_days():
+def cached_price_data_10_days() -> list[BarRow]:
     """
     Module-scoped cached price data for 10 days.
 
     Returns list of tuples: (timestamp, open, high, low, close, volume)
     Generated ONCE per module, reused by all tests.
     """
-    data = []
+    data: list[BarRow] = []
     today = datetime.now(UTC).date()
     base_date = today - timedelta(days=10)
 
@@ -374,7 +345,7 @@ def cached_price_data_10_days():
 
 @pytest.fixture
 def sample_btc_prices_10_days(
-    db_session: Session, cached_price_data_10_days
+    db_session: Session, cached_price_data_10_days: list[BarRow]
 ) -> list[Price]:
     """
     Create 10 days of BTC price records using cached data.
@@ -383,7 +354,7 @@ def sample_btc_prices_10_days(
     Returns:
         List of 60 Price records (6 per day at 4-hour intervals)
     """
-    prices = []
+    prices: list[Price] = []
 
     for timestamp, open_price, high, low, close, volume in cached_price_data_10_days:
         price_record = Price(
@@ -412,7 +383,7 @@ def sample_prediction_for_tomorrow(
     Returns:
         Prediction record with predicted_for=tomorrow
     """
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = utc_today() + timedelta(days=1)
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -450,7 +421,7 @@ def sample_unevaluated_prediction_for_today(
     Returns:
         Prediction record with predicted_for=today, actual_price=NULL
     """
-    today = date.today()
+    today = utc_today()
 
     prediction = Prediction(
         model_id=sample_trained_model.id,
@@ -476,18 +447,19 @@ def sample_unevaluated_prediction_for_today(
 @pytest.fixture
 def sample_actual_price_for_today(db_session: Session) -> Price:
     """
-    Create today's 7am BTC price record.
+    Create the daily bar that settles today's predictions.
+
+    A prediction for today is scored against the bar opened yesterday, which
+    closes at 00:00 UTC today (daily bars are stored at their 00:00 UTC open).
 
     Returns:
-        Price record with timestamp=today 7am
+        Price record with timestamp=yesterday 00:00 UTC
     """
-    today = date.today()
-    timestamp_7am = datetime.combine(
-        today, datetime.min.time().replace(hour=7), tzinfo=UTC
-    )
+    yesterday = utc_today() - timedelta(days=1)
+    timestamp = datetime.combine(yesterday, datetime.min.time(), tzinfo=UTC)
 
     price_record = Price(
-        timestamp=timestamp_7am,
+        timestamp=timestamp,
         open=Decimal("67000.00"),
         high=Decimal("67800.00"),
         low=Decimal("66800.00"),
@@ -513,7 +485,7 @@ def sample_evaluated_prediction_for_today(
     Returns:
         Prediction record with actual_price != NULL (already evaluated)
     """
-    today = date.today()
+    today = utc_today()
 
     prediction = Prediction(
         model_id=sample_trained_model.id,

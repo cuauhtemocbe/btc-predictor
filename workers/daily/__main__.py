@@ -1,19 +1,11 @@
-"""
-Daily cron job orchestration.
+"""Daily cron job: evaluator, trainer, predictor, in that order.
 
-This job runs daily and orchestrates the following workflow:
-1. Evaluator: Evaluate yesterday's prediction (update with actual price and metrics)
-2. Trainer: Train/retrain ML model on historical data
-3. Predictor: Generate tomorrow's prediction using active model
+Each stage must succeed before the next runs: a failed evaluator leaves nothing
+fresh to train on, and a failed trainer leaves the predictor a stale or missing
+model. The pipeline stops at the first failure and returns that stage's exit
+code (#64).
 
-Each stage must succeed before the next one runs. A failed evaluator run
-means no fresh actual-price data to retrain against, and a failed trainer
-run means the predictor would run against a stale or nonexistent model --
-neither failure is safe to build on, so the pipeline stops at the first
-one and reports it as the job's own exit code (issue #64).
-
-Entry point: python -m workers.daily
-Version: 1.0.1 (migrations fix 2026-05-22)
+Entry point: ``python -m workers.daily``
 """
 
 import logging
@@ -22,7 +14,6 @@ from collections.abc import Callable
 
 from workers.daily import evaluator, predictor, trainer
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -44,20 +35,15 @@ def _run_stage(name: str, stage_main: Callable[[], int]) -> int:
 
 
 def main() -> int:
-    """
-    Main entry point for the daily job.
-
-    Runs evaluator → trainer → predictor in sequence, stopping at the
-    first stage that fails (returns non-zero or raises).
+    """Run evaluator, trainer and predictor, stopping at the first stage that fails.
 
     Returns:
-        Exit code (0 = success, non-zero = the failing stage's exit code)
+        0 on success, otherwise the exit code of the failing stage.
     """
     logger.info("=" * 60)
     logger.info("Starting daily job orchestration")
     logger.info("=" * 60)
 
-    # Step 1: Evaluate yesterday's prediction
     logger.info("Step 1: Running evaluator")
     evaluator_exit = _run_stage("Evaluator", evaluator.main)
 
@@ -66,7 +52,6 @@ def main() -> int:
         logger.error("Stopping before trainer: evaluation must succeed first")
         return evaluator_exit
 
-    # Step 2: Train/retrain model
     logger.info("Step 2: Running trainer")
     trainer_exit = _run_stage("Trainer", trainer.main)
 
@@ -75,7 +60,6 @@ def main() -> int:
         logger.error("Stopping before predictor: a fresh model is required first")
         return trainer_exit
 
-    # Step 3: Generate tomorrow's prediction
     logger.info("Step 3: Running predictor")
     predictor_exit = _run_stage("Predictor", predictor.main)
 
