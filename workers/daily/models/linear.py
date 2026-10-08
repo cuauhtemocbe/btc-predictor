@@ -1,9 +1,4 @@
-"""
-Linear Regression model for BTC price prediction.
-
-This module implements a concrete ML model using sklearn's LinearRegression
-with sliding window feature engineering.
-"""
+"""Linear regression model over the return features of ``shared.features``."""
 
 import pickle
 
@@ -15,57 +10,28 @@ from workers.daily.models.base import BaseModel
 
 
 class LinearRegressionModel(BaseModel):
-    """
-    Linear Regression model over a sliding window of features.
+    """sklearn linear regression, agnostic to what its columns mean.
 
-    The model is agnostic to what the columns mean. The trainers feed it the
-    return features of shared.features and a log-return target, so predict()
-    returns a log return; the predictor turns it into a price with
-    shared.features.price_from_return(). With raw close windows and a price
-    target it predicts a price (n_features defaults to window_days).
+    The trainer and the predictor feed it ``shared.features`` columns (lagged log
+    returns, their volatility and log volume changes) and a next-day log return as
+    target, so ``predict`` returns a log return; ``shared.features.price_from_return``
+    turns it into a price.
 
     Attributes:
-        window_days: Number of historical days used as features (default: 30)
-        model: sklearn LinearRegression instance
-        _is_trained: Internal flag tracking if model has been trained
-
-    Example:
-        >>> import numpy as np
-        >>> model = LinearRegressionModel(window_days=30)
-        >>>
-        >>> # Prepare training data (60 days -> 30 samples)
-        >>> prices = np.random.rand(60)
-        >>> X = np.array([prices[i:i+30] for i in range(30)])
-        >>> y = np.array([prices[i+30] for i in range(30)])
-        >>>
-        >>> # Train and predict
-        >>> model.train(X, y)
-        >>> X_new = prices[-30:].reshape(1, -1)
-        >>> predicted_price = model.predict(X_new)
-        >>> print(f"Predicted: ${predicted_price:.2f}")
-        >>>
-        >>> # Serialize for storage
-        >>> model_bytes = model.serialize()
-        >>> restored = LinearRegressionModel.deserialize(model_bytes)
+        window_days: Days of history per sample.
+        n_features: Feature columns; ``feature_count(window_days)`` for the return
+            features, ``window_days`` by default.
     """
 
     def __init__(self, window_days: int = 30, n_features: int | None = None):
-        """
-        Initialize a new LinearRegressionModel.
+        """Create an untrained model.
 
         Args:
-            window_days: Number of historical days to use as features.
-                        Must be >= 1. Default is 30 days.
-            n_features: Number of feature columns. Defaults to window_days (one
-                        column per day). Models trained on the return features of
-                        shared.features pass feature_count(window_days).
+            window_days: Days of history per sample, at least 1.
+            n_features: Feature columns; defaults to ``window_days``.
 
         Raises:
-            ValueError: If window_days < 1.
-
-        Example:
-            >>> model = LinearRegressionModel()  # default 30 days
-            >>> model = LinearRegressionModel(window_days=60)  # custom window
+            ValueError: If ``window_days`` < 1.
         """
         if window_days < 1:
             raise ValueError("window_days must be >= 1")
@@ -76,27 +42,16 @@ class LinearRegressionModel(BaseModel):
         self._is_trained = False
 
     def train(self, X: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> None:
-        """
-        Train the model with historical price data.
+        """Fit the model.
 
         Args:
-            X: Feature matrix of shape (n_samples, window_days).
-               Each row contains window_days consecutive close prices.
-            y: Target vector of shape (n_samples,).
-               Each value is the next day's close price.
+            X: Features of shape (n_samples, n_features): lagged log returns,
+                volatility and log volume changes.
+            y: Next-day log return, shape (n_samples,).
 
         Raises:
-            ValueError: If X or y have invalid shapes.
-            ValueError: If X contains NaN or infinite values.
-
-        Example:
-            >>> model = LinearRegressionModel(window_days=30)
-            >>> X = np.random.rand(50, 30)  # 50 samples, 30 features
-            >>> y = np.random.rand(50)      # 50 target values
-            >>> model.train(X, y)
-            >>> assert model.is_trained
+            ValueError: If the shapes do not match or X or y hold NaN or inf.
         """
-        # Validate shapes
         if X.ndim != 2:
             raise ValueError(f"X must be 2-dimensional, got {X.ndim} dimensions")
 
@@ -115,7 +70,6 @@ class LinearRegressionModel(BaseModel):
                 f"got {X.shape[1]}"
             )
 
-        # Validate data quality
         if np.isnan(X).any():
             raise ValueError("X contains NaN values")
 
@@ -128,37 +82,22 @@ class LinearRegressionModel(BaseModel):
         if np.isinf(y).any():
             raise ValueError("y contains infinite values")
 
-        # Train the model
         self.model.fit(X, y)
         self._is_trained = True
 
     def predict(self, X: npt.NDArray[np.float64]) -> float:
-        """
-        Predict the next day's BTC close price.
+        """Predict the next-day log return.
 
         Args:
-            X: Feature vector of shape (1, window_days) or (window_days,).
-               Contains the most recent window_days close prices.
-
-        Returns:
-            Predicted close price as a float (in USD).
+            X: One sample, shape (n_features,) or (1, n_features).
 
         Raises:
-            ValueError: If model is not trained yet.
-            ValueError: If X has invalid shape.
-
-        Example:
-            >>> model = LinearRegressionModel(window_days=30)
-            >>> # ... train model first ...
-            >>> last_30_days = np.random.rand(1, 30)
-            >>> predicted_price = model.predict(last_30_days)
-            >>> assert predicted_price > 0
+            ValueError: If the model is untrained, or X has the wrong shape or holds
+                NaN or infinite values.
         """
-        # Check if model is trained
         if not self._is_trained:
             raise ValueError("Model must be trained before making predictions")
 
-        # Reshape if needed (accept both (window_days,) and (1, window_days))
         if X.ndim == 1:
             if X.shape[0] != self.n_features:
                 raise ValueError(
@@ -177,38 +116,22 @@ class LinearRegressionModel(BaseModel):
         else:
             raise ValueError(f"X must be 1D or 2D, got {X.ndim} dimensions")
 
-        # Validate data quality
         if np.isnan(X).any():
             raise ValueError("X contains NaN values")
 
         if np.isinf(X).any():
             raise ValueError("X contains infinite values")
 
-        # Make prediction
         prediction = self.model.predict(X)[0]
         return float(prediction)
 
     def serialize(self) -> bytes:
-        """
-        Serialize the model to bytes for database storage.
-
-        Serializes both the sklearn model and metadata (window_days, is_trained)
-        using pickle format.
-
-        Returns:
-            Serialized model as bytes.
+        """Pickle the sklearn model with its configuration and trained flag.
 
         Raises:
-            RuntimeError: If serialization fails.
-
-        Example:
-            >>> model = LinearRegressionModel(window_days=30)
-            >>> # ... train model ...
-            >>> model_bytes = model.serialize()
-            >>> assert len(model_bytes) < 1_000_000  # < 1MB
+            RuntimeError: If pickling fails.
         """
         try:
-            # Package model state: sklearn model + metadata
             state = {
                 "sklearn_model": self.model,
                 "window_days": self.window_days,
@@ -221,24 +144,11 @@ class LinearRegressionModel(BaseModel):
 
     @classmethod
     def deserialize(cls, data: bytes) -> "LinearRegressionModel":
-        """
-        Deserialize bytes back to a LinearRegressionModel instance.
-
-        Args:
-            data: Serialized model bytes (from serialize() method).
-
-        Returns:
-            Reconstructed LinearRegressionModel instance.
+        """Rebuild a model from the bytes ``serialize`` returned.
 
         Raises:
-            ValueError: If data is corrupted.
             pickle.UnpicklingError: If unpickling fails.
-
-        Example:
-            >>> model_bytes = model.serialize()
-            >>> restored = LinearRegressionModel.deserialize(model_bytes)
-            >>> assert restored.is_trained == model.is_trained
-            >>> assert restored.window_days == model.window_days
+            ValueError: If the data is corrupted or lacks required keys.
         """
         try:
             state = pickle.loads(data)
@@ -247,7 +157,6 @@ class LinearRegressionModel(BaseModel):
         except Exception as e:
             raise ValueError(f"Data is corrupted or invalid: {e}") from e
 
-        # Validate state structure
         if not isinstance(state, dict):
             raise ValueError("Deserialized state must be a dictionary")
 
@@ -256,7 +165,6 @@ class LinearRegressionModel(BaseModel):
             missing = required_keys - state.keys()
             raise ValueError(f"Missing required keys in serialized data: {missing}")
 
-        # Reconstruct model
         instance = cls(
             window_days=state["window_days"],
             n_features=state.get("n_features"),
@@ -268,16 +176,5 @@ class LinearRegressionModel(BaseModel):
 
     @property
     def is_trained(self) -> bool:
-        """
-        Check if the model has been trained.
-
-        Returns:
-            True if model is trained and ready for predictions, False otherwise.
-
-        Example:
-            >>> model = LinearRegressionModel()
-            >>> assert not model.is_trained
-            >>> model.train(X, y)
-            >>> assert model.is_trained
-        """
+        """True once ``train`` has run."""
         return self._is_trained

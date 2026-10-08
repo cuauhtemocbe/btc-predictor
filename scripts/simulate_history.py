@@ -2,7 +2,7 @@
 """
 Replay the daily job over past days so the dashboard has history to show.
 
-For every run date D of the range it does what the 07:00 UTC cron does on day D,
+For every run date D of the range it does what the daily cron (00:10 UTC) does on day D,
 using only the bars opened before D:
 
 1. Train the linear model on the stored daily rows (``workers.daily.trainer`` data
@@ -61,7 +61,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "linear_v1"
-PREDICTOR_HOUR_UTC = 7  # the daily cron runs at 07:00 UTC
+PREDICTOR_HOUR_UTC = 7  # hour stamped on replayed rows; the live cron runs at 00:10 UTC
 PRICE_QUANTUM = Decimal("0.01")
 DEFAULT_DAYS = 31
 

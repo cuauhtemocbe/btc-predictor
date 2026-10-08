@@ -35,28 +35,21 @@ templates = Jinja2Templates(directory=str(templates_dir))
 def calculate_backtest_strategy_metrics(
     results: list[BacktestResult], strategy_key: str
 ) -> dict[str, Any]:
-    """
-    Calculate aggregate performance metrics for a backtest strategy.
+    """Aggregate metrics of one strategy over the results of a backtest run.
 
-    Dollar figures come from the stored PnL column; the Sharpe ratio and the max
-    drawdown come from returns, ``pnl / price_at_prediction``, compounded from 1.0
-    and recomputed on read (#177).
+    Dollar figures come from the stored PnL column; the Sharpe ratio and max drawdown
+    come from returns, ``pnl / price_at_prediction``, compounded from 1.0 and
+    recomputed on read (#177).
 
     Args:
-        results: List of BacktestResult objects, ordered by predicted_for
-        strategy_key: One of 'pnl_simple', 'pnl_long_short',
-            'pnl_threshold', 'pnl_realistic'
+        results: Results ordered by ``predicted_for``.
+        strategy_key: ``pnl_simple``, ``pnl_long_short``, ``pnl_threshold``,
+        ``pnl_realistic``.
 
     Returns:
-        Dictionary with metrics:
-        - total_pnl: Sum of all PnL values
-        - win_rate: Percentage of winning trades (0-1)
-        - max_drawdown_pct: Largest fall of the compounded equity curve, in percent
-        - best_day: Best single-day PnL
-        - worst_day: Worst single-day PnL
-        - sharpe_ratio: Annualized Sharpe ratio of the daily returns; 0.0 with
-          fewer than 2 returns or no variance
-        - trade_count: Number of trades
+        ``total_pnl``, ``win_rate`` (0-1), ``max_drawdown_pct``, ``best_day``,
+        ``worst_day``, ``sharpe_ratio`` (annualized; 0.0 with fewer than 2 returns or
+        no variance) and ``trade_count``.
     """
     evaluated = [r for r in results if getattr(r, strategy_key) is not None]
     pnl_values = [float(getattr(result, strategy_key)) for result in evaluated]
@@ -95,15 +88,7 @@ def calculate_backtest_strategy_metrics(
 def calculate_cumulative_pnl_backtest(
     results: list[BacktestResult],
 ) -> list[DailyPnlPoint]:
-    """
-    Calculate daily PnL values for all strategies.
-
-    Args:
-        results: List of BacktestResult objects sorted by predicted_for
-
-    Returns:
-        List of DailyPnlPoint with date and PnL for each strategy
-    """
+    """Daily PnL of every strategy, one ``DailyPnlPoint`` per result."""
     daily_points = []
 
     for result in results:
@@ -149,26 +134,18 @@ async def get_backtesting_metrics(
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> BacktestMetricsResponse:
-    """
-    Get backtesting metrics with strategy comparison and daily PnL.
+    """Metrics of the four strategies and the daily PnL of the latest backtest run.
 
-    Queries the most recent backtest run of ``symbol`` (by backtest_run_id with
-    latest created_at) and returns aggregated metrics for all 4 strategies plus
-    daily PnL time series.
+    The latest run of ``symbol`` is the ``backtest_run_id`` created last.
 
     Args:
-        start_date: Optional start date filter (query param: ?start=2024-05-01)
-        end_date: Optional end date filter (query param: ?end=2024-05-30)
-        symbol: Asset whose latest run is shown (default BTCUSDT)
-        db: Database session (injected)
+        start_date: Query ``start``, optional lower bound.
+        end_date: Query ``end``, optional upper bound.
+        symbol: Asset whose latest run is shown, default BTCUSDT.
+        db: Database session (injected).
 
-    Returns:
-        BacktestMetricsResponse with metadata, strategy metrics, and daily PnL.
-        Returns 404 if no backtest results exist.
-
-    Examples:
-        - GET /api/backtesting/metrics
-        - GET /api/backtesting/metrics?start=2024-05-01&end=2024-05-30
+    Raises:
+        HTTPException: 404 if no backtest results exist.
     """
     # Find the most recent backtest_run_id
     latest_run_query = (
@@ -275,18 +252,9 @@ async def get_backtesting_dashboard(
     symbol: SymbolQuery = DEFAULT_SYMBOL,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """
-    Render backtesting results dashboard with cumulative PnL chart and metrics table.
+    """Render the backtest dashboard: cumulative PnL chart and metrics table.
 
-    Args:
-        request: FastAPI request object
-        start_date: Optional start date filter
-        end_date: Optional end date filter
-        symbol: Asset to show (default BTCUSDT)
-        db: Database session (injected)
-
-    Returns:
-        HTML page with backtesting visualization
+    Args: same as ``get_backtesting_metrics``, plus the FastAPI ``request``.
     """
     # Try to fetch metrics data
     try:
