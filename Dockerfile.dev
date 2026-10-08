@@ -9,7 +9,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     POETRY_VERSION=2.4.1 \
     POETRY_HOME=/opt/poetry \
-    POETRY_VIRTUALENVS_CREATE=false
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_INSTALLER_PARALLEL=false
+
+# POETRY_INSTALLER_PARALLEL=false: the API install below re-resolves api-service
+# and upgrades or downgrades packages the root lock already installed. Parallel
+# `pip uninstall`s of two packages that ship a top-level single-file module
+# (pytest's py.py, threadpoolctl.py) race on site-packages/__pycache__ and fail
+# with FileNotFoundError.
 
 # Upgrade pip and install Poetry with security fixes
 RUN pip install --no-cache-dir --upgrade pip==26.1 && \
