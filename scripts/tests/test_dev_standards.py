@@ -340,16 +340,6 @@ def test_dev_dockerfile_keeps_floating_tag() -> None:
     assert "@sha256:" not in dockerfile_dev
 
 
-def test_dev_dockerfile_installs_dependencies_sequentially() -> None:
-    # The API layer re-resolves api-service over the root lock; parallel
-    # `pip uninstall`s of packages with a top-level single-file module (pytest's
-    # py.py, threadpoolctl.py) race on site-packages/__pycache__ and the build
-    # fails with FileNotFoundError.
-    dockerfile_dev = (REPO_ROOT / "Dockerfile.dev").read_text()
-
-    assert re.search(r"POETRY_INSTALLER_PARALLEL=false\b", dockerfile_dev)
-
-
 def test_production_dockerfile_api_stage_has_healthcheck() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
 

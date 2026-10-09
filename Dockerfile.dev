@@ -9,14 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     POETRY_VERSION=2.4.1 \
     POETRY_HOME=/opt/poetry \
-    POETRY_VIRTUALENVS_CREATE=false \
-    POETRY_INSTALLER_PARALLEL=false
-
-# POETRY_INSTALLER_PARALLEL=false: the API install below re-resolves api-service
-# and upgrades or downgrades packages the root lock already installed. Parallel
-# `pip uninstall`s of two packages that ship a top-level single-file module
-# (pytest's py.py, threadpoolctl.py) race on site-packages/__pycache__ and fail
-# with FileNotFoundError.
+    POETRY_VIRTUALENVS_CREATE=false
 
 # Upgrade pip and install Poetry with security fixes
 RUN pip install --no-cache-dir --upgrade pip==26.1 && \
@@ -31,17 +24,10 @@ COPY pyproject.toml poetry.lock* ./
 # Copy shared package first (dependency)
 COPY shared/ ./shared/
 
-# Install root dependencies (including the ml group: scikit-learn and numpy, which
-# the daily worker and its tests import)
-RUN poetry install --no-interaction --no-ansi --no-root --with ml
-
-# Copy API code (mounted as volume in dev, but needed for poetry install)
-COPY api-service/ ./api/
-
-# Install API dependencies
-WORKDIR /app/api
-RUN poetry install --no-interaction --no-ansi --no-root
-
-WORKDIR /app
+# Install exactly what production installs: the root lock, every group. There is
+# deliberately no second install from api-service/pyproject.toml (it has no lock
+# and re-resolved against PyPI, overriding the versions the lock pins), so the
+# Docker quality gate tests the versions production runs (#213).
+RUN poetry install --no-interaction --no-ansi --no-root --with api,fetch,ml,dev
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
