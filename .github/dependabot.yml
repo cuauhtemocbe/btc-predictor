@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     ignore:
       # SQLAlchemy 2.1 defaults to psycopg v3 and we ship psycopg2: the app
       # fails to boot. Lift this together with the driver.
@@ -17,6 +19,8 @@ updates:
     directory: "/shared"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     ignore:
       # SQLAlchemy 2.1 defaults to psycopg v3 and we ship psycopg2: the app
       # fails to boot. Lift this together with the driver.
@@ -30,6 +34,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     ignore:
       # Python 3.14 was blocked by tensorflow-cpu (no stable cp314 wheel), removed in
       # #184. The ignore stays until the 3.14 migration is decided on its own.
@@ -43,6 +49,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
