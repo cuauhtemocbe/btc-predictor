@@ -8,18 +8,18 @@ packages = [{include = "shared"}]
 
 [tool.poetry.dependencies]
 python = "^3.13"
-pydantic-settings = "^2.15"
+pydantic-settings = "^2.16"
 # SQLAlchemy 2.1 defaults postgresql:// to psycopg v3 and we ship psycopg2:
 # the app fails to boot ('No module named psycopg'). Lift the cap together
 # with the driver.
-sqlalchemy = ">=2.0,<2.1"
+sqlalchemy = ">=2.0.55,<2.1"
 psycopg2-binary = "^2.9"
-alembic = "^1.13"
+alembic = "^1.20"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1"
 pytest-cov = "^7.1"
-pytest-mock = "^3.16"
+pytest-mock = "^3.17"
 pytest-asyncio = "^1.4"
 
 [build-system]
