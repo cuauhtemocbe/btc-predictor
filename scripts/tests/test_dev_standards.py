@@ -314,10 +314,13 @@ def test_production_dockerfile_base_pinned_by_digest() -> None:
 def test_sqlalchemy_is_capped_below_2_1(pyproject_path: str) -> None:
     # SQLAlchemy 2.1 defaults postgresql:// to psycopg v3 and we ship psycopg2,
     # so the app fails to boot. The root lock is what production installs and
-    # the CI gate does not test it, so every manifest carries the cap.
+    # the CI gate does not test it, so every manifest carries the cap. Dependabot
+    # may raise the floor (">=2.0.55,<2.1"); only the cap is fixed.
     pyproject = tomllib.loads((REPO_ROOT / pyproject_path).read_text())
 
-    assert pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"] == ">=2.0,<2.1"
+    spec = pyproject["tool"]["poetry"]["dependencies"]["sqlalchemy"]
+
+    assert re.fullmatch(r">=2\.0(\.\d+)?,<2\.1", spec), spec
 
 
 def test_dependabot_does_not_propose_sqlalchemy_2_1() -> None:
