@@ -23,3 +23,44 @@ vulnerabilities:
       Accepted by: Security team
       Date: 2026-05-16
     expired_at: "2026-08-16T00:00:00Z"  # Review in 3 months
+
+  # pip 26.2.2 vendors its own copies of these packages under pip/_vendor
+  # (listed in pip/_vendor/vendor.txt). Trivy reports them without a file path,
+  # so each entry matches the exact purl instead. Added in PR #238
+  # (meta-projects#92). The copies the project imports are msgpack 1.2.4 and
+  # urllib3 2.8.0, which already include the fixes; setuptools is not installed
+  # outside pip's vendor directory. No pip release fixes this yet; drop each
+  # entry when pip bumps its vendored copy, or at the latest on the expiry date.
+  - id: CVE-2026-114613
+    purls:
+      - "pkg:pypi/msgpack@1.1.2"
+    statement: |
+      msgpack 1.1.2 vendored in pip 26.2.2. Only pip itself imports it, to read its
+      HTTP cache; the project does not use pip's vendored msgpack.
+    expired_at: "2027-02-12T00:00:00Z"
+  - id: GHSA-6v7p-g79w-8964
+    purls:
+      - "pkg:pypi/msgpack@1.1.2"
+    statement: |
+      msgpack 1.1.2 vendored in pip 26.2.2. Same justification as CVE-2026-114613.
+    expired_at: "2027-02-12T00:00:00Z"
+  - id: CVE-2025-47273
+    purls:
+      - "pkg:pypi/setuptools@70.3.0"
+    statement: |
+      setuptools 70.3.0 vendored in pip 26.2.2 (pip/_vendor/pkg_resources). Not
+      installed as a package; the project never imports pip's vendored copy.
+    expired_at: "2027-02-12T00:00:00Z"
+  - id: CVE-2026-97687
+    purls:
+      - "pkg:pypi/urllib3@2.7.0"
+    statement: |
+      urllib3 2.7.0 vendored in pip 26.2.2. The urllib3 the project imports is 2.8.0
+      (fixed). pip only uses its vendored copy while installing packages at build time.
+    expired_at: "2027-02-12T00:00:00Z"
+  - id: CVE-2026-97689
+    purls:
+      - "pkg:pypi/urllib3@2.7.0"
+    statement: |
+      urllib3 2.7.0 vendored in pip 26.2.2. Same justification as CVE-2026-97687.
+    expired_at: "2027-02-12T00:00:00Z"
