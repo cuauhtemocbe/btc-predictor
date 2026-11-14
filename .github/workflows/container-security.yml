@@ -28,6 +28,12 @@ jobs:
   # its scan to keep the runner's disk free for the next build.
   trivy-image:
     runs-on: ubuntu-latest
+    env:
+      # Accepted-risk entries (each with an expiry) for findings no image change
+      # can fix, such as packages vendored inside pip. Set here instead of the
+      # action's `trivyignores` input because that input rewrites the file and
+      # may not keep the YAML format.
+      TRIVY_IGNOREFILE: .trivyignore.yaml
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

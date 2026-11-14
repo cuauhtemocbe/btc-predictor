@@ -1,7 +1,7 @@
 # ============================================================================
 # Stage 1: Base - Common dependencies for all services
 # ============================================================================
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS base
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,17 +10,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     POETRY_HOME=/opt/poetry \
     POETRY_VIRTUALENVS_CREATE=false
 
-# Patch openssl and pcre2 until the pinned base digest ships it: Debian 13.7 has
-# 3.5.7-1~deb13u2 (CVE-2026-75804, CVE-2026-84782, fixed in deb13u3). Remove this
-# step after bumping the digest to an image that already includes the fix.
-# libpcre2-8-0 10.46-1~deb13u2 has CVE-2026-103111 (HIGH, fixed in deb13u3).
+# Patch zlib until the pinned base digest ships it: the base has zlib1g
+# 1:1.3.dfsg+really1.3.1-1+b1 (CVE-2026-76844, CVE-2026-85091, fixed in
+# +deb13u1). Remove this step after bumping the digest to an image that already
+# includes the fix.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends --only-upgrade \
-        openssl libssl3t64 openssl-provider-legacy libpcre2-8-0 && \
+    apt-get install -y --no-install-recommends --only-upgrade zlib1g && \
     rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install Poetry
-RUN pip install --no-cache-dir --upgrade pip==26.1 && \
+RUN pip install --no-cache-dir --upgrade pip==26.2.2 && \
     pip install --no-cache-dir poetry==$POETRY_VERSION
 
 WORKDIR /app
