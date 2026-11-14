@@ -10,7 +10,7 @@ Standards Compliance", issues #43-#47):
 - The Makefile is self-documented and scripts/validate.sh is the single
   source of truth for the local quality gate, reused by the git hooks (#44)
 - Production Dockerfile is pinned by digest with a healthcheck; the dev
-  image intentionally floats (#43)
+  image uses the same pinned base (#43, meta-projects#92)
 """
 
 import os
@@ -301,7 +301,7 @@ def test_production_dockerfile_base_pinned_by_digest() -> None:
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
 
     assert re.search(
-        r"^FROM python:3\.13-slim@sha256:[0-9a-f]{64} AS base",
+        r"^FROM python:3\.13\.\d+-slim-trixie@sha256:[0-9a-f]{64} AS base",
         dockerfile,
         re.MULTILINE,
     ), "Production Dockerfile base stage must be pinned by a sha256 digest"
@@ -331,13 +331,18 @@ def test_dependabot_does_not_propose_sqlalchemy_2_1() -> None:
         ]
 
 
-def test_dev_dockerfile_keeps_floating_tag() -> None:
-    dockerfile_dev = (REPO_ROOT / "Dockerfile.dev").read_text()
-
-    assert re.search(r"^FROM python:3\.13-slim$", dockerfile_dev, re.MULTILINE), (
-        "Dockerfile.dev should intentionally NOT pin a digest"
+def test_dev_dockerfile_uses_same_pinned_base_as_production() -> None:
+    # meta-projects#92: every Dockerfile carries one identical FROM string, so a
+    # CPython bump is a single search-and-replace.
+    from_line = re.compile(
+        r"^FROM (python:3\.13\.\d+-slim-trixie@sha256:[0-9a-f]{64})", re.MULTILINE
     )
-    assert "@sha256:" not in dockerfile_dev
+    production = from_line.search((REPO_ROOT / "Dockerfile").read_text())
+    dev = from_line.search((REPO_ROOT / "Dockerfile.dev").read_text())
+
+    assert production is not None, "Production Dockerfile base must be pinned"
+    assert dev is not None, "Dockerfile.dev base must be pinned by tag and digest"
+    assert dev.group(1) == production.group(1)
 
 
 def test_production_dockerfile_api_stage_has_healthcheck() -> None:
