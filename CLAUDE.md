@@ -78,7 +78,8 @@ The start commands and schedules live in the Railway dashboard, not in `railway.
 
 ### 8. Docker Image Hardening
 
-- The production `Dockerfile` pins the base image by `sha256` digest so builds are reproducible. `Dockerfile.dev` keeps the floating `python:3.13-slim` tag on purpose: dev images should track patch releases.
+- Every `Dockerfile*`, `Dockerfile.dev` included, uses the same pinned base image, `python:3.13.<patch>-slim-trixie@sha256:<digest>`, so builds are reproducible and the next CPython release is one search-and-replace (meta-projects#92). `Dockerfile.dev` no longer floats on `python:3.13-slim`. The interpreter stays on the 3.13 line.
+- The `trivy-image` job (`.github/workflows/container-security.yml`) fails on any fixable HIGH or CRITICAL finding. Fixable OS packages the pinned base lacks are patched with `apt-get --only-upgrade` in each production Dockerfile (today `zlib1g`; remove the step when the digest ships the fix). Findings no image change can fix, such as packages vendored inside pip, are accepted in `.trivyignore.yaml` with an exact `purl`, a justification and an expiry (`scripts/tests/test_trivy_ignore.py` enforces the shape).
 - `Dockerfile.dev` installs only the root `poetry.lock` (`--with api,fetch,ml,dev`), the same lock production installs, with no second install from `api-service/pyproject.toml` (it has no lock). `scripts/tests/test_dev_image_lock.py` fails the `Docker quality gate` when the image runs a version the lock does not pin (#213).
 - The `api` stage has a `HEALTHCHECK` on `GET /health` using stdlib `urllib` (the slim image ships neither `curl` nor `wget`). The `fetch` and `ml-worker` stages have none on purpose: they are one-shot cron jobs.
 
