@@ -9,7 +9,11 @@ packages = [{include = "api"}]
 [tool.poetry.dependencies]
 python = "^3.13"
 shared = {path = "../shared", develop = true}
-fastapi = "^0.115.0"
+fastapi = ">=0.161.1"
+# Transitive floors: the lock-less manifest is resolved fresh by Dependabot, so
+# these keep it at the versions the root poetry.lock already resolves.
+starlette = ">=1.9.0"
+certifi = ">=2026.10.19"
 uvicorn = {extras = ["standard"], version = "^0.34.0"}
 jinja2 = "^3.1.0"
 httpx = "^0.28.0"
@@ -18,8 +22,8 @@ httpx = "^0.28.0"
 sqlalchemy = ">=2.0,<2.1"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3.0"
-pytest-asyncio = "^0.24.0"
+pytest = "^9.1.1"
+pytest-asyncio = ">=1.4.0,<1.5"
 pytest-mock = "^3.14.0"
 beautifulsoup4 = "^4.12.0"
 scikit-learn = "^1.5.0"
