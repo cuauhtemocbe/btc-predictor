@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from api.numeric import required_float
 from api.routers import router
@@ -29,6 +30,11 @@ from shared.strategies import get_all_strategies_metrics
 from shared.utils import DEFAULT_TIMEFRAME
 
 app = FastAPI(title="BTC Predictor", version="0.1.0")
+# Honour X-Forwarded-Proto/-For so redirects keep https behind Railway's proxy.
+# trusted_hosts="*" is acceptable only because Railway's public network reaches the
+# container solely through its proxy. The risk: a client that reached the container
+# directly could spoof the request scheme and client address.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 app.include_router(router)
 app.include_router(prices_router)
 app.include_router(predictions_router)
@@ -110,6 +116,12 @@ async def dashboard(
             **asset_context(request, symbol),
         },
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Answer browsers' automatic icon request with 204 No Content (no icon yet)."""
+    return Response(status_code=204)
 
 
 @app.get("/health", response_model=None)

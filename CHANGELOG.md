@@ -130,6 +130,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is not dated yesterday (UTC) or that skips a day: they exit 1, name the missing
   dates and save no prediction and no model. Before, a missed `fetch-price` run
   produced a 2-day move scored as a 1-day prediction (#174).
+- The dashboard linked to `/models?symbol=...`, which redirected to `/models/`, and
+  behind Railway's proxy that redirect pointed at `http://`, so a `fetch` from the
+  https page was blocked as mixed content. The link now goes to `/models/?symbol=...`
+  and the app honours `X-Forwarded-Proto` (`ProxyHeadersMiddleware`), so any redirect
+  keeps https. `trusted_hosts="*"` is safe only because Railway's public network
+  reaches the container through its proxy; a client reaching the container directly
+  could spoof the scheme and address. `GET /favicon.ico` now answers 204 instead of
+  404 (#240).
 
 ### Added
 
