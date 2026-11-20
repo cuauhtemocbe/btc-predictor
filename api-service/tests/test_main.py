@@ -55,3 +55,21 @@ async def test_redirect_behind_proxy_keeps_https(client: AsyncClient) -> None:
     assert response.status_code in {301, 302, 307, 308}
     assert response.headers["location"].startswith("https://")
     assert response.headers["location"].endswith("/models/?symbol=BTCUSDT")
+
+
+# Issue #240, Scenario 3: the favicon does not answer 404
+async def test_favicon_answers_no_content(client: AsyncClient) -> None:
+    """
+    When a client requests "/favicon.ico"
+    Then the response status is 204
+    """
+    response = await client.get("/favicon.ico")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+async def test_favicon_is_not_in_the_openapi_schema(client: AsyncClient) -> None:
+    schema = (await client.get("/openapi.json")).json()
+
+    assert "/favicon.ico" not in schema["paths"]

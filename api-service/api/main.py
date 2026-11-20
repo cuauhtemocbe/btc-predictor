@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
@@ -116,6 +116,12 @@ async def dashboard(
             **asset_context(request, symbol),
         },
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Answer browsers' automatic icon request with 204 No Content (no icon yet)."""
+    return Response(status_code=204)
 
 
 @app.get("/health", response_model=None)
