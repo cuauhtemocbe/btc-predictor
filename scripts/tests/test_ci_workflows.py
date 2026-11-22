@@ -149,3 +149,16 @@ def test_quality_runs_mutation_testing_only_on_demand() -> None:
 
 def test_ci_does_not_duplicate_railway_deployment() -> None:
     assert not (WORKFLOWS / "deploy.yml").exists()
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "container-security.yml"])
+def test_workflows_report_on_push_to_main_for_railway_wait_for_ci(name: str) -> None:
+    """Railway's Wait for CI (#219) waits on the workflows a push to main triggers.
+
+    Both must run on `push` to `main`, or Wait for CI has nothing to wait for on
+    that workflow and a red run would not stop the deploy.
+    """
+    # PyYAML reads the bare `on` key as the boolean True
+    triggers = yaml.safe_load(read_workflow(name))[True]
+
+    assert "main" in triggers["push"]["branches"]

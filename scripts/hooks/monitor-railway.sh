@@ -5,6 +5,10 @@
 # This script monitors Railway services until they complete deployment.
 # It checks the status of btc-predictor, daily, and fetch-price services.
 #
+# Railway's "Wait for CI" holds every deployment in Waiting until the commit's
+# GitHub Actions workflows finish (about 4 minutes), and marks it Skipped when a
+# workflow fails (#219). Waiting counts as in progress; Skipped is a failure.
+#
 # Usage:
 #   ./scripts/hooks/monitor-railway.sh [--silent]
 #
@@ -19,7 +23,7 @@
 set -e
 
 # Configuration (env overrides exist so the script can be tested with a stub)
-TIMEOUT_SECONDS=${MONITOR_TIMEOUT_SECONDS:-420}  # 7 minutes max
+TIMEOUT_SECONDS=${MONITOR_TIMEOUT_SECONDS:-900}  # 15 minutes max: ~4 waiting for CI, then the build
 CHECK_INTERVAL=${MONITOR_CHECK_INTERVAL:-5}      # Check every 5 seconds
 SERVICES=("btc-predictor" "daily" "fetch-price")
 
@@ -128,6 +132,14 @@ while [[ $elapsed -lt $TIMEOUT_SECONDS ]]; do
         # A failed deployment will never come online: stop waiting
         if echo "$status" | grep -qE "Failed|Crashed"; then
             log "\n${RED}❌ $service deployment failed: $status${NC}"
+            exit 1
+        fi
+
+        # Wait for CI skips the deployment when a workflow on the commit failed;
+        # the previous deployment keeps running and nothing is retried by itself
+        if echo "$status" | grep -qE "Skipped"; then
+            log "\n${RED}❌ $service deployment skipped: $status${NC}"
+            log "${YELLOW}⚠️  A workflow on this commit failed (Wait for CI). Fix and push, or re-run the workflow.${NC}"
             exit 1
         fi
     done

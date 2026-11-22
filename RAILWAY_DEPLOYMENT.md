@@ -37,7 +37,18 @@ Railway injects everything; no dotenv file and no data-source API key are needed
 
 ## After each push to `main`
 
-Railway builds one image per service and deploys. Check that every service is online with `./scripts/hooks/monitor-railway.sh`. Manual deploy: `railway up`, or Deployments > Deploy in the dashboard.
+Railway builds one image per service and deploys. Check that every service is online with `./scripts/hooks/monitor-railway.sh` (it gives up after 900 s and treats `Waiting` as in progress and `Skipped` as a failure). Manual deploy: `railway up`, or Deployments > Deploy in the dashboard.
+
+### Wait for CI
+
+`btc-predictor`, `daily`, `fetch-price` and `monthly-backtest` deploy from `main` with **Wait for CI** on (Settings > Source in each service; it is a service setting, not a file in git). A push to `main` is deployed only after every GitHub Actions workflow on that commit has finished green. This closes the gap that branch protection leaves: `enforce_admins` is `false`, so a direct push by the owner reaches `main` without any check.
+
+- **What you see.** The deployment sits in `WAITING` while `CI` and `Container security` run in parallel (about 140 to 230 s), then builds as usual.
+- **A red workflow skips the deploy.** The deployment is `SKIPPED` and the previous one keeps running; the crons keep using their last successful image. A skipped deployment is not retried by itself.
+- **Recovery.** Fix and push again, or re-run the failed workflow from the Actions tab. If the workflows have not finished after two hours, Railway skips the deployment too.
+- **Needs a `push` trigger on `main`.** Railway waits only for workflows that run on `push` to `main`. `ci.yml` and `container-security.yml` have it, and `scripts/tests/test_ci_workflows.py` fails if either loses it. `quality.yml` (mutation testing, on demand) has no `push` trigger and does not take part.
+- **`cancel-in-progress` caveat.** `ci.yml` cancels a run when a newer push arrives. Two quick pushes to `main` cancel the first commit's `CI`; Railway blocks on a cancelled run only when no other workflow on that commit succeeded, so that commit's outcome then depends on its `Container security` result.
+- **Verify the setting.** Read it back, do not trust the dashboard toggle: `get-service-config` (Railway MCP) must return `source.checkSuites: true` on the four services.
 
 ## Verify
 
@@ -59,6 +70,7 @@ Expected: one row per symbol, with `MAX(timestamp)` equal to yesterday 00:00 UTC
 ## Troubleshooting
 
 - **`DATABASE_URL` not found**: link the PostgreSQL plugin to the service, or copy the variable from the postgres service.
+- **A push to `main` is not deployed**: look for a `SKIPPED` deployment (`list-deployments`). A workflow on that commit failed or was cancelled; see [Wait for CI](#wait-for-ci) for the recovery.
 - **A cron does not run**: check the schedule and the Start Command in the dashboard (the `.toml` files are not connected, see RAILWAY_MULTISTAGE_CONFIG.md), read the logs, and make sure the command runs locally (`docker compose exec api python -m workers.daily`).
 - **`fetch-price` fails or stores nothing**: run the `--check` command from step 4; the job refuses a symbol with no stored bars, so load the history first.
 - **Predictions stay pending (`actual_price` is NULL)**: the evaluator settles a prediction only when the bar that closes it is stored. Check that `fetch-price` succeeded before `daily` and that `prices` has yesterday's bar.
