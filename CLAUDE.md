@@ -172,6 +172,8 @@ git push origin main
 ./scripts/hooks/monitor-railway.sh
 ```
 
+All four services deploy with **Wait for CI** on (`source.checkSuites: true`, #219): a push to `main` waits about 4 minutes in `WAITING` for `CI` and `Container security`, and a red workflow makes Railway skip the deployment while the previous one keeps running. The monitor waits up to 900 s and exits 1 on `Skipped`. Setting, recovery and the `cancel-in-progress` caveat: `RAILWAY_DEPLOYMENT.md` ("Wait for CI").
+
 ### Main Branch Protection
 
 The `main` branch is protected in GitHub: force-pushes and branch deletion are

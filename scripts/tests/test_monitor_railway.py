@@ -226,6 +226,68 @@ class TestMonitorExitBehaviour:
         assert "daily deployment failed" in result.stdout
         assert "deployed successfully" not in result.stdout
 
+    def test_waiting_for_ci_is_not_reported_as_deployed(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
+        # Wait for CI: a new deployment sits in Waiting, then builds, then is online
+        railway_stub.load(
+            snapshot(suffix="old"),
+            snapshot(status="● Waiting", suffix="new"),
+            snapshot(status="● Building", suffix="new"),
+            snapshot(suffix="new"),
+        )
+
+        result = run_monitor(railway_stub.environment)
+
+        assert result.returncode == 0, result.stdout
+        assert "All services deployed successfully" in result.stdout
+
+    def test_still_waiting_for_ci_at_the_deadline_is_a_timeout(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
+        railway_stub.load(
+            snapshot(suffix="old"), snapshot(status="● Waiting", suffix="new")
+        )
+
+        result = run_monitor(railway_stub.environment)
+
+        assert result.returncode == 1
+        assert "Deployment timeout" in result.stdout
+        assert "deployed successfully" not in result.stdout
+
+    def test_a_deployment_skipped_by_wait_for_ci_fails_immediately(
+        self, railway_stub: SimpleNamespace
+    ) -> None:
+        # A red workflow: Railway creates the deployment but marks it Skipped
+        railway_stub.load(
+            snapshot(suffix="old"),
+            snapshot(suffix="new", statuses={"daily": "● Skipped"}),
+        )
+
+        result = run_monitor(railway_stub.environment)
+
+        assert result.returncode == 1
+        assert "daily deployment skipped" in result.stdout
+        assert "deployed successfully" not in result.stdout
+
+    def test_default_timeout_outlasts_the_wait_for_ci(self) -> None:
+        # CI takes up to ~230 s on main and the build follows: 420 s timed out
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key != "MONITOR_TIMEOUT_SECONDS"
+        }
+
+        result = subprocess.run(
+            ["bash", "-c", f'source "{SCRIPT}"; echo "$TIMEOUT_SECONDS"'],
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert int(result.stdout.strip()) >= 900
+
     def test_silent_flag_suppresses_output(self, railway_stub: SimpleNamespace) -> None:
         railway_stub.load(snapshot(suffix="old"), snapshot(suffix="new"))
 

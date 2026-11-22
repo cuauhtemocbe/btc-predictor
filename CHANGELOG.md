@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Railway deploys from `main` only after the commit's CI passed: **Wait for CI** is on for `btc-predictor`, `daily`, `fetch-price` and `monthly-backtest` (`source.checkSuites: true`), so a red workflow makes Railway skip the deployment and the previous one keeps running. `scripts/hooks/monitor-railway.sh` now waits up to 900 s (was 420 s, shorter than the wait for CI plus the build) and exits 1 on a `Skipped` deployment instead of reporting success. `RAILWAY_DEPLOYMENT.md` documents the setting, the recovery and the `cancel-in-progress` caveat, and `test_ci_workflows.py` fails if `ci.yml` or `container-security.yml` loses its `push` trigger on `main` (#219).
 - Mutation testing no longer runs weekly: `quality.yml` (now named "Mutation Testing") has only the `workflow_dispatch` trigger, so it runs on demand (#192).
 - **Displayed risk numbers change** (#177). Max drawdown, the Sharpe ratio and the
   equity curve are now derived from returns, `pnl / price_at_prediction`, compounded
