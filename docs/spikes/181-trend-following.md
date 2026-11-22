@@ -4,7 +4,7 @@
 
 Date: 2026-11-22. Code: `scripts/trend_following.py` (rules and metrics) and `scripts/trend_study.py` (protocol and report), with tests. Nothing is written to the database. Data: `BTCUSDT` daily bars as stored, 2017-08-17 to 2026-08-31.
 
-The owner can override a no-go in writing (`docs/STRATEGY.md`, "A version starts only when the gate of the previous one is met, or when the owner overrides it"). This document does not. What the override would rest on is in "What would change the decision".
+On 2026-11-22 the owner overrode the no-go for paper-trading only, with conditions for real money, pause and archive. They are in `docs/STRATEGY.md`, "Override of the #181 no-go". This document records the result of the spike, not the override.
 
 ## Method
 
@@ -145,7 +145,7 @@ The median window is 0.0% because the rule is in cash on 43% of the days of the 
 ## What would change the decision
 
 - **More data.** If the winner keeps the same daily Sharpe (0.049), skewness (0.72) and kurtosis (9.9) it had on the test slice, the probability passes 0.95 after about 1,080 days of test data with one trial, and after about 2,200 days (6 years) with the 38 trials counted. The test slice has 974. This is arithmetic on the formula, not a measurement. Data after the spike is the only clean data, as #181 said, and the roughly 80 days from September to 21 November 2026 are the first of it.
-- **An owner override.** `docs/STRATEGY.md` allows one in writing. Paper-trading costs no money, and the result passes every other condition including a plateau and the drawdown limit, so the owner may judge that #182 is the cheaper way to collect clean data. If the owner overrides, the thresholds of #182 should use the rolling windows above.
+- **An owner override** (done on 2026-11-22, paper-trading only). Paper-trading costs no money, and the result passes every other condition including a plateau and the drawdown limit, so #182 is the cheaper way to collect clean data. The pause thresholds of the override are the 5th percentiles of the rolling windows above.
 - **A different rule.** If the owner wants the 0.95 threshold to hold, the next step is a better-specified Donchian ensemble with the paper's own lookbacks and highs and lows, which needs the full paper and a loader that returns highs and lows.
 
 ## Reproduce

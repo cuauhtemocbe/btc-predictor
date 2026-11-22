@@ -1,6 +1,6 @@
 # Strategy: how the project makes money in v1, v2 and v3
 
-Spike #186. Date: 2026-11-22. Status: **v1 is defined and has its issues (#181, #182). v2 and v3 are "not yet"**, each with the reason and the condition to open it.
+Spike #186. Date: 2026-11-22. Status: **v1 is defined and has its issues (#181, #182). v2 and v3 are "not yet"**, each with the reason and the condition to open it. #181 ended in a no-go and the owner overrode it on 2026-11-22 for paper-trading only, with the conditions in "Override of the #181 no-go".
 
 The six owner answers are in the first section and fix the thresholds used below. A version starts only when the gate of the previous one is met, or when the owner overrides it in writing in this document. Research notes and data checks for a later version do not count as starting it; building it does.
 
@@ -44,11 +44,20 @@ From the audit script of 2026-10-03 (BTCUSDT 2019-2026, 0.1% fee per side), as r
 | **Decision rule** | Long or cash on spot. Candidates: SMA 50, 100 and 200, and a Donchian ensemble with volatility sizing. The rule is chosen in #181 with parameters picked on the validation slice (before 2024-01-01) only. The signal is computed from closed, complete bars after the daily close; the owner places the order by hand. |
 | **Costs** | 0.1% per side (Binance spot fee) plus slippage tested at 0.05%, 0.1% and 0.2% per side. A manual fill can differ from the close the backtest assumes; the slippage parameter is the allowance for that. |
 | **Success metric and threshold** | On the test slice, net of costs: Calmar and Sharpe above buy-and-hold's, max drawdown no worse than -40% (warning at -30%), net return positive. Plus the robustness conditions proposed in #181: neighboring lookbacks within 20% do not collapse and the deflated Sharpe probability is above 0.95. |
-| **Gate to v2** | Both of: a go in #181, and the live burn-in of #182 passed (at least 3 executed signal changes, no skipped day, no stale-data exit, live results not below the 5th percentile of the same-length windows reported by #181). |
-| **Stop condition** | A no-go in #181: record it and stop the strategy work. After that, any drawdown worse than -40% of the strategy's equity (paper or real) stops the rule until the owner reviews it, and live results below the 5th percentile of #181's windows pause it. A stale or gapped series already produces no signal (#174). |
+| **Gate to v2** | Both of: a go in #181 (replaced, after the override, by condition 2 of that section), and the live burn-in of #182 passed (at least 3 executed signal changes, no skipped day, no stale-data exit, live results not below the 5th percentile of the same-length windows reported by #181). |
+| **Stop condition** | A no-go in #181 stops the strategy work unless the owner overrides it; the override of 2026-11-22 is below, with its own archive condition. Either way, any drawdown worse than -40% of the strategy's equity (paper or real) stops the rule until the owner reviews it, and live results below the 5th percentile of #181's windows pause it. A stale or gapped series already produces no signal (#174). |
 | **Issues** | [#181](https://github.com/cuauhtemocbe/btc-predictor/issues/181) validates the rule historically. [#182](https://github.com/cuauhtemocbe/btc-predictor/issues/182) runs it on live bars and shows it against buy-and-hold. The model benchmark is #184 (closed). |
 
 Out of scope for v1: automatic orders, API keys, a position limit and a kill switch. They need an explicit owner decision and their own issue.
+
+### Override of the #181 no-go
+
+Date: 2026-11-22. Result of #181 (`docs/spikes/181-trend-following.md`): **no-go**. SMA122, chosen on the validation slice, passes five of the six conditions on the test slice and fails the deflated Sharpe probability: 0.863, needs above 0.95, and 0.941 even with a single trial, because the test slice has 974 days. The owner overrode the no-go **for paper-trading only** (#182), on these conditions:
+
+1. **The rule is frozen.** SMA122 on `BTCUSDT` closes: long while the close is above the mean of the last 122 closes, otherwise cash. The lookback does not change during the paper-trade. Another lookback or rule needs a new spike.
+2. **Real money needs two things:** the gate of #182, and a deflated Sharpe probability above 0.95. The probability is computed by `python -m scripts.trend_study` after loading history with `scripts/load_binance_history.py`, on the test slice extended with every closed day after 2026-08-31 and counting the same 38 trials. Those days are clean: neither the lookback nor the threshold was chosen with them. If the daily Sharpe stays at 0.049, the probability passes 0.95 at about 2,200 test days; the slice has 974.
+3. **Pause thresholds.** A compounded net return of the rule (paper or real) below -10.8% over any 30 days, or below -14.6% over any 91 days, pauses it until the owner reviews it. These are the 5th percentile of the winner's windows over the validation and test days in the spike, and they replace "the 5th percentile of the windows reported by #181" above.
+4. **Archive.** If the extended test sample reaches 2,200 days and the probability is still not above 0.95, the strategy is archived and the strategy work stops, as a no-go would have done.
 
 ## v2: rule plus model
 
