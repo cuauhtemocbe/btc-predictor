@@ -422,3 +422,25 @@ async def test_dashboard_states_the_assumptions_of_each_strategy(
     assert "funding" in text
     assert "fee charged every day" in text
     assert "no intraday data" in text
+
+
+# Issue #240, Scenario 1: the Models link does not redirect
+@pytest.mark.asyncio
+async def test_dashboard_models_link_points_at_canonical_path(
+    client: AsyncClient,
+    db_session: Session,
+) -> None:
+    """
+    Given the dashboard for the symbol "BTCUSDT"
+    Then its Models link points to "/models/?symbol=BTCUSDT"
+    And requesting that link answers 200
+    """
+    response = await client.get("/", params={"symbol": "BTCUSDT"})
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    hrefs = [a.get("href") for a in soup.find_all("a")]
+    assert "/models/?symbol=BTCUSDT" in hrefs
+    assert "/models?symbol=BTCUSDT" not in hrefs
+
+    linked = await client.get("/models/?symbol=BTCUSDT")
+    assert linked.status_code == 200
