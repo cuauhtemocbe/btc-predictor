@@ -275,6 +275,7 @@ Cada push a `main` despliega solo. Servicios, comandos de inicio y variables: [R
 ## 📚 Documentación
 
 - [IMPLEMENTATION_HISTORY.md](docs/archive/specs/IMPLEMENTATION_HISTORY.md): historial de decisiones.
+- [STRATEGY.md](docs/STRATEGY.md): cómo gana dinero el proyecto en v1, v2 y v3 (fuente de retorno, datos, regla, costos, métrica, gate y condición de parada), con las respuestas del dueño (#186).
 - [CLAUDE.md](CLAUDE.md): contexto del proyecto para Claude Code.
 - [CHANGELOG.md](CHANGELOG.md) e [issues](https://github.com/cuauhtemocbe/btc-predictor/issues).
 
